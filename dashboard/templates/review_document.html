@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Review document — {{ prop.name }}{% endblock %}
+{% block content %}
+  <h1>Review: {{ doc.filename }}</h1>
+  <p class="subtitle">{{ prop.name }} · uploaded {{ doc.uploaded_at }} · status: {{ doc.status }}</p>
+
+  <div class="card">
+    {% if items %}
+      <p class="note" style="margin-top:0">Edit anything that's wrong, then confirm to add these to {{ prop.name }}'s expense ledger. Nothing is saved to the ledger until you confirm.</p>
+      <form method="post" action="{{ url_for('confirm_document', doc_id=doc.id) }}">
+        <table class="review-table">
+          <thead><tr><th>Month</th><th>Year</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount (£, negative = cost)</th></tr></thead>
+          <tbody>
+            {% for item in items %}
+              {% set item_month = (item.date[5:7]|int) if item.date and item.date|length >= 7 else month %}
+              {% set item_year = (item.date[0:4]|int) if item.date and item.date|length >= 4 else year %}
+              <tr>
+                <td><select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == item_month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select></td>
+                <td><input name="year" value="{{ item_year }}" size="4"></td>
+                <td><input name="vendor" value="{{ item.vendor or '' }}"></td>
+                <td><input name="description" value="{{ item.description or '' }}"></td>
+                <td>
+                  <select name="category">
+                    {% for c in ['purchase','cleaning','utilities','booking_income','other'] %}
+                      <option value="{{ c }}" {{ 'selected' if item.category == c }}>{{ c }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td><input name="amount" type="number" step="0.01" value="{{ item.amount }}"></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="dialog-actions" style="justify-content:flex-start; margin-top:14px">
+          <button type="submit" style="background:var(--teal); color:#fff; border-color:var(--teal)">Confirm &amp; add to ledger</button>
+          <a href="{{ url_for('property_page', property_id=prop.id) }}" style="align-self:center">Cancel</a>
+        </div>
+      </form>
+    {% else %}
+      <p class="note" style="margin-top:0">Nothing was auto-extracted from this file. Add its line items by hand:</p>
+      <form method="post" action="{{ url_for('confirm_document', doc_id=doc.id) }}">
+        <table class="review-table">
+          <thead><tr><th>Month</th><th>Year</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount (£)</th></tr></thead>
+          <tbody>
+            {% for i in range(5) %}
+              <tr>
+                <td><select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select></td>
+                <td><input name="year" value="{{ year }}" size="4"></td>
+                <td><input name="vendor"></td>
+                <td><input name="description"></td>
+                <td>
+                  <select name="category">
+                    {% for c in ['purchase','cleaning','utilities','booking_income','other'] %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                  </select>
+                </td>
+                <td><input name="amount" type="number" step="0.01"></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p class="note">Leave the amount blank on any row you don't need — blank rows are skipped.</p>
+        <div class="dialog-actions" style="justify-content:flex-start; margin-top:14px">
+          <button type="submit" style="background:var(--teal); color:#fff; border-color:var(--teal)">Confirm &amp; add to ledger</button>
+          <a href="{{ url_for('property_page', property_id=prop.id) }}" style="align-self:center">Cancel</a>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+{% endblock %}

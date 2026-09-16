@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Urban Nest Estates — Dashboard{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Urban Nest Estates</div>
+    <nav>
+      <a href="{{ url_for('index') }}" class="{{ 'active' if active == 'overview' else '' }}">Homepage</a>
+      <select onchange="if(this.value) window.location.href=this.value">
+        <option value="">Jump to a flat…</option>
+        {% for p in all_properties %}
+          <option value="{{ url_for('property_page', property_id=p.id) }}" {{ 'selected' if active_property == p.id else '' }}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" class="add-btn" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add apartment</button>
+    </nav>
+  </header>
+
+  <dialog id="add-apartment-dialog">
+    <form method="post" action="{{ url_for('add_apartment') }}">
+      <h2 style="margin-top:0">Add an apartment</h2>
+      <label>Name <input type="text" name="name" placeholder="e.g. 12 Marlowe House" required></label>
+      <label>Address <input type="text" name="address" placeholder="optional, defaults to the name"></label>
+      <div class="dialog-actions">
+        <button type="button" onclick="document.getElementById('add-apartment-dialog').close()">Cancel</button>
+        <button type="submit">Add</button>
+      </div>
+    </form>
+  </dialog>
+
+  <main>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

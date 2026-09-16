@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Homepage — Urban Nest Estates{% endblock %}
+{% block content %}
+  <h1>Portfolio Homepage</h1>
+  <p class="subtitle">{{ flats_count }} apartments · current month: {{ current_month }}
+    · <a href="{{ url_for('property_page', property_id='general-overheads') }}">shared overhead costs</a></p>
+
+  <div class="tiles">
+    {% for t in tiles %}
+      <div class="tile">
+        <div class="label">{{ t.label }}</div>
+        <div class="value">{{ t.value }}</div>
+        {% if t.delta is not none %}
+          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior month</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  {% if income_goal %}
+  <div class="card">
+    <h2 style="margin-top:0">Goal — {{ current_month }} revenue</h2>
+    <p class="subtitle" style="margin-bottom:6px">Target £{{ '{:,.0f}'.format(income_goal) }} across flats with a target set · {{ goal_progress }}% reached so far</p>
+    <div class="progress-bar"><div style="width: {{ [goal_progress, 100]|min }}%"></div></div>
+  </div>
+  {% endif %}
+
+  <div class="grid-2">
+    <div class="card">
+      <h2 style="margin-top:0">Monthly revenue &amp; profit</h2>
+      <canvas id="revenueChart" height="220"></canvas>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Monthly occupancy (portfolio avg)</h2>
+      <canvas id="occChart" height="220"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Year on year</h2>
+    {% if yoy %}
+      <table>
+        <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Same month last year</th><th class="num">Change</th></tr></thead>
+        <tbody>
+          {% for row in yoy %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td class="num">£{{ '{:,.0f}'.format(row.this_year) }}</td>
+              <td class="num">£{{ '{:,.0f}'.format(row.last_year) }}</td>
+              <td class="num" style="color: {{ '#1a8754' if row.delta_pct and row.delta_pct > 0 else ('#c0392b' if row.delta_pct and row.delta_pct < 0 else '#647573') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="note">Not enough overlapping history yet — most of the portfolio only started tracking in 2026.</p>
+    {% endif %}
+  </div>
+
+  <h2>By apartment — {{ current_month }}</h2>
+  <div class="property-grid">
+    {% for r in prop_rows %}
+      <a class="property-card" href="{{ url_for('property_page', property_id=r.id) }}">
+        <div class="name">{{ r.name }}</div>
+        <div class="area">Revenue £{{ '{:,.0f}'.format(r.income) }} · Profit £{{ '{:,.0f}'.format(r.profit) }} · Occ {{ '%.0f'|format(r.occupancy * 100) }}%</div>
+        {% if r.progress is not none %}
+          <div class="progress-bar"><div style="width: {{ [r.progress, 100]|min }}%"></div></div>
+          <div class="note" style="margin-top:4px">{{ r.progress }}% of £{{ '{:,.0f}'.format(r.target) }} target</div>
+        {% else %}
+          <div class="note" style="margin-top:4px">No target set yet</div>
+        {% endif %}
+      </a>
+    {% endfor %}
+  </div>
+
+  <script>
+    const months = {{ months_json|safe }};
+    const income = {{ income_json|safe }};
+    const profit = {{ profit_json|safe }};
+    const occupancy = {{ occupancy_json|safe }};
+    const teal = '#0c5d5e';
+    const amber = '#c98a1f';
+    const tealSoft = 'rgba(12,93,94,0.15)';
+
+    new Chart(document.getElementById('revenueChart'), {
+      data: {
+        labels: months,
+        datasets: [
+          { type: 'bar', label: 'Revenue (£)', data: income, backgroundColor: teal },
+          { type: 'line', label: 'Net profit (£)', data: profit, borderColor: amber, tension: 0.25 }
+        ]
+      },
+      options: { scales: { y: { beginAtZero: true } } }
+    });
+
+    new Chart(document.getElementById('occChart'), {
+      type: 'line',
+      data: { labels: months, datasets: [{ label: 'Occupancy %', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25 }] },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+    });
+  </script>
+{% endblock %}
