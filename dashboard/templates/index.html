@@ -1,76 +1,124 @@
 {% extends "base.html" %}
 {% block title %}Homepage — Urban Nest Estates{% endblock %}
 {% block content %}
-  <h1>Portfolio Homepage</h1>
-  <p class="subtitle">{{ flats_count }} apartments · current month: {{ current_month }}
-    · <a href="{{ url_for('property_page', property_id='general-overheads') }}">shared overhead costs</a></p>
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px">
+    <div>
+      <h1>Portfolio Overview</h1>
+      <p class="subtitle" style="margin-bottom:0">{{ flats_count }} apartments · {{ rng.display }}{% if rng.partial %} (to date){% endif %}
+        · <a href="{{ url_for('property_page', property_id='general-overheads') }}">shared overhead costs</a></p>
+    </div>
+    <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      {% for key, label in range_labels.items() %}
+        <button type="submit" name="range" value="{{ key }}"
+          style="background: {{ 'var(--accent-ink)' if rng.choice == key else '#fff' }}; color: {{ '#fff' if rng.choice == key else 'var(--ink)' }}; border: 1px solid var(--line);">{{ label }}</button>
+      {% endfor %}
+      {% if rng.choice == 'custom' %}
+        <input type="month" name="start" value="{{ rng.start_input }}" style="padding:7px 8px; border:1px solid var(--line); border-radius:8px">
+        <input type="month" name="end" value="{{ rng.end_input }}" style="padding:7px 8px; border:1px solid var(--line); border-radius:8px">
+        <button type="submit">Go</button>
+      {% endif %}
+    </form>
+  </div>
 
-  <div class="tiles">
+  <div class="tiles" style="margin-top:16px">
     {% for t in tiles %}
       <div class="tile">
         <div class="label">{{ t.label }}</div>
         <div class="value">{{ t.value }}</div>
         {% if t.delta is not none %}
-          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior month</div>
+          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior period</div>
         {% endif %}
+        {% if t.delta_ly is not none %}
+          <div class="note" style="margin-top:4px">{{ '%+.0f'|format(t.delta_ly) }}% vs same period last year</div>
+        {% endif %}
+        {% if t.note %}<div class="note" style="margin-top:4px">{{ t.note }}</div>{% endif %}
       </div>
     {% endfor %}
   </div>
 
-  {% if income_goal %}
-  <div class="card">
-    <h2 style="margin-top:0">Goal — {{ current_month }} revenue</h2>
-    <p class="subtitle" style="margin-bottom:6px">Target £{{ '{:,.0f}'.format(income_goal) }} across flats with a target set · {{ goal_progress }}% reached so far</p>
-    <div class="progress-bar"><div style="width: {{ [goal_progress, 100]|min }}%"></div></div>
-  </div>
+  {% if insights %}
+    <div class="card">
+      <h2 style="margin-top:0">Insights</h2>
+      <ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px">
+        {% for i in insights %}
+          <li style="color: {{ 'var(--red)' if i.type == 'warning' else ('var(--accent-ink)' if i.type == 'positive' else 'var(--ink-soft)') }}; font-size:0.9rem">{{ i.text }}</li>
+        {% endfor %}
+      </ul>
+    </div>
   {% endif %}
 
   <div class="grid-2">
     <div class="card">
-      <h2 style="margin-top:0">Monthly revenue &amp; profit</h2>
+      <h2 style="margin-top:0">Revenue &amp; profit trend</h2>
       <canvas id="revenueChart" height="220"></canvas>
+      <p class="note">Months with nothing recorded are simply absent, not drawn as zero.</p>
     </div>
     <div class="card">
-      <h2 style="margin-top:0">Monthly occupancy (portfolio avg)</h2>
+      <h2 style="margin-top:0">Portfolio occupancy trend</h2>
       <canvas id="occChart" height="220"></canvas>
     </div>
   </div>
 
+  <h2>Property performance — {{ rng.display }}</h2>
   <div class="card">
-    <h2 style="margin-top:0">Year on year</h2>
-    {% if yoy %}
-      <table>
-        <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Same month last year</th><th class="num">Change</th></tr></thead>
-        <tbody>
-          {% for row in yoy %}
-            <tr>
-              <td>{{ row.label }}</td>
-              <td class="num">£{{ '{:,.0f}'.format(row.this_year) }}</td>
-              <td class="num">£{{ '{:,.0f}'.format(row.last_year) }}</td>
-              <td class="num" style="color: {{ '#056a4a' if row.delta_pct and row.delta_pct > 0 else ('#e0483f' if row.delta_pct and row.delta_pct < 0 else '#7c8d87') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="note">Not enough overlapping history yet — most of the portfolio only started tracking in 2026.</p>
-    {% endif %}
+    <table>
+      <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Margin</th><th class="num">Occupancy</th><th class="num">ADR</th><th class="num">vs Target</th></tr></thead>
+      <tbody>
+        {% for r in prop_rows %}
+          <tr>
+            <td><a href="{{ url_for('property_page', property_id=r.id) }}">{{ r.name }}</a></td>
+            <td class="num">£{{ '{:,.0f}'.format(r.revenue) }}</td>
+            <td class="num">£{{ '{:,.0f}'.format(r.profit) }}</td>
+            <td class="num">{{ '%.0f'|format(r.margin * 100) }}%</td>
+            <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+            <td class="num">£{{ '{:,.0f}'.format(r.adr) }}</td>
+            <td class="num">{{ '%.0f'|format(r.vs_target) + '%' if r.vs_target is not none else '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 
-  <h2>By apartment — {{ current_month }}</h2>
-  <div class="property-grid">
-    {% for r in prop_rows %}
-      <a class="property-card" href="{{ url_for('property_page', property_id=r.id) }}">
-        <div class="name">{{ r.name }}</div>
-        <div class="area">Revenue £{{ '{:,.0f}'.format(r.income) }} · Profit £{{ '{:,.0f}'.format(r.profit) }} · Occ {{ '%.0f'|format(r.occupancy * 100) }}%</div>
-        {% if r.progress is not none %}
-          <div class="progress-bar"><div style="width: {{ [r.progress, 100]|min }}%"></div></div>
-          <div class="note" style="margin-top:4px">{{ r.progress }}% of £{{ '{:,.0f}'.format(r.target) }} target</div>
-        {% else %}
-          <div class="note" style="margin-top:4px">No target set yet</div>
-        {% endif %}
-      </a>
-    {% endfor %}
+  <div class="grid-2">
+    <div class="card">
+      <h2 style="margin-top:0">Expense breakdown — {{ rng.display }}</h2>
+      {% if expense_rows %}
+        <table>
+          <thead><tr><th>Category</th><th class="num">Amount</th><th class="num">vs prior</th></tr></thead>
+          <tbody>
+            {% for e in expense_rows %}
+              <tr>
+                <td>{{ e.category }}</td>
+                <td class="num">£{{ '{:,.0f}'.format(e.amount) }}</td>
+                <td class="num" style="color: {{ 'var(--red)' if e.delta and e.delta > 0 else 'var(--accent-ink)' }}">{{ '%+.0f'|format(e.delta) + '%' if e.delta is not none else '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="note">No costs recorded for this period yet.</p>
+      {% endif %}
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Year on year</h2>
+      {% if yoy %}
+        <table>
+          <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Last year</th><th class="num">Change</th></tr></thead>
+          <tbody>
+            {% for row in yoy[-6:] %}
+              <tr>
+                <td>{{ row.label }}</td>
+                <td class="num">£{{ '{:,.0f}'.format(row.this_year) }}</td>
+                <td class="num">£{{ '{:,.0f}'.format(row.last_year) }}</td>
+                <td class="num" style="color: {{ '#056a4a' if row.delta_pct and row.delta_pct > 0 else ('#e0483f' if row.delta_pct and row.delta_pct < 0 else '#7c8d87') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="note">Not enough overlapping history yet.</p>
+      {% endif %}
+    </div>
   </div>
 
   <script>

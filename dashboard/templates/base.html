@@ -21,7 +21,7 @@
       <nav class="primary">
         <a href="{{ url_for('index') }}" class="nav-link {{ 'active' if active == 'overview' else '' }}"><span class="dot"></span>Homepage</a>
         <a href="{{ url_for('occupancy_page') }}" class="nav-link {{ 'active' if active == 'occupancy' else '' }}"><span class="dot"></span>Occupancy</a>
-        <a href="{{ url_for('opex_capex_page') }}" class="nav-link {{ 'active' if active == 'opex_capex' else '' }}"><span class="dot"></span>Opex &amp; Capex</a>
+        <a href="{{ url_for('expenses_page') }}" class="nav-link {{ 'active' if active == 'expenses' else '' }}"><span class="dot"></span>Expenses</a>
         <a href="{{ url_for('documents_inbox') }}" class="nav-link {{ 'active' if active == 'documents' else '' }}"><span class="dot"></span>Documents</a>
       </nav>
 

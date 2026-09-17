@@ -1,10 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Opex &amp; Capex — Urban Nest Estates{% endblock %}
+{% block title %}Expenses — Urban Nest Estates{% endblock %}
 {% block content %}
-  <h1>Opex &amp; Capex</h1>
+  <h1>Expenses</h1>
   <p class="subtitle">Portfolio-wide operating and capital costs · current month: {{ current_month }}</p>
 
-  <div class="card">
+  <div class="tiles">
+    {% for t in tiles %}
+      <div class="tile">
+        <div class="label">{{ t.label }}</div>
+        <div class="value">{{ t.value }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="card" style="margin-top:20px">
     <h2 style="margin-top:0">Monthly Opex vs Capex, whole portfolio</h2>
     <canvas id="costsChart" height="110"></canvas>
   </div>
@@ -43,20 +52,36 @@
       {% endif %}
     </div>
     <div class="card">
-      <h2 style="margin-top:0">By category — all time</h2>
-      {% if all_time_categories %}
+      <h2 style="margin-top:0">Top vendors — {{ current_month }}</h2>
+      {% if vendor_breakdown %}
         <table>
-          <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+          <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
           <tbody>
-            {% for c in all_time_categories %}
-              <tr><td>{{ c.category }}</td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt) }}</td></tr>
+            {% for v in vendor_breakdown %}
+              <tr><td>{{ v.vendor }}</td><td class="num">{{ v.n }}</td><td class="num">£{{ '{:,.0f}'.format(v.amt) }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
       {% else %}
-        <p class="note">No itemized costs recorded yet.</p>
+        <p class="note">No vendors recorded for this month yet.</p>
       {% endif %}
     </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">By category — all time</h2>
+    {% if all_time_categories %}
+      <table>
+        <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          {% for c in all_time_categories %}
+            <tr><td>{{ c.category }}</td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="note">No itemized costs recorded yet.</p>
+    {% endif %}
   </div>
 
   <script>

@@ -2,15 +2,44 @@
 {% block title %}Occupancy — Urban Nest Estates{% endblock %}
 {% block content %}
   <h1>Occupancy</h1>
-  <p class="subtitle">Every flat, one chart · current month: {{ current_month }}</p>
+  <p class="subtitle">Portfolio-wide, then by flat · current month: {{ current_month }}</p>
 
   <div class="card">
-    <h2 style="margin-top:0">Occupancy by flat, over time</h2>
-    <canvas id="occChart" height="110"></canvas>
-    <p class="note">Portfolio average is the bold dashed line. A gap in a flat's line means it had no recorded figure that month, not 0%.</p>
+    <h2 style="margin-top:0">Portfolio occupancy trend</h2>
+    <canvas id="portfolioChart" height="90"></canvas>
+    <p class="note">Gaps are months with nothing recorded yet, not 0%.</p>
   </div>
 
-  <h2>By flat — {{ current_month }}</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h2 style="margin-top:0">By flat — {{ current_month }}</h2>
+      <canvas id="rankedChart" height="{{ rows|length * 34 + 20 }}"></canvas>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Last 12 months</h2>
+      <div style="overflow-x:auto">
+        <table style="font-size:0.8rem">
+          <thead><tr><th>Flat</th>{% for m in heatmap_months %}<th class="num">{{ m }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for r in heatmap_rows %}
+              <tr>
+                <td>{{ r.name }}</td>
+                {% for v in r.cells %}
+                  {% if v is none %}
+                    <td class="num" style="background:var(--bg)"></td>
+                  {% else %}
+                    <td class="num" style="background: rgba(14,164,114,{{ (v/100)|round(2) }}); color: {{ '#fff' if v > 55 else 'var(--ink)' }}">{{ v|round|int }}</td>
+                  {% endif %}
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h2>By flat — table</h2>
   <div class="card">
     <table>
       <thead><tr><th>Flat</th><th class="num">Occupancy</th><th class="num">Days booked</th><th class="num">vs prior month</th></tr></thead>
@@ -29,11 +58,37 @@
     </table>
   </div>
 
+  <div class="card">
+    <h2 style="margin-top:0">Compare flats over time</h2>
+    <p class="note" style="margin-top:-6px">Click a name in the legend to show or hide just that flat's line.</p>
+    <canvas id="compareChart" height="110"></canvas>
+  </div>
+
   <script>
     const months = {{ months_json|safe }};
     const portfolio = {{ portfolio_json|safe }};
     const series = {{ series_json|safe }};
+    const teal = '#0ea472';
+    const tealSoft = 'rgba(14,164,114,0.15)';
     const palette = ['#0ea472', '#e0932e', '#8e44ad', '#2980b9', '#e0483f', '#16a085', '#d35400', '#7f8c8d', '#27ae60', '#2c3e50', '#e67e22'];
+
+    new Chart(document.getElementById('portfolioChart'), {
+      type: 'line',
+      data: { labels: months, datasets: [{ label: 'Occupancy %', data: portfolio, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25, spanGaps: false }] },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } },
+    });
+
+    const rankedLabels = {{ rows|map(attribute='name')|list|tojson }};
+    const rankedValues = {{ rows|map(attribute='occupancy')|list|tojson }}.map(v => Math.round(v * 1000) / 10);
+    new Chart(document.getElementById('rankedChart'), {
+      type: 'bar',
+      data: { labels: rankedLabels, datasets: [{ label: 'Occupancy %', data: rankedValues, backgroundColor: teal, borderRadius: 4 }] },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, max: 100 } },
+      },
+    });
 
     const datasets = Object.keys(series).map((name, i) => ({
       label: name,
@@ -43,18 +98,10 @@
       spanGaps: false,
       tension: 0.25,
       pointRadius: 2,
+      hidden: i >= 4,
     }));
-    datasets.push({
-      label: 'Portfolio average',
-      data: portfolio,
-      borderColor: '#1c2624',
-      borderWidth: 3,
-      borderDash: [6, 4],
-      pointRadius: 0,
-      tension: 0.25,
-    });
 
-    new Chart(document.getElementById('occChart'), {
+    new Chart(document.getElementById('compareChart'), {
       type: 'line',
       data: { labels: months, datasets },
       options: {

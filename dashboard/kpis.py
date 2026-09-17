@@ -29,6 +29,33 @@ def prior_month(year, month):
     return (year - 1, 12) if month == 1 else (year, month - 1)
 
 
+def add_months(year, month, delta):
+    """(year, month) shifted by delta months (may be negative)."""
+    total = (year * 12 + (month - 1)) + delta
+    return total // 12, total % 12 + 1
+
+
+def months_in_range(start_year, start_month, end_year, end_month):
+    """Inclusive month count, e.g. Jan-Mar = 3."""
+    return (end_year - start_year) * 12 + (end_month - start_month) + 1
+
+
+def shift_range(start_year, start_month, end_year, end_month, delta_months):
+    sy, sm = add_months(start_year, start_month, delta_months)
+    ey, em = add_months(end_year, end_month, delta_months)
+    return sy, sm, ey, em
+
+
+def prior_period(start_year, start_month, end_year, end_month):
+    """The immediately-preceding span of the same length."""
+    n = months_in_range(start_year, start_month, end_year, end_month)
+    return shift_range(start_year, start_month, end_year, end_month, -n)
+
+
+def same_period_last_year(start_year, start_month, end_year, end_month):
+    return shift_range(start_year, start_month, end_year, end_month, -12)
+
+
 def _prop_clause(property_id, column="property_id"):
     return (f"AND {column} = ?", (property_id,)) if property_id else ("", ())
 

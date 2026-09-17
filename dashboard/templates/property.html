@@ -16,9 +16,10 @@
     {% endfor %}
   </div>
   {% if not tiles %}
-    <div class="card"><p class="note">No monthly figures for {{ month_name }} {{ year }} yet — add an expense below or upload a document to start building this flat's numbers.</p></div>
+    <div class="card"><p class="note">No monthly figures for {{ month_name }} {{ year }} yet — {% if is_overhead %}add an expense below to start tracking shared costs.{% else %}add an expense below or upload a document to start building this flat's numbers.{% endif %}</p></div>
   {% endif %}
 
+  {% if not is_overhead %}
   <div class="card">
     <h2 style="margin-top:0">Goal — {{ month_name }} {{ year }}</h2>
     {% if goal_progress is not none %}
@@ -33,7 +34,14 @@
       <button type="submit">Save goal</button>
     </form>
   </div>
+  {% endif %}
 
+  {% if is_overhead %}
+  <div class="card">
+    <h2 style="margin-top:0">Monthly cost trend</h2>
+    <canvas id="revenueChart" height="220"></canvas>
+  </div>
+  {% else %}
   <div class="grid-2">
     <div class="card">
       <h2 style="margin-top:0">Revenue, costs &amp; profit</h2>
@@ -75,6 +83,7 @@
     </form>
     {% if prop.ical_synced_at %}<p class="note" style="margin-top:8px">Last synced {{ prop.ical_synced_at }}.</p>{% endif %}
   </div>
+  {% endif %}
 
   <div class="card">
     <h2 style="margin-top:0">Upload a document</h2>
@@ -168,10 +177,12 @@
       options: { scales: { y: { beginAtZero: true } } }
     });
 
-    new Chart(document.getElementById('occChart'), {
-      type: 'line',
-      data: { labels: months, datasets: [{ label: 'Occupancy %', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25 }] },
-      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
-    });
+    if (document.getElementById('occChart')) {
+      new Chart(document.getElementById('occChart'), {
+        type: 'line',
+        data: { labels: months, datasets: [{ label: 'Occupancy %', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25 }] },
+        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+      });
+    }
   </script>
 {% endblock %}
