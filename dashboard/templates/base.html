@@ -8,19 +8,46 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">Urban Nest Estates</div>
-    <nav>
-      <a href="{{ url_for('index') }}" class="{{ 'active' if active == 'overview' else '' }}">Homepage</a>
-      <select onchange="if(this.value) window.location.href=this.value">
-        <option value="">Jump to a flat…</option>
-        {% for p in all_properties %}
-          <option value="{{ url_for('property_page', property_id=p.id) }}" {{ 'selected' if active_property == p.id else '' }}>{{ p.name }}</option>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark">UN</div>
+        <div>
+          <div class="name">Urban Nest</div>
+          <div class="sub">Estates</div>
+        </div>
+      </div>
+
+      <nav class="primary">
+        <a href="{{ url_for('index') }}" class="nav-link {{ 'active' if active == 'overview' else '' }}"><span class="dot"></span>Homepage</a>
+        <a href="{{ url_for('occupancy_page') }}" class="nav-link {{ 'active' if active == 'occupancy' else '' }}"><span class="dot"></span>Occupancy</a>
+        <a href="{{ url_for('opex_capex_page') }}" class="nav-link {{ 'active' if active == 'opex_capex' else '' }}"><span class="dot"></span>Opex &amp; Capex</a>
+      </nav>
+
+      <div class="section-label">Flats</div>
+      <div class="flats-list">
+        {% for p in all_properties if not p.is_overhead %}
+          <a href="{{ url_for('property_page', property_id=p.id) }}" class="nav-link {{ 'active' if active_property == p.id else '' }}"><span class="dot"></span>{{ p.name }}</a>
         {% endfor %}
-      </select>
+        {% for p in all_properties if p.is_overhead %}
+          <a href="{{ url_for('property_page', property_id=p.id) }}" class="nav-link overhead {{ 'active' if active_property == p.id else '' }}"><span class="dot"></span>{{ p.name }}</a>
+        {% endfor %}
+      </div>
+
       <button type="button" class="add-btn" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add apartment</button>
-    </nav>
-  </header>
+    </aside>
+
+    <div class="main-col">
+      <main>
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
+          {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
 
   <dialog id="add-apartment-dialog">
     <form method="post" action="{{ url_for('add_apartment') }}">
@@ -33,14 +60,5 @@
       </div>
     </form>
   </dialog>
-
-  <main>
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
-      {% endif %}
-    {% endwith %}
-    {% block content %}{% endblock %}
-  </main>
 </body>
 </html>

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Occupancy — Urban Nest Estates{% endblock %}
+{% block content %}
+  <h1>Occupancy</h1>
+  <p class="subtitle">Every flat, one chart · current month: {{ current_month }}</p>
+
+  <div class="card">
+    <h2 style="margin-top:0">Occupancy by flat, over time</h2>
+    <canvas id="occChart" height="110"></canvas>
+    <p class="note">Portfolio average is the bold dashed line. A gap in a flat's line means it had no recorded figure that month, not 0%.</p>
+  </div>
+
+  <h2>By flat — {{ current_month }}</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>Flat</th><th class="num">Occupancy</th><th class="num">Days booked</th><th class="num">vs prior month</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><a href="{{ url_for('property_page', property_id=r.id) }}">{{ r.name }}</a></td>
+            <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+            <td class="num">{{ '%.0f'|format(r.days_booked) }}</td>
+            <td class="num" style="color: {{ '#056a4a' if r.delta and r.delta > 0 else ('#e0483f' if r.delta and r.delta < 0 else '#7c8d87') }}">
+              {{ '%+.1f'|format(r.delta) + '%' if r.delta is not none else 'n/a' }}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const months = {{ months_json|safe }};
+    const portfolio = {{ portfolio_json|safe }};
+    const series = {{ series_json|safe }};
+    const palette = ['#0ea472', '#e0932e', '#8e44ad', '#2980b9', '#e0483f', '#16a085', '#d35400', '#7f8c8d', '#27ae60', '#2c3e50', '#e67e22'];
+
+    const datasets = Object.keys(series).map((name, i) => ({
+      label: name,
+      data: series[name],
+      borderColor: palette[i % palette.length],
+      backgroundColor: 'transparent',
+      spanGaps: false,
+      tension: 0.25,
+      pointRadius: 2,
+    }));
+    datasets.push({
+      label: 'Portfolio average',
+      data: portfolio,
+      borderColor: '#1c2624',
+      borderWidth: 3,
+      borderDash: [6, 4],
+      pointRadius: 0,
+      tension: 0.25,
+    });
+
+    new Chart(document.getElementById('occChart'), {
+      type: 'line',
+      data: { labels: months, datasets },
+      options: {
+        scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: 'Occupancy %' } } },
+        plugins: { legend: { position: 'bottom' } },
+      },
+    });
+  </script>
+{% endblock %}

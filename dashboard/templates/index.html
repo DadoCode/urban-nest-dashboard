@@ -47,7 +47,7 @@
               <td>{{ row.label }}</td>
               <td class="num">£{{ '{:,.0f}'.format(row.this_year) }}</td>
               <td class="num">£{{ '{:,.0f}'.format(row.last_year) }}</td>
-              <td class="num" style="color: {{ '#1a8754' if row.delta_pct and row.delta_pct > 0 else ('#c0392b' if row.delta_pct and row.delta_pct < 0 else '#647573') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
+              <td class="num" style="color: {{ '#056a4a' if row.delta_pct and row.delta_pct > 0 else ('#e0483f' if row.delta_pct and row.delta_pct < 0 else '#7c8d87') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -78,9 +78,9 @@
     const income = {{ income_json|safe }};
     const profit = {{ profit_json|safe }};
     const occupancy = {{ occupancy_json|safe }};
-    const teal = '#0c5d5e';
-    const amber = '#c98a1f';
-    const tealSoft = 'rgba(12,93,94,0.15)';
+    const teal = '#0ea472';
+    const amber = '#e0932e';
+    const tealSoft = 'rgba(14,164,114,0.15)';
 
     new Chart(document.getElementById('revenueChart'), {
       data: {

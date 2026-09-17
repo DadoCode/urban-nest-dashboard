@@ -252,6 +252,97 @@ def index():
     )
 
 
+def all_months(conn):
+    """Every (year, month) that appears anywhere in monthly_summary, as
+    sorted 'YYYY-MM' strings -- the shared x-axis for cross-property charts
+    so every flat's series lines up even if one started later than another."""
+    return [f"{r['year']}-{r['month']:02d}" for r in conn.execute(
+        "SELECT DISTINCT year, month FROM monthly_summary ORDER BY year, month"
+    )]
+
+
+@app.route("/occupancy")
+def occupancy_page():
+    conn = db.get_conn()
+    flats = get_properties(conn, include_overhead=False)
+    year, month = current_year_month(conn)
+    py, pm = prior_month(year, month)
+    months = all_months(conn)
+
+    series_by_property = {}
+    rows = []
+    for p in flats:
+        by_key = {(r["year"], r["month"]): r for r in full_series(conn, p["id"])}
+        series_by_property[p["name"]] = [
+            (round((by_key[tuple(map(int, ym.split("-")))]["occupancy"] or 0) * 100, 1)
+             if tuple(map(int, ym.split("-"))) in by_key else None)
+            for ym in months
+        ]
+        current = by_key.get((year, month))
+        previous = by_key.get((py, pm))
+        rows.append({
+            "id": p["id"], "name": p["name"],
+            "occupancy": (current["occupancy"] or 0) if current else 0,
+            "days_booked": (current["days_booked"] or 0) if current else 0,
+            "delta": pct_delta(current["occupancy"] or 0, previous["occupancy"] or 0) if current and previous else None,
+        })
+    rows.sort(key=lambda r: r["occupancy"], reverse=True)
+
+    portfolio_by_key = {(r["year"], r["month"]): r for r in full_series(conn)}
+    portfolio_series = [
+        round((portfolio_by_key[tuple(map(int, ym.split("-")))]["occupancy"] or 0) * 100, 1)
+        if tuple(map(int, ym.split("-"))) in portfolio_by_key else None
+        for ym in months
+    ]
+
+    return render_template(
+        "occupancy.html", active="occupancy", all_properties=get_properties(conn), active_property=None,
+        current_month=f"{MONTH_NAMES[month]} {year}", rows=rows,
+        months_json=json.dumps(months), portfolio_json=json.dumps(portfolio_series),
+        series_json=json.dumps(series_by_property),
+    )
+
+
+@app.route("/opex-capex")
+def opex_capex_page():
+    conn = db.get_conn()
+    flats = get_properties(conn, include_overhead=False)
+    year, month = current_year_month(conn)
+    months_rows = full_series(conn)
+    months = [f"{r['year']}-{r['month']:02d}" for r in months_rows]
+
+    rows = []
+    for p in flats:
+        row = summary_row(conn, p["id"], year, month)
+        rows.append({
+            "id": p["id"], "name": p["name"],
+            "opex": (row["opex"] or 0) if row else 0,
+            "capex": (row["capex"] or 0) if row else 0,
+            "total_costs": abs((row["total_costs"] or 0)) if row else 0,
+        })
+    rows.sort(key=lambda r: r["total_costs"], reverse=True)
+
+    def category_breakdown(where_extra="", params=()):
+        return conn.execute(
+            f"""SELECT category, SUM(amount) amt, COUNT(*) n FROM expense_items
+                WHERE category NOT IN ('booking_income') {where_extra}
+                GROUP BY category ORDER BY amt DESC""",
+            params,
+        ).fetchall()
+
+    this_month_categories = category_breakdown("AND year=? AND month=?", (year, month))
+    all_time_categories = category_breakdown()
+
+    return render_template(
+        "opex_capex.html", active="opex_capex", all_properties=get_properties(conn), active_property=None,
+        current_month=f"{MONTH_NAMES[month]} {year}", rows=rows,
+        this_month_categories=this_month_categories, all_time_categories=all_time_categories,
+        months_json=json.dumps(months),
+        opex_json=json.dumps([r["opex"] or 0 for r in months_rows]),
+        capex_json=json.dumps([r["capex"] or 0 for r in months_rows]),
+    )
+
+
 @app.route("/property/<property_id>")
 def property_page(property_id):
     conn = db.get_conn()
