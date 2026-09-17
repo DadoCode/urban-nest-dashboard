@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Documents — Urban Nest Estates{% endblock %}
+{% block content %}
+  <h1>Documents</h1>
+  <p class="subtitle">Upload whatever came in this month — the system tries to work out the flat, the period and the line items; nothing touches the ledger until you review and confirm it.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0">Upload</h2>
+    <form class="upload-form" method="post" action="{{ url_for('upload_to_inbox') }}" enctype="multipart/form-data">
+      <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx" multiple required>
+      <select name="property_id">
+        <option value="">Auto-detect flat</option>
+        {% for p in all_properties %}
+          <option value="{{ p.id }}">{{ p.name }}</option>
+        {% endfor %}
+      </select>
+      <select name="doc_type">
+        <option value="amazon_order">Amazon / Temu order</option>
+        <option value="cleaning_invoice">Cleaning invoice</option>
+        <option value="booking_statement">Booking / Airbnb statement</option>
+        <option value="bank_statement">Bank statement</option>
+        <option value="utility_bill">Utility bill</option>
+        <option value="other">Other</option>
+      </select>
+      <button type="submit">Upload</button>
+    </form>
+    <p class="note" style="margin-top:10px">PDF, photo, CSV or XLSX. Multiple files at once go straight into the list below — open each to review.</p>
+  </div>
+
+  <h2>All documents</h2>
+  <div class="card">
+    {% if docs %}
+      <table>
+        <thead><tr><th>File</th><th>Type</th><th>Flat</th><th>Uploaded</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for d in docs %}
+            <tr>
+              <td>{{ d.filename }}</td>
+              <td>{{ d.doc_type or '—' }}</td>
+              <td>{{ d.property_name }}</td>
+              <td class="note">{{ d.uploaded_at }}</td>
+              <td><span class="status-pill {{ 'confirmed' if d.status == 'confirmed' else '' }}">{{ d.status }}</span></td>
+              <td>{% if d.status != 'confirmed' %}<a href="{{ url_for('review_document', doc_id=d.id) }}">review</a>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="note">Nothing uploaded yet.</p>
+    {% endif %}
+  </div>
+{% endblock %}

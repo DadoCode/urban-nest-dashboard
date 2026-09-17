@@ -1,22 +1,25 @@
 """
-Urban Nest Estates business dashboard -- sourced from the real accounts
-tracker (imported by scripts/import_excel_tracker.py into data/dashboard.db)
-plus whatever's added by hand or through document uploads from here on.
+Urban Nest Estates business dashboard.
+
+Every KPI on every page is derived on read from `bookings` + `transactions`
+via dashboard/kpis.py -- there is no cached totals table to keep in sync.
+See scripts/migrate_to_normalized_schema.py for how the original Excel
+import's monthly_summary/expense_items/goals became this shape.
 
 Run with:  python3 dashboard/app.py
 """
 import datetime
 import json
 import mimetypes
+import re
 from pathlib import Path
 
 from flask import Flask, render_template, request, redirect, url_for, flash
 
-import calendar as pycalendar
-
 import db
 import extraction
 import ical_sync
+import kpis
 
 ROOT = Path(__file__).resolve().parent.parent
 UPLOADS = ROOT / "data" / "uploads"
@@ -26,33 +29,13 @@ app.secret_key = "urban-nest-dashboard"  # local-only tool, no auth/session sens
 
 MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
+MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
 @app.before_request
 def _setup():
     db.ensure_schema()
     UPLOADS.mkdir(parents=True, exist_ok=True)
-
-
-def current_year_month(conn):
-    """The 'current' reporting period is the latest month where at least
-    half the active portfolio has real income recorded -- this is a
-    hand-updated ledger, not a live feed, so the calendar's actual current
-    month is usually still mostly-empty for a few weeks (one property
-    entered early doesn't make it 'the current month'). Falls back to
-    today's month if the ledger has no data at all yet."""
-    active_count = conn.execute("SELECT COUNT(*) FROM properties WHERE active = 1 AND is_overhead = 0").fetchone()[0] or 1
-    threshold = max(1, active_count // 2)
-    row = conn.execute(
-        """SELECT year, month FROM monthly_summary
-           GROUP BY year, month HAVING COUNT(*) FILTER (WHERE income > 0) >= ?
-           ORDER BY year DESC, month DESC LIMIT 1""",
-        (threshold,),
-    ).fetchone()
-    if row:
-        return row["year"], row["month"]
-    today = datetime.date.today()
-    return today.year, today.month
 
 
 def pct_delta(current, previous):
@@ -67,10 +50,10 @@ def get_properties(conn, active_only=True, include_overhead=True):
     if active_only:
         clauses.append("active = 1")
     if not include_overhead:
-        clauses.append("is_overhead = 0")
+        clauses.append("type != 'overhead'")
     if clauses:
         q += " WHERE " + " AND ".join(clauses)
-    q += " ORDER BY is_overhead, name"
+    q += " ORDER BY (type = 'overhead'), name"
     return conn.execute(q).fetchall()
 
 
@@ -78,119 +61,49 @@ def get_property(conn, property_id):
     return conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
 
 
-def summary_row(conn, property_id, year, month):
+def target_row(conn, property_id, year, month):
     return conn.execute(
-        "SELECT * FROM monthly_summary WHERE property_id=? AND year=? AND month=?",
+        "SELECT * FROM targets WHERE property_id=? AND year=? AND month=?",
         (property_id, year, month),
     ).fetchone()
 
 
-def prior_month(year, month):
-    return (year - 1, 12) if month == 1 else (year, month - 1)
-
-
-def full_series(conn, property_id=None):
-    """Chronological list of monthly rows -- one property, or the whole
-    portfolio summed together when property_id is None."""
-    if property_id:
-        rows = conn.execute(
-            "SELECT * FROM monthly_summary WHERE property_id=? ORDER BY year, month",
-            (property_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-    rows = conn.execute(
-        """SELECT year, month,
-                  SUM(income) income, SUM(total_costs) total_costs,
-                  SUM(opex) opex, SUM(capex) capex,
-                  SUM(net_profit) net_profit, SUM(operating_profit) operating_profit,
-                  AVG(occupancy) occupancy, SUM(days_booked) days_booked
-           FROM monthly_summary GROUP BY year, month ORDER BY year, month"""
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def yoy_pairs(series, current_period):
-    by_key = {(r["year"], r["month"]): r for r in series}
+def yoy_pairs(conn, property_id, current_period):
+    """[(label, this_year, last_year, delta_pct), ...] for every month up to
+    current_period where the same month exists a year earlier too."""
+    series = {(s["year"], s["month"]): s for s in kpis.monthly_series(conn, property_id)}
     pairs = []
-    for (year, month), row in sorted(by_key.items()):
+    for (year, month), row in sorted(series.items()):
         if (year, month) > current_period:
             continue
-        prev = by_key.get((year - 1, month))
-        if prev and (row["income"] or prev["income"]):
+        prev = series.get((year - 1, month))
+        if prev:
             pairs.append({
                 "label": f"{MONTH_NAMES[month]} {year}",
-                "this_year": row["income"] or 0,
-                "last_year": prev["income"] or 0,
-                "delta_pct": pct_delta(row["income"] or 0, prev["income"] or 0),
+                "this_year": row["revenue"],
+                "last_year": prev["revenue"],
+                "delta_pct": pct_delta(row["revenue"], prev["revenue"]),
             })
     return pairs
 
 
-def goal_row(conn, property_id, year, month):
-    return conn.execute(
-        "SELECT * FROM goals WHERE property_id=? AND year=? AND month=?",
-        (property_id, year, month),
-    ).fetchone()
-
-
-def recompute_derived_month(conn, property_id, year, month):
-    """Keeps monthly_summary current for months that aren't in the Excel
-    tracker at all -- once uploads/manual entries are the only source for a
-    month, this recomputes its income/costs/profit from expense_items every
-    time a new line item lands. Never touches a month that has a real
-    'excel_import' row: that ledger is the trusted historical figure and
-    itemized purchases don't reconstruct it exactly (see the import
-    script's docstring)."""
-    existing = conn.execute(
-        "SELECT source, income, total_costs FROM monthly_summary WHERE property_id=? AND year=? AND month=?",
-        (property_id, year, month),
-    ).fetchone()
-    # The Excel import pre-fills a full 12-month template per year, so a
-    # future month often already has a zeroed-out placeholder row -- that's
-    # not real historical data, so it's still fair game to derive over.
-    if existing and existing["source"] == "excel_import" and (existing["income"] or existing["total_costs"]):
-        return
-    row = conn.execute(
-        """SELECT
-             COALESCE(SUM(amount) FILTER (WHERE category = 'booking_income'), 0) income,
-             COALESCE(SUM(amount) FILTER (WHERE category != 'booking_income'), 0) costs
-           FROM expense_items WHERE property_id=? AND year=? AND month=?""",
-        (property_id, year, month),
-    ).fetchone()
-    income, costs = row["income"], row["costs"]
-    conn.execute(
-        """INSERT INTO monthly_summary (property_id, year, month, income, total_costs, net_profit, source)
-           VALUES (?,?,?,?,?,?,'derived')
-           ON CONFLICT(property_id, year, month) DO UPDATE SET
-             income=excluded.income, total_costs=excluded.total_costs,
-             net_profit=excluded.net_profit, source='derived'""",
-        (property_id, year, month, income, -costs, income - costs),
-    )
-
-
-def merge_calendar_month(conn, property_id, year, month, nights_booked):
-    """Writes occupancy/days_booked from a synced booking calendar without
-    touching income/costs (the calendar only tells us which nights were
-    booked, not what they were worth) and without overwriting a month that
-    already has a real recorded occupancy figure from the Excel import."""
-    days_in_month = pycalendar.monthrange(year, month)[1]
-    occupancy = min(nights_booked / days_in_month, 1.0)
-    existing = conn.execute(
-        "SELECT source, occupancy FROM monthly_summary WHERE property_id=? AND year=? AND month=?",
-        (property_id, year, month),
-    ).fetchone()
-    if existing and existing["source"] == "excel_import" and existing["occupancy"]:
-        return False
-    conn.execute(
-        """INSERT INTO monthly_summary (property_id, year, month, occupancy, days_booked, source)
-           VALUES (?,?,?,?,?,'ical')
-           ON CONFLICT(property_id, year, month) DO UPDATE SET
-             occupancy=excluded.occupancy, days_booked=excluded.days_booked,
-             source=CASE WHEN monthly_summary.source = 'excel_import' THEN monthly_summary.source ELSE 'ical' END""",
-        (property_id, year, month, occupancy, nights_booked),
-    )
-    return True
+def tiles_for(conn, property_id, year, month, extra=None):
+    py, pm = kpis.prior_month(year, month)
+    start, end = kpis.month_bounds(year, month)
+    pstart, pend = kpis.month_bounds(py, pm)
+    cur = kpis.kpi_snapshot(conn, property_id, start, end)
+    prev = kpis.kpi_snapshot(conn, property_id, pstart, pend)
+    tiles = [
+        {"label": f"Revenue — {MONTH_NAMES[month]} {year}", "value": f"£{cur['revenue']:,.0f}",
+         "delta": pct_delta(cur["revenue"], prev["revenue"])},
+        {"label": "Net profit", "value": f"£{cur['net_profit']:,.0f}",
+         "delta": pct_delta(cur["net_profit"], prev["net_profit"])},
+        {"label": "Occupancy", "value": f"{cur['occupancy'] * 100:.0f}%",
+         "delta": pct_delta(cur["occupancy"], prev["occupancy"])},
+        {"label": "Booked nights", "value": cur["booked_nights"],
+         "delta": pct_delta(cur["booked_nights"], prev["booked_nights"])},
+    ]
+    return tiles, cur, prev
 
 
 @app.route("/")
@@ -198,102 +111,84 @@ def index():
     conn = db.get_conn()
     nav_properties = get_properties(conn)
     flats = get_properties(conn, include_overhead=False)
-    year, month = current_year_month(conn)
-    py, pm = prior_month(year, month)
+    year, month = kpis.current_period(conn)
+    tiles, cur, prev = tiles_for(conn, None, year, month)
 
-    portfolio_series = full_series(conn)
-    by_key = {(r["year"], r["month"]): r for r in portfolio_series}
-    current = by_key.get((year, month))
-    previous = by_key.get((py, pm))
+    targets_total = conn.execute(
+        "SELECT SUM(revenue_target) t FROM targets WHERE year=? AND month=?", (year, month)
+    ).fetchone()["t"] or 0
+    goal_progress = round(cur["revenue"] / targets_total * 100, 1) if targets_total else 0
 
-    tiles = []
-    if current:
-        tiles.append({"label": f"Revenue — {MONTH_NAMES[month]} {year}", "value": f"£{(current['income'] or 0):,.0f}",
-                       "delta": pct_delta(current["income"] or 0, previous["income"] or 0) if previous else None})
-        tiles.append({"label": "Net profit", "value": f"£{(current['net_profit'] or 0):,.0f}",
-                       "delta": pct_delta(current["net_profit"] or 0, previous["net_profit"] or 0) if previous else None})
-        tiles.append({"label": "Occupancy (avg)", "value": f"{(current['occupancy'] or 0) * 100:.0f}%",
-                       "delta": pct_delta(current["occupancy"] or 0, previous["occupancy"] or 0) if previous else None})
-        tiles.append({"label": "Costs", "value": f"£{abs(current['total_costs'] or 0):,.0f}",
-                       "delta": pct_delta(abs(current["total_costs"] or 0), abs(previous["total_costs"] or 0)) if previous else None})
-
-    goals_this_month = conn.execute(
-        "SELECT SUM(income_target) t, SUM(profit_target) p FROM goals WHERE year=? AND month=?", (year, month)
-    ).fetchone()
-    income_goal = goals_this_month["t"] or 0
-    goal_progress = round((current["income"] or 0) / income_goal * 100, 1) if current and income_goal else 0
-
+    start, end = kpis.month_bounds(year, month)
     prop_rows = []
     for p in flats:
-        row = summary_row(conn, p["id"], year, month)
-        g = goal_row(conn, p["id"], year, month)
-        income = (row["income"] if row else 0) or 0
-        target = (g["income_target"] if g else 0) or 0
+        snap = kpis.kpi_snapshot(conn, p["id"], start, end)
+        t = target_row(conn, p["id"], year, month)
+        target = (t["revenue_target"] if t else 0) or 0
         prop_rows.append({
             "id": p["id"], "name": p["name"],
-            "income": income,
-            "profit": (row["net_profit"] if row else 0) or 0,
-            "occupancy": (row["occupancy"] if row else 0) or 0,
+            "income": snap["revenue"], "profit": snap["net_profit"], "occupancy": snap["occupancy"],
             "target": target,
-            "progress": round(income / target * 100, 1) if target else None,
+            "progress": round(snap["revenue"] / target * 100, 1) if target else None,
         })
     prop_rows.sort(key=lambda r: r["income"], reverse=True)
 
-    yoy = yoy_pairs(portfolio_series, (year, month))
+    portfolio_series = kpis.monthly_series(conn, None)
+    yoy = yoy_pairs(conn, None, (year, month))
 
     return render_template(
         "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats),
         active_property=None, tiles=tiles, current_month=f"{MONTH_NAMES[month]} {year}",
-        income_goal=income_goal, goal_progress=goal_progress, prop_rows=prop_rows, yoy=yoy,
-        months_json=json.dumps([f"{r['year']}-{r['month']:02d}" for r in portfolio_series]),
-        income_json=json.dumps([r["income"] or 0 for r in portfolio_series]),
-        profit_json=json.dumps([r["net_profit"] or 0 for r in portfolio_series]),
-        occupancy_json=json.dumps([round((r["occupancy"] or 0) * 100, 1) for r in portfolio_series]),
+        income_goal=targets_total, goal_progress=goal_progress, prop_rows=prop_rows, yoy=yoy,
+        months_json=json.dumps([s["ym"] for s in portfolio_series]),
+        income_json=json.dumps([s["revenue"] for s in portfolio_series]),
+        profit_json=json.dumps([s["net_profit"] for s in portfolio_series]),
+        occupancy_json=json.dumps([round(s["occupancy"] * 100, 1) for s in portfolio_series]),
     )
-
-
-def all_months(conn):
-    """Every (year, month) that appears anywhere in monthly_summary, as
-    sorted 'YYYY-MM' strings -- the shared x-axis for cross-property charts
-    so every flat's series lines up even if one started later than another."""
-    return [f"{r['year']}-{r['month']:02d}" for r in conn.execute(
-        "SELECT DISTINCT year, month FROM monthly_summary ORDER BY year, month"
-    )]
 
 
 @app.route("/occupancy")
 def occupancy_page():
     conn = db.get_conn()
     flats = get_properties(conn, include_overhead=False)
-    year, month = current_year_month(conn)
-    py, pm = prior_month(year, month)
-    months = all_months(conn)
+    year, month = kpis.current_period(conn)
+    py, pm = kpis.prior_month(year, month)
+    months = kpis.months_with_data(conn, None)
 
     series_by_property = {}
     rows = []
     for p in flats:
-        by_key = {(r["year"], r["month"]): r for r in full_series(conn, p["id"])}
-        series_by_property[p["name"]] = [
-            (round((by_key[tuple(map(int, ym.split("-")))]["occupancy"] or 0) * 100, 1)
-             if tuple(map(int, ym.split("-"))) in by_key else None)
-            for ym in months
-        ]
-        current = by_key.get((year, month))
-        previous = by_key.get((py, pm))
+        own_months = set(kpis.months_with_data(conn, p["id"]))
+        values = []
+        for ym in months:
+            if ym not in own_months:
+                values.append(None)
+                continue
+            y, m = map(int, ym.split("-"))
+            s, e = kpis.month_bounds(y, m)
+            values.append(round(kpis.occupancy(conn, p["id"], s, e) * 100, 1))
+        series_by_property[p["name"]] = values
+
+        cstart, cend = kpis.month_bounds(year, month)
+        pstart, pend = kpis.month_bounds(py, pm)
+        cur_occ = kpis.occupancy(conn, p["id"], cstart, cend)
+        prev_occ = kpis.occupancy(conn, p["id"], pstart, pend)
         rows.append({
-            "id": p["id"], "name": p["name"],
-            "occupancy": (current["occupancy"] or 0) if current else 0,
-            "days_booked": (current["days_booked"] or 0) if current else 0,
-            "delta": pct_delta(current["occupancy"] or 0, previous["occupancy"] or 0) if current and previous else None,
+            "id": p["id"], "name": p["name"], "occupancy": cur_occ,
+            "days_booked": kpis.booked_nights(conn, p["id"], cstart, cend),
+            "delta": pct_delta(cur_occ, prev_occ) if f"{py}-{pm:02d}" in own_months else None,
         })
     rows.sort(key=lambda r: r["occupancy"], reverse=True)
 
-    portfolio_by_key = {(r["year"], r["month"]): r for r in full_series(conn)}
-    portfolio_series = [
-        round((portfolio_by_key[tuple(map(int, ym.split("-")))]["occupancy"] or 0) * 100, 1)
-        if tuple(map(int, ym.split("-"))) in portfolio_by_key else None
-        for ym in months
-    ]
+    portfolio_months = set(kpis.months_with_data(conn, None))
+    portfolio_series = []
+    for ym in months:
+        if ym not in portfolio_months:
+            portfolio_series.append(None)
+            continue
+        y, m = map(int, ym.split("-"))
+        s, e = kpis.month_bounds(y, m)
+        portfolio_series.append(round(kpis.occupancy(conn, None, s, e) * 100, 1))
 
     return render_template(
         "occupancy.html", active="occupancy", all_properties=get_properties(conn), active_property=None,
@@ -307,39 +202,39 @@ def occupancy_page():
 def opex_capex_page():
     conn = db.get_conn()
     flats = get_properties(conn, include_overhead=False)
-    year, month = current_year_month(conn)
-    months_rows = full_series(conn)
-    months = [f"{r['year']}-{r['month']:02d}" for r in months_rows]
+    year, month = kpis.current_period(conn)
+    start, end = kpis.month_bounds(year, month)
+    months = kpis.months_with_data(conn, None)
 
     rows = []
     for p in flats:
-        row = summary_row(conn, p["id"], year, month)
-        rows.append({
-            "id": p["id"], "name": p["name"],
-            "opex": (row["opex"] or 0) if row else 0,
-            "capex": (row["capex"] or 0) if row else 0,
-            "total_costs": abs((row["total_costs"] or 0)) if row else 0,
-        })
+        s, e = kpis.month_bounds(year, month)
+        opex = kpis.costs(conn, p["id"], s, e, capex=False)
+        capex = kpis.costs(conn, p["id"], s, e, capex=True)
+        rows.append({"id": p["id"], "name": p["name"], "opex": opex, "capex": capex, "total_costs": opex + capex})
     rows.sort(key=lambda r: r["total_costs"], reverse=True)
 
-    def category_breakdown(where_extra="", params=()):
+    opex_series, capex_series = [], []
+    for ym in months:
+        y, m = map(int, ym.split("-"))
+        s, e = kpis.month_bounds(y, m)
+        opex_series.append(kpis.costs(conn, None, s, e, capex=False))
+        capex_series.append(kpis.costs(conn, None, s, e, capex=True))
+
+    def category_breakdown(start=None, end=None):
+        clause, params = ("AND date>=? AND date<?", (start, end)) if start else ("", ())
         return conn.execute(
-            f"""SELECT category, SUM(amount) amt, COUNT(*) n FROM expense_items
-                WHERE category NOT IN ('booking_income') {where_extra}
+            f"""SELECT category, SUM(amount) amt, COUNT(*) n FROM transactions
+                WHERE direction='expense' AND category != 'reconciliation' {clause}
                 GROUP BY category ORDER BY amt DESC""",
             params,
         ).fetchall()
 
-    this_month_categories = category_breakdown("AND year=? AND month=?", (year, month))
-    all_time_categories = category_breakdown()
-
     return render_template(
         "opex_capex.html", active="opex_capex", all_properties=get_properties(conn), active_property=None,
         current_month=f"{MONTH_NAMES[month]} {year}", rows=rows,
-        this_month_categories=this_month_categories, all_time_categories=all_time_categories,
-        months_json=json.dumps(months),
-        opex_json=json.dumps([r["opex"] or 0 for r in months_rows]),
-        capex_json=json.dumps([r["capex"] or 0 for r in months_rows]),
+        this_month_categories=category_breakdown(start, end), all_time_categories=category_breakdown(),
+        months_json=json.dumps(months), opex_json=json.dumps(opex_series), capex_json=json.dumps(capex_series),
     )
 
 
@@ -351,52 +246,38 @@ def property_page(property_id):
         flash(f"Unknown property '{property_id}'.")
         return redirect(url_for("index"))
 
-    year, month = current_year_month(conn)
-    py, pm = prior_month(year, month)
-    series = full_series(conn, property_id)
-    by_key = {(r["year"], r["month"]): r for r in series}
-    current = by_key.get((year, month))
-    previous = by_key.get((py, pm))
+    year, month = kpis.current_period(conn)
+    tiles, cur, prev = tiles_for(conn, property_id, year, month)
+    if f"{year}-{month:02d}" not in kpis.months_with_data(conn, property_id):
+        tiles = []
 
-    tiles = []
-    if current:
-        tiles.append({"label": f"Revenue — {MONTH_NAMES[month]} {year}", "value": f"£{(current['income'] or 0):,.0f}",
-                       "delta": pct_delta(current["income"] or 0, previous["income"] or 0) if previous else None})
-        tiles.append({"label": "Net profit", "value": f"£{(current['net_profit'] or 0):,.0f}",
-                       "delta": pct_delta(current["net_profit"] or 0, previous["net_profit"] or 0) if previous else None})
-        tiles.append({"label": "Occupancy", "value": f"{(current['occupancy'] or 0) * 100:.0f}%",
-                       "delta": pct_delta(current["occupancy"] or 0, previous["occupancy"] or 0) if previous else None})
-        tiles.append({"label": "Days booked", "value": int(current["days_booked"] or 0),
-                       "delta": pct_delta(current["days_booked"] or 0, previous["days_booked"] or 0) if previous else None})
+    target = target_row(conn, property_id, year, month)
+    rev_target = (target["revenue_target"] if target else 0) or 0
+    goal_progress = round(cur["revenue"] / rev_target * 100, 1) if rev_target else None
 
-    goal = goal_row(conn, property_id, year, month)
-    income = (current["income"] or 0) if current else 0
-    target = (goal["income_target"] if goal else 0) or 0
-    goal_progress = round(income / target * 100, 1) if target else None
-
-    expenses = conn.execute(
-        """SELECT * FROM expense_items WHERE property_id=?
-           ORDER BY year DESC, month DESC, id DESC LIMIT 60""",
+    transactions = conn.execute(
+        """SELECT *, CAST(strftime('%Y', date) AS INTEGER) AS year, CAST(strftime('%m', date) AS INTEGER) AS month
+           FROM transactions WHERE property_id=? ORDER BY date DESC, id DESC LIMIT 60""",
         (property_id,),
     ).fetchall()
-
     documents = conn.execute(
         "SELECT * FROM documents WHERE property_id=? ORDER BY uploaded_at DESC", (property_id,)
     ).fetchall()
 
-    yoy = yoy_pairs(series, (year, month))
+    series = kpis.monthly_series(conn, property_id)
+    yoy = yoy_pairs(conn, property_id, (year, month))
 
     return render_template(
         "property.html", active="property", all_properties=get_properties(conn),
-        active_property=property_id, prop=prop, tiles=tiles, goal=goal,
+        active_property=property_id, prop=prop, tiles=tiles, goal=target,
         goal_progress=goal_progress, year=year, month=month, month_name=MONTH_NAMES[month],
-        expenses=expenses, documents=documents, yoy=yoy,
+        expenses=transactions, documents=documents, yoy=yoy,
         extraction_available=extraction.available(),
-        months_json=json.dumps([f"{r['year']}-{r['month']:02d}" for r in series]),
-        income_json=json.dumps([r["income"] or 0 for r in series]),
-        profit_json=json.dumps([r["net_profit"] or 0 for r in series]),
-        costs_json=json.dumps([abs(r["total_costs"] or 0) for r in series]),
-        occupancy_json=json.dumps([round((r["occupancy"] or 0) * 100, 1) for r in series]),
+        months_json=json.dumps([s["ym"] for s in series]),
+        income_json=json.dumps([s["revenue"] for s in series]),
+        profit_json=json.dumps([s["net_profit"] for s in series]),
+        costs_json=json.dumps([s["costs"] for s in series]),
+        occupancy_json=json.dumps([round(s["occupancy"] * 100, 1) for s in series]),
     )
 
 
@@ -409,7 +290,7 @@ def add_apartment():
         flash("Give the new apartment a name.")
         return redirect(url_for("index"))
     slug = db.unique_slug(conn, db.slugify(name))
-    conn.execute("INSERT INTO properties (id, code, name, address) VALUES (?,?,?,?)",
+    conn.execute("INSERT INTO properties (id, code, name, address, type) VALUES (?,?,?,?,'flat')",
                  (slug, slug.upper()[:10], name, address))
     conn.commit()
     flash(f"Added {name}. Upload its first document or add an entry to get it on the board.")
@@ -419,19 +300,19 @@ def add_apartment():
 @app.route("/property/<property_id>/goal", methods=["POST"])
 def update_goal(property_id):
     conn = db.get_conn()
-    year, month = current_year_month(conn)
+    year, month = kpis.current_period(conn)
     try:
-        income_target = float(request.form["income_target"])
+        revenue_target = float(request.form["income_target"])
         profit_target = float(request.form["profit_target"])
     except (KeyError, ValueError):
         flash("Enter numbers for the goal fields.")
         return redirect(request.referrer or url_for("index"))
     conn.execute(
-        """INSERT INTO goals (property_id, year, month, income_target, profit_target, source)
+        """INSERT INTO targets (property_id, year, month, revenue_target, profit_target, source)
            VALUES (?,?,?,?,?,'manual')
            ON CONFLICT(property_id, year, month) DO UPDATE SET
-             income_target=excluded.income_target, profit_target=excluded.profit_target""",
-        (property_id, year, month, income_target, profit_target),
+             revenue_target=excluded.revenue_target, profit_target=excluded.profit_target""",
+        (property_id, year, month, revenue_target, profit_target),
     )
     conn.commit()
     flash("Goal updated.")
@@ -452,49 +333,161 @@ def sync_calendar(property_id):
         return redirect(url_for("property_page", property_id=property_id))
 
     try:
-        nights = ical_sync.sync(url)
+        ics_text = ical_sync.fetch(url)
+        events = ical_sync.parse_events(ics_text)
     except ValueError as e:
         flash(str(e))
         return redirect(url_for("property_page", property_id=property_id))
 
-    conn.execute(
-        "UPDATE properties SET ical_url=?, ical_synced_at=datetime('now') WHERE id=?",
-        (url, property_id),
-    )
-    updated = 0
-    for (year, month), n in nights.items():
-        if merge_calendar_month(conn, property_id, year, month, n):
-            updated += 1
+    conn.execute("UPDATE properties SET ical_url=?, ical_synced_at=datetime('now') WHERE id=?", (url, property_id))
+    added = skipped = 0
+    for check_in, check_out in events:
+        exists = conn.execute(
+            "SELECT 1 FROM bookings WHERE property_id=? AND check_in=? AND check_out=? AND source='ical'",
+            (property_id, check_in.isoformat(), check_out.isoformat()),
+        ).fetchone()
+        if exists:
+            skipped += 1
+            continue
+        conn.execute(
+            """INSERT INTO bookings (property_id, platform, check_in, check_out,
+                                      gross_revenue, platform_fees, cleaning_fee, net_revenue, status, source)
+               VALUES (?,'airbnb',?,?,0,0,0,0,'confirmed','ical')""",
+            (property_id, check_in.isoformat(), check_out.isoformat()),
+        )
+        added += 1
     conn.commit()
-    skipped = len(nights) - updated
-    msg = f"Synced occupancy for {updated} month(s) from the calendar."
-    if skipped:
-        msg += f" ({skipped} month(s) already had a recorded figure and were left alone.)"
-    flash(msg)
+    flash(f"Synced calendar: {added} new reservation(s) added" + (f", {skipped} already on file." if skipped else "."))
     return redirect(url_for("property_page", property_id=property_id))
 
 
 @app.route("/property/<property_id>/expense", methods=["POST"])
 def add_expense(property_id):
     conn = db.get_conn()
-    default_year, default_month = current_year_month(conn)
+    today = datetime.date.today()
     try:
         amount = abs(float(request.form["amount"]))
-        year = int(request.form.get("year") or default_year)
-        month = int(request.form.get("month") or default_month)
+        year = int(request.form.get("year") or today.year)
+        month = int(request.form.get("month") or today.month)
     except (KeyError, ValueError):
         flash("Enter a valid amount.")
         return redirect(url_for("property_page", property_id=property_id))
+    category = request.form.get("category", "purchase")
+    direction = "income" if category == "booking_income" else "expense"
     conn.execute(
-        """INSERT INTO expense_items (property_id, year, month, vendor, description, amount, category, source)
+        """INSERT INTO transactions (property_id, date, vendor, description, amount, direction, category, source)
            VALUES (?,?,?,?,?,?,?,'manual')""",
-        (property_id, year, month, request.form.get("vendor", ""), request.form.get("description", ""),
-         amount, request.form.get("category", "purchase")),
+        (property_id, f"{year}-{month:02d}-01", request.form.get("vendor", ""),
+         request.form.get("description", ""), amount, direction, category),
     )
-    recompute_derived_month(conn, property_id, year, month)
     conn.commit()
     flash("Expense added.")
     return redirect(url_for("property_page", property_id=property_id))
+
+
+def _period_from_hint(hint):
+    if hint and re.match(r"^\d{4}-\d{2}$", hint):
+        y, m = hint.split("-")
+        return int(y), int(m)
+    return None
+
+
+def find_duplicate(conn, property_id, item):
+    if not property_id or not item.get("amount"):
+        return False
+    date = item.get("date") or ""
+    year_month = date[:7] if re.match(r"^\d{4}-\d{2}", date) else None
+    if not year_month:
+        return False
+    start, end = kpis.month_bounds(*map(int, year_month.split("-")))
+    row = conn.execute(
+        """SELECT 1 FROM transactions WHERE property_id=? AND date>=? AND date<?
+           AND ABS(amount - ?) < 0.01 AND (vendor = ? OR description = ?) LIMIT 1""",
+        (property_id, start, end, item["amount"], item.get("vendor"), item.get("description")),
+    ).fetchone()
+    return bool(row)
+
+
+def _save_upload(conn, file, doc_type, property_id):
+    """Handles a single uploaded file: saves it, extracts line items,
+    guesses a property when none was given, flags likely duplicates.
+    Returns the new document id."""
+    dest_dir = UPLOADS / (property_id or "_unassigned")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{Path(file.filename).name}"
+    dest_path = dest_dir / safe_name
+    file.save(dest_path)
+
+    mime_type = file.mimetype or mimetypes.guess_type(file.filename)[0]
+    cur = conn.execute(
+        "INSERT INTO documents (property_id, filename, stored_path, doc_type, status) VALUES (?,?,?,?,'pending')",
+        (property_id, file.filename, str(dest_path), doc_type),
+    )
+    doc_id = cur.lastrowid
+    conn.commit()
+
+    result = extraction.extract(dest_path, mime_type)
+    if result is None:
+        flash(f"Saved {file.filename}. No extraction available for this file type/no API key, so add its line items by hand below.")
+        return doc_id
+
+    items = result["items"]
+    detected_property_id = property_id
+    if not detected_property_id and result.get("document_hint"):
+        properties = [dict(p) for p in get_properties(conn, include_overhead=False)]
+        guessed_id, confidence = extraction.guess_property(result["document_hint"], properties)
+        if guessed_id:
+            detected_property_id = guessed_id
+
+    period = _period_from_hint(result.get("period_hint"))
+    for item in items:
+        item["possible_duplicate"] = find_duplicate(conn, detected_property_id, item)
+
+    conn.execute(
+        """UPDATE documents SET status='extracted', extracted_json=?, property_id=?,
+             detected_year=?, detected_month=? WHERE id=?""",
+        (json.dumps(items), detected_property_id, period[0] if period else None,
+         period[1] if period else None, doc_id),
+    )
+    conn.commit()
+    dupes = sum(1 for i in items if i["possible_duplicate"])
+    msg = f"Extracted {len(items)} line item(s) from {file.filename} — review and confirm below."
+    if dupes:
+        msg += f" {dupes} look like they might already be on file."
+    flash(msg)
+    return doc_id
+
+
+@app.route("/documents")
+def documents_inbox():
+    conn = db.get_conn()
+    docs = conn.execute("SELECT * FROM documents ORDER BY uploaded_at DESC LIMIT 200").fetchall()
+    properties_by_id = {p["id"]: p for p in get_properties(conn)}
+    rows = []
+    for d in docs:
+        rows.append({**dict(d), "property_name": properties_by_id.get(d["property_id"], {}).get("name", "Unassigned")})
+    return render_template(
+        "documents.html", active="documents", all_properties=get_properties(conn), active_property=None,
+        docs=rows,
+    )
+
+
+@app.route("/documents/upload", methods=["POST"])
+def upload_to_inbox():
+    conn = db.get_conn()
+    files = request.files.getlist("document")
+    files = [f for f in files if f and f.filename]
+    if not files:
+        flash("Choose at least one file first.")
+        return redirect(url_for("documents_inbox"))
+    doc_type = request.form.get("doc_type", "other")
+    property_id = request.form.get("property_id") or None
+    last_doc_id = None
+    for file in files:
+        last_doc_id = _save_upload(conn, file, doc_type, property_id)
+    if len(files) == 1:
+        return redirect(url_for("review_document", doc_id=last_doc_id))
+    return redirect(url_for("documents_inbox"))
 
 
 @app.route("/property/<property_id>/upload", methods=["POST"])
@@ -504,30 +497,7 @@ def upload_document(property_id):
     if not file or not file.filename:
         flash("Choose a file first.")
         return redirect(url_for("property_page", property_id=property_id))
-
-    dest_dir = UPLOADS / property_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{Path(file.filename).name}"
-    dest_path = dest_dir / safe_name
-    file.save(dest_path)
-
-    mime_type = file.mimetype or mimetypes.guess_type(file.filename)[0]
-    cur = conn.execute(
-        "INSERT INTO documents (property_id, filename, stored_path, doc_type, status) VALUES (?,?,?,?,'pending')",
-        (property_id, file.filename, str(dest_path), request.form.get("doc_type", "other")),
-    )
-    doc_id = cur.lastrowid
-    conn.commit()
-
-    items = extraction.extract(dest_path, mime_type)
-    if items is not None:
-        conn.execute("UPDATE documents SET status='extracted', extracted_json=? WHERE id=?",
-                     (json.dumps(items), doc_id))
-        conn.commit()
-        flash(f"Extracted {len(items)} line item(s) — review and confirm below.")
-    else:
-        flash("Saved the file. No extraction key configured, so add its line items by hand below.")
-
+    doc_id = _save_upload(conn, file, request.form.get("doc_type", "other"), property_id)
     return redirect(url_for("review_document", doc_id=doc_id))
 
 
@@ -541,11 +511,12 @@ def review_document(doc_id):
     prop = get_property(conn, doc["property_id"])
     items = json.loads(doc["extracted_json"]) if doc["extracted_json"] else []
     today = datetime.date.today()
-    year, month = today.year, today.month
+    year = doc["detected_year"] or today.year
+    month = doc["detected_month"] or today.month
     return render_template(
-        "review_document.html", active="property", all_properties=get_properties(conn),
+        "review_document.html", active="documents", all_properties=get_properties(conn),
         active_property=doc["property_id"], prop=prop, doc=doc, items=items,
-        year=year, month=month,
+        flats=get_properties(conn, include_overhead=False), year=year, month=month,
     )
 
 
@@ -557,6 +528,8 @@ def confirm_document(doc_id):
         flash("Unknown document.")
         return redirect(url_for("index"))
 
+    included = set(request.form.getlist("include"))  # row indices as strings
+    property_ids = request.form.getlist("property_id")
     vendors = request.form.getlist("vendor")
     descriptions = request.form.getlist("description")
     amounts = request.form.getlist("amount")
@@ -565,30 +538,31 @@ def confirm_document(doc_id):
     months = request.form.getlist("month")
 
     added = 0
-    touched_periods = set()
-    for vendor, desc, amount_s, category, year_s, month_s in zip(vendors, descriptions, amounts, categories, years, months):
-        if not amount_s:
+    final_property_id = doc["property_id"]
+    for i, (pid, vendor, desc, amount_s, category, year_s, month_s) in enumerate(
+        zip(property_ids, vendors, descriptions, amounts, categories, years, months)
+    ):
+        if str(i) not in included or not amount_s or not pid:
             continue
         try:
             amount = abs(float(amount_s))
         except ValueError:
             continue
         year, month = int(year_s), int(month_s)
+        direction = "income" if category == "booking_income" else "expense"
         conn.execute(
-            """INSERT INTO expense_items (property_id, year, month, vendor, description, amount, category, source, document_id)
+            """INSERT INTO transactions (property_id, date, vendor, description, amount, direction, category, source, document_id)
                VALUES (?,?,?,?,?,?,?,'upload',?)""",
-            (doc["property_id"], year, month, vendor, desc, amount, category, doc_id),
+            (pid, f"{year}-{month:02d}-01", vendor, desc, amount, direction, category, doc_id),
         )
         added += 1
-        touched_periods.add((year, month))
+        final_property_id = pid
 
-    for year, month in touched_periods:
-        recompute_derived_month(conn, doc["property_id"], year, month)
-
-    conn.execute("UPDATE documents SET status='confirmed' WHERE id=?", (doc_id,))
+    conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?",
+                 (final_property_id, doc_id))
     conn.commit()
     flash(f"Added {added} line item(s) to the ledger.")
-    return redirect(url_for("property_page", property_id=doc["property_id"]))
+    return redirect(url_for("property_page", property_id=final_property_id) if final_property_id else url_for("documents_inbox"))
 
 
 if __name__ == "__main__":
