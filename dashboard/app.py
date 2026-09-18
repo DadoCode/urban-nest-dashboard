@@ -19,6 +19,7 @@ from flask import Flask, request
 
 import db
 from routes import register_blueprints
+from services.completeness import seed_defaults
 
 ROOT = Path(__file__).resolve().parent.parent
 UPLOADS = Path(os.environ["DASHBOARD_UPLOADS_PATH"]) if os.environ.get("DASHBOARD_UPLOADS_PATH") else ROOT / "data" / "uploads"
@@ -30,6 +31,13 @@ RECENT_MAX = 5
 def create_app():
     flask_app = Flask(__name__)
     flask_app.secret_key = "urban-nest-dashboard"  # local-only tool, no auth/session sensitivity
+
+    db.ensure_schema()
+    conn = db.get_conn()
+    for p in conn.execute("SELECT id FROM properties WHERE type='flat'"):
+        seed_defaults(conn, p["id"])
+    conn.commit()
+    conn.close()
 
     @flask_app.before_request
     def _setup():

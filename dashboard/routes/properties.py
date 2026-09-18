@@ -9,6 +9,7 @@ import services.ical_sync as ical_sync
 import services.kpis as kpis
 from services.common import (MONTH_NAMES, get_properties, get_property, pct_delta,
                               target_row, tiles_for, yoy_pairs)
+from services.completeness import completeness_for, seed_defaults
 
 bp = Blueprint("properties", __name__)
 
@@ -36,15 +37,13 @@ def index():
         snap = kpis.kpi_snapshot(conn, p["id"], start, end)
         target = target_row(conn, p["id"], year, month)
         rev_target = (target["revenue_target"] if target else 0) or 0
-        has_docs = bool(conn.execute(
-            "SELECT 1 FROM documents WHERE property_id=? AND uploaded_at >= ? LIMIT 1", (p["id"], start)
-        ).fetchone())
+        completeness = completeness_for(conn, p["id"], start, end)
         rows.append({
             "id": p["id"], "name": p["name"], "active": p["active"],
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"], "adr": snap["adr"], "revpar": snap["revpar"],
             "vs_target": round(snap["revenue"] / rev_target * 100, 1) if rev_target else None,
-            "has_docs": has_docs,
+            "completeness": completeness,
         })
     rows.sort(key=lambda r: r["revenue"], reverse=True)
 
@@ -245,6 +244,7 @@ def add():
     slug = db.unique_slug(conn, db.slugify(name))
     conn.execute("INSERT INTO properties (id, code, name, address, type) VALUES (?,?,?,?,'flat')",
                  (slug, slug.upper()[:10], name, address))
+    seed_defaults(conn, slug)
     conn.commit()
     flash(f"Added {name}. Upload its first document or add an entry to get it on the board.")
     return redirect(url_for("properties.detail", property_id=slug))
@@ -257,15 +257,18 @@ def update_goal(property_id):
     try:
         revenue_target = float(request.form["income_target"])
         profit_target = float(request.form["profit_target"])
+        occ_raw = request.form.get("occupancy_target", "").strip()
+        occupancy_target = float(occ_raw) if occ_raw else None
     except (KeyError, ValueError):
         flash("Enter numbers for the goal fields.")
         return redirect(request.referrer or url_for("overview.index"))
     conn.execute(
-        """INSERT INTO targets (property_id, year, month, revenue_target, profit_target, source)
-           VALUES (?,?,?,?,?,'manual')
+        """INSERT INTO targets (property_id, year, month, revenue_target, profit_target, occupancy_target, source)
+           VALUES (?,?,?,?,?,?,'manual')
            ON CONFLICT(property_id, year, month) DO UPDATE SET
-             revenue_target=excluded.revenue_target, profit_target=excluded.profit_target""",
-        (property_id, year, month, revenue_target, profit_target),
+             revenue_target=excluded.revenue_target, profit_target=excluded.profit_target,
+             occupancy_target=excluded.occupancy_target""",
+        (property_id, year, month, revenue_target, profit_target, occupancy_target),
     )
     conn.commit()
     flash("Goal updated.")

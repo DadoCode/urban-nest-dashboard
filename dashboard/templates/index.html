@@ -8,7 +8,7 @@
   </div>
 
   <div class="tiles" style="margin-top:16px">
-    {% for t in tiles %}
+    {% for t in primary_tiles %}
       <div class="tile">
         <div class="label">{{ t.label }}</div>
         <div class="value">{{ t.value }}</div>
@@ -23,9 +23,52 @@
     {% endfor %}
   </div>
 
+  <div class="tiles tiles-secondary">
+    {% for t in secondary_tiles %}
+      <div class="tile">
+        <div class="label">{{ t.label }}</div>
+        <div class="value">{{ t.value }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="grid-2" style="margin-top:20px">
+    {% if target_bars %}
+      <div class="card">
+        <h2 style="margin-top:0">Performance against target — {{ ctx.display }}</h2>
+        {% for b in target_bars %}
+          <div class="target-bar-row">
+            <div class="target-labels">
+              <span class="name">{{ b.label }}</span>
+              <span class="figures">{{ b.actual_fmt }} / {{ b.target_fmt }} · {{ b.pct }}%</span>
+            </div>
+            <div class="target-bar-track"><div class="target-bar-fill {{ 'over' if b.pct >= 100 else '' }}" style="width: {{ [b.pct, 100]|min }}%"></div></div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if completeness %}
+      <div class="card">
+        <h2 style="margin-top:0">Data completeness — this month</h2>
+        <p class="subtitle" style="margin-bottom:10px">{{ completeness.overall }}% complete across {{ completeness.rows|length }} propert{{ 'y' if completeness.rows|length == 1 else 'ies' }}</p>
+        {% if completeness.gaps %}
+          {% for g in completeness.gaps %}
+            <div class="completeness-row">
+              <span>{{ g.name }}</span>
+              <span class="note">missing {% for m in g.missing %}{{ doc_type_labels.get(m, m) }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="note">Every configured property has its expected documents in for this month.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
   {% if insights %}
     <div class="card">
-      <h2 style="margin-top:0">Insights</h2>
+      <h2 style="margin-top:0">Attention <span class="status-pill">{{ insights|length }}</span></h2>
       <ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px">
         {% for i in insights %}
           <li style="color: {{ 'var(--red)' if i.type == 'warning' else ('var(--accent-ink)' if i.type == 'positive' else 'var(--ink-soft)') }}; font-size:0.9rem">{{ i.text }}</li>

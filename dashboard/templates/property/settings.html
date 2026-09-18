@@ -23,6 +23,7 @@
     <form class="goal-form" method="post" action="{{ url_for('properties.update_goal', property_id=prop.id) }}">
       <label>Revenue target £ <input type="number" step="10" name="income_target" value="{{ goal.revenue_target if goal and goal.revenue_target is not none else '' }}"></label>
       <label>Profit target £ <input type="number" step="10" name="profit_target" value="{{ goal.profit_target if goal and goal.profit_target is not none else '' }}"></label>
+      <label>Occupancy target % <input type="number" step="1" min="0" max="100" name="occupancy_target" value="{{ goal.occupancy_target if goal and goal.occupancy_target is not none else '' }}"></label>
       <button type="submit">Save target</button>
     </form>
   </div>

@@ -120,6 +120,24 @@ def booked_nights(conn, property_id, start, end):
     return total
 
 
+def reservation_count(conn, property_id, start, end):
+    """Real reservations only -- excludes the synthetic 'monthly-aggregate'
+    rows the historical Excel import uses to carry a month's occupancy
+    figure without a reconstructable reservation-level record."""
+    clause, params = _prop_clause(property_id)
+    return conn.execute(
+        f"""SELECT COUNT(*) FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
+            AND check_in<? AND check_out>? {clause}""",
+        (end, start, *params),
+    ).fetchone()[0]
+
+
+def avg_stay(conn, property_id, start, end):
+    """Average Length of Stay: occupied nights / reservations."""
+    n = reservation_count(conn, property_id, start, end)
+    return booked_nights(conn, property_id, start, end) / n if n else 0.0
+
+
 def available_nights(conn, property_id, start, end):
     days = (datetime.date.fromisoformat(end) - datetime.date.fromisoformat(start)).days
     if property_id:

@@ -12,6 +12,7 @@
   --accent-dim: #0ea47214;
   --accent-ink: #056a4a;
   --amber: #e0932e;
+  --amber-dim: #e0932e1c;
   --violet: #7c5cfc;
   --blue: #2f7de1;
   --red: #e0483f;
@@ -174,6 +175,27 @@ h2 { font-size: 1.02rem; font-weight: 700; margin: 28px 0 14px; color: var(--ink
 .delta.up { color: var(--accent-ink); background: var(--green-dim); }
 .delta.down { color: var(--red); background: var(--red-dim); }
 .delta.flat { color: var(--muted); background: rgba(124,141,135,0.12); }
+
+.tiles-secondary { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 10px; }
+.tiles-secondary .tile { box-shadow: none; padding: 12px 14px; }
+.tiles-secondary .tile .value { font-size: 1.1rem; font-weight: 700; margin-top: 3px; }
+.tiles-secondary .tile .label { font-size: 0.66rem; }
+
+/* ---------- target bars ---------- */
+
+.target-bar-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.target-bar-row:last-child { margin-bottom: 0; }
+.target-bar-row .target-labels { display: flex; justify-content: space-between; font-size: 0.85rem; }
+.target-bar-row .target-labels .name { font-weight: 600; }
+.target-bar-row .target-labels .figures { color: var(--muted); }
+.target-bar-track { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.target-bar-fill { height: 100%; border-radius: 999px; background: var(--accent); }
+.target-bar-fill.over { background: var(--accent-ink); }
+
+/* ---------- completeness ---------- */
+
+.completeness-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 0.87rem; }
+.completeness-row:last-child { border-bottom: none; }
 
 /* ---------- cards ---------- */
 
