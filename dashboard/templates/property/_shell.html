@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ prop.name }} — Urban Nest Estates{% endblock %}
+{% block content %}
+  <h1>{{ prop.name }}</h1>
+  <p class="subtitle" style="margin-bottom:0">{{ prop.address }}</p>
+
+  <div class="tabs">
+    <a href="{{ url_for('properties.detail', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'overview' else '' }}">Overview</a>
+    {% if not is_overhead %}
+      <a href="{{ url_for('properties.bookings', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'bookings' else '' }}">Bookings</a>
+    {% endif %}
+    <a href="{{ url_for('properties.expenses_tab', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'expenses' else '' }}">Expenses</a>
+    <a href="{{ url_for('properties.documents_tab', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'documents' else '' }}">Documents</a>
+    <a href="{{ url_for('properties.settings_tab', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'settings' else '' }}">Settings</a>
+  </div>
+
+  {% block tab_content %}{% endblock %}
+{% endblock %}

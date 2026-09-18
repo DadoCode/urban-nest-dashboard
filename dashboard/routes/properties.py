@@ -8,7 +8,7 @@ import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
 from services.common import (MONTH_NAMES, get_properties, get_property, pct_delta,
-                              target_row, target_total, tiles_for, yoy_pairs)
+                              target_row, tiles_for, yoy_pairs)
 
 bp = Blueprint("properties", __name__)
 
@@ -55,16 +55,37 @@ def index():
     )
 
 
-@bp.route("/property/<property_id>")
+def _load(conn, property_id):
+    """Common lookups every tab needs: the property row, whether it's the
+    overhead cost-centre, and the "current" year/month those tabs report on."""
+    prop = get_property(conn, property_id)
+    if not prop:
+        return None, None, None, None
+    is_overhead = prop["type"] == "overhead"
+    year, month = kpis.current_period(conn)
+    return prop, is_overhead, year, month
+
+
+def _checklist(conn, property_id, is_overhead, year, month):
+    has_target = bool(target_row(conn, property_id, year, month))
+    has_calendar = bool(conn.execute("SELECT ical_url FROM properties WHERE id=?", (property_id,)).fetchone()["ical_url"])
+    has_documents = bool(conn.execute("SELECT 1 FROM documents WHERE property_id=? LIMIT 1", (property_id,)).fetchone())
+    return {"has_target": has_target, "has_calendar": has_calendar, "has_documents": has_documents}
+
+
+def _remember_visit(resp, property_id):
+    from app import RECENT_COOKIE, RECENT_MAX
+    prior = [i for i in request.cookies.get(RECENT_COOKIE, "").split(",") if i and i != property_id]
+    resp.set_cookie(RECENT_COOKIE, ",".join([property_id, *prior][:RECENT_MAX]), max_age=60 * 60 * 24 * 90)
+
+
+@bp.route("/properties/<property_id>")
 def detail(property_id):
     conn = db.get_conn()
-    prop = get_property(conn, property_id)
+    prop, is_overhead, year, month = _load(conn, property_id)
     if not prop:
         flash(f"Unknown property '{property_id}'.")
         return redirect(url_for("overview.index"))
-
-    is_overhead = prop["type"] == "overhead"
-    year, month = kpis.current_period(conn)
 
     if is_overhead:
         start, end = kpis.month_bounds(year, month)
@@ -82,24 +103,14 @@ def detail(property_id):
         rev_target = (target["revenue_target"] if target else 0) or 0
         goal_progress = round(cur["revenue"] / rev_target * 100, 1) if rev_target else None
 
-    transactions = conn.execute(
-        """SELECT *, CAST(strftime('%Y', date) AS INTEGER) AS year, CAST(strftime('%m', date) AS INTEGER) AS month
-           FROM transactions WHERE property_id=? ORDER BY date DESC, id DESC LIMIT 60""",
-        (property_id,),
-    ).fetchall()
-    documents = conn.execute(
-        "SELECT * FROM documents WHERE property_id=? ORDER BY uploaded_at DESC", (property_id,)
-    ).fetchall()
-
     series = kpis.monthly_series(conn, property_id)
     yoy = yoy_pairs(conn, property_id, (year, month))
 
     resp = make_response(render_template(
-        "property.html", active="properties", all_properties=get_properties(conn),
-        active_property=property_id, prop=prop, is_overhead=is_overhead, tiles=tiles, goal=target,
-        goal_progress=goal_progress, year=year, month=month, month_name=MONTH_NAMES[month],
-        expenses=transactions, documents=documents, yoy=yoy,
-        extraction_available=extraction.available(),
+        "property/overview.html", active="properties", all_properties=get_properties(conn),
+        active_property=property_id, active_tab="overview",
+        prop=prop, is_overhead=is_overhead, tiles=tiles, goal=target, goal_progress=goal_progress,
+        year=year, month=month, month_name=MONTH_NAMES[month], yoy=yoy,
         months_json=json.dumps([s["ym"] for s in series]),
         income_json=json.dumps([s["revenue"] for s in series]),
         profit_json=json.dumps([s["net_profit"] for s in series]),
@@ -107,10 +118,120 @@ def detail(property_id):
         occupancy_json=json.dumps([round(s["occupancy"] * 100, 1) for s in series]),
     ))
     if not is_overhead:
-        from app import RECENT_COOKIE, RECENT_MAX
-        prior = [i for i in request.cookies.get(RECENT_COOKIE, "").split(",") if i and i != property_id]
-        resp.set_cookie(RECENT_COOKIE, ",".join([property_id, *prior][:RECENT_MAX]), max_age=60 * 60 * 24 * 90)
+        _remember_visit(resp, property_id)
     return resp
+
+
+@bp.route("/properties/<property_id>/bookings")
+def bookings(property_id):
+    conn = db.get_conn()
+    prop, is_overhead, year, month = _load(conn, property_id)
+    if not prop:
+        flash(f"Unknown property '{property_id}'.")
+        return redirect(url_for("overview.index"))
+    if is_overhead:
+        return redirect(url_for("properties.detail", property_id=property_id))
+
+    start, end = kpis.month_bounds(year, month)
+    rows = conn.execute(
+        """SELECT *, CAST(julianday(check_out) - julianday(check_in) AS INTEGER) AS nights
+           FROM bookings WHERE property_id=? AND status='confirmed' AND reservation_id != 'monthly-aggregate'
+           ORDER BY check_in DESC LIMIT 100""",
+        (property_id,),
+    ).fetchall()
+
+    resp = make_response(render_template(
+        "property/bookings.html", active="properties", all_properties=get_properties(conn),
+        active_property=property_id, active_tab="bookings",
+        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
+        booked_nights=kpis.booked_nights(conn, property_id, start, end),
+        adr=kpis.adr(conn, property_id, start, end),
+        bookings=rows,
+    ))
+    _remember_visit(resp, property_id)
+    return resp
+
+
+@bp.route("/properties/<property_id>/expenses")
+def expenses_tab(property_id):
+    conn = db.get_conn()
+    prop, is_overhead, year, month = _load(conn, property_id)
+    if not prop:
+        flash(f"Unknown property '{property_id}'.")
+        return redirect(url_for("overview.index"))
+
+    transactions = conn.execute(
+        """SELECT *, CAST(strftime('%Y', date) AS INTEGER) AS year, CAST(strftime('%m', date) AS INTEGER) AS month
+           FROM transactions WHERE property_id=? ORDER BY date DESC, id DESC LIMIT 60""",
+        (property_id,),
+    ).fetchall()
+
+    resp = make_response(render_template(
+        "property/expenses.html", active="properties", all_properties=get_properties(conn),
+        active_property=property_id, active_tab="expenses",
+        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
+        expenses=transactions,
+    ))
+    if not is_overhead:
+        _remember_visit(resp, property_id)
+    return resp
+
+
+@bp.route("/properties/<property_id>/documents")
+def documents_tab(property_id):
+    conn = db.get_conn()
+    prop, is_overhead, year, month = _load(conn, property_id)
+    if not prop:
+        flash(f"Unknown property '{property_id}'.")
+        return redirect(url_for("overview.index"))
+
+    documents = conn.execute(
+        "SELECT * FROM documents WHERE property_id=? ORDER BY uploaded_at DESC", (property_id,)
+    ).fetchall()
+
+    resp = make_response(render_template(
+        "property/documents.html", active="properties", all_properties=get_properties(conn),
+        active_property=property_id, active_tab="documents",
+        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
+        documents=documents, extraction_available=extraction.available(),
+    ))
+    if not is_overhead:
+        _remember_visit(resp, property_id)
+    return resp
+
+
+@bp.route("/properties/<property_id>/settings")
+def settings_tab(property_id):
+    conn = db.get_conn()
+    prop, is_overhead, year, month = _load(conn, property_id)
+    if not prop:
+        flash(f"Unknown property '{property_id}'.")
+        return redirect(url_for("overview.index"))
+
+    target = target_row(conn, property_id, year, month)
+    goal_progress = None
+    if not is_overhead:
+        rev_target = (target["revenue_target"] if target else 0) or 0
+        if rev_target:
+            start, end = kpis.month_bounds(year, month)
+            cur_rev = kpis.revenue(conn, property_id, start, end)
+            goal_progress = round(cur_rev / rev_target * 100, 1)
+
+    resp = make_response(render_template(
+        "property/settings.html", active="properties", all_properties=get_properties(conn),
+        active_property=property_id, active_tab="settings",
+        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
+        goal=target, goal_progress=goal_progress,
+        checklist=_checklist(conn, property_id, is_overhead, year, month),
+    ))
+    if not is_overhead:
+        _remember_visit(resp, property_id)
+    return resp
+
+
+@bp.route("/property/<property_id>")
+def legacy_detail(property_id):
+    return redirect(url_for("properties.detail", property_id=property_id), code=301)
 
 
 @bp.route("/apartments", methods=["POST"])
@@ -148,7 +269,7 @@ def update_goal(property_id):
     )
     conn.commit()
     flash("Goal updated.")
-    return redirect(url_for("properties.detail", property_id=property_id))
+    return redirect(url_for("properties.settings_tab", property_id=property_id))
 
 
 @bp.route("/property/<property_id>/sync_calendar", methods=["POST"])
@@ -162,14 +283,14 @@ def sync_calendar(property_id):
     url = (request.form.get("ical_url") or "").strip() or prop["ical_url"]
     if not url:
         flash("Paste the calendar's export/sync URL first (Airbnb: listing → Availability → Export calendar).")
-        return redirect(url_for("properties.detail", property_id=property_id))
+        return redirect(url_for("properties.settings_tab", property_id=property_id))
 
     try:
         ics_text = ical_sync.fetch(url)
         events = ical_sync.parse_events(ics_text)
     except ValueError as e:
         flash(str(e))
-        return redirect(url_for("properties.detail", property_id=property_id))
+        return redirect(url_for("properties.settings_tab", property_id=property_id))
 
     conn.execute("UPDATE properties SET ical_url=?, ical_synced_at=datetime('now') WHERE id=?", (url, property_id))
     added = skipped = 0
@@ -190,7 +311,7 @@ def sync_calendar(property_id):
         added += 1
     conn.commit()
     flash(f"Synced calendar: {added} new reservation(s) added" + (f", {skipped} already on file." if skipped else "."))
-    return redirect(url_for("properties.detail", property_id=property_id))
+    return redirect(url_for("properties.settings_tab", property_id=property_id))
 
 
 @bp.route("/property/<property_id>/expense", methods=["POST"])
@@ -203,7 +324,7 @@ def add_expense(property_id):
         month = int(request.form.get("month") or today.month)
     except (KeyError, ValueError):
         flash("Enter a valid amount.")
-        return redirect(url_for("properties.detail", property_id=property_id))
+        return redirect(url_for("properties.expenses_tab", property_id=property_id))
     category = request.form.get("category", "purchase")
     direction = "income" if category == "booking_income" else "expense"
     conn.execute(
@@ -214,4 +335,4 @@ def add_expense(property_id):
     )
     conn.commit()
     flash("Expense added.")
-    return redirect(url_for("properties.detail", property_id=property_id))
+    return redirect(url_for("properties.expenses_tab", property_id=property_id))

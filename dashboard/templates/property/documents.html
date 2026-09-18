@@ -1,0 +1,39 @@
+{% extends "property/_shell.html" %}
+{% block tab_content %}
+  <div class="card">
+    <h2 style="margin-top:0">Upload a document</h2>
+    <p class="note" style="margin-top:-6px">Amazon/Temu orders, cleaning invoices, booking-platform statements, bank statements, receipts — PDF or photo. Upload whatever came in, review the extracted lines, confirm, and this flat's numbers update automatically.
+      {% if not extraction_available %}No extraction key is configured right now, so you'll enter the line items by hand after uploading.{% else %}Claude will pull out the line items for you to review before anything's added to the ledger.{% endif %}</p>
+    <form class="upload-form" method="post" action="{{ url_for('documents.upload_property', property_id=prop.id) }}" enctype="multipart/form-data">
+      <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp" required>
+      <select name="doc_type">
+        <option value="amazon_order">Amazon / Temu order</option>
+        <option value="cleaning_invoice">Cleaning invoice</option>
+        <option value="booking_statement">Booking / Airbnb statement</option>
+        <option value="bank_statement">Bank statement</option>
+        <option value="utility_bill">Utility bill</option>
+        <option value="other">Other</option>
+      </select>
+      <button type="submit">Upload</button>
+    </form>
+  </div>
+
+  <h2>Documents on file</h2>
+  <div class="card">
+    {% if documents %}
+      <ul class="doc-list">
+        {% for d in documents %}
+          <li>
+            <span>{{ d.filename }} <span class="note">({{ d.doc_type }}, {{ d.uploaded_at }})</span></span>
+            <span>
+              <span class="status-pill {{ 'confirmed' if d.status == 'confirmed' else '' }}">{{ d.status }}</span>
+              {% if d.status != 'confirmed' %}<a href="{{ url_for('documents.review', doc_id=d.id) }}">review</a>{% endif %}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="note">No documents uploaded for this flat yet.</p>
+    {% endif %}
+  </div>
+{% endblock %}

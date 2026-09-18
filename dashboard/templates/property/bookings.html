@@ -1,0 +1,40 @@
+{% extends "property/_shell.html" %}
+{% block tab_content %}
+  <div class="tiles">
+    <div class="tile"><div class="label">Booked nights — {{ month_name }} {{ year }}</div><div class="value">{{ booked_nights }}</div></div>
+    <div class="tile"><div class="label">ADR</div><div class="value">£{{ '{:,.0f}'.format(adr) }}</div></div>
+    <div class="tile"><div class="label">Reservations on file</div><div class="value">{{ bookings|length }}</div></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Booking calendar sync</h2>
+    {% if prop.ical_synced_at %}
+      <p class="note" style="margin-top:-6px">Last synced {{ prop.ical_synced_at }}. <a href="{{ url_for('properties.settings_tab', property_id=prop.id) }}">Change the calendar URL on Settings</a>.</p>
+    {% else %}
+      <p class="note" style="margin-top:-6px">No calendar connected yet. <a href="{{ url_for('properties.settings_tab', property_id=prop.id) }}">Add one on Settings</a> to fill in reservations automatically.</p>
+    {% endif %}
+  </div>
+
+  <h2>Reservations</h2>
+  <div class="card">
+    {% if bookings %}
+      <table>
+        <thead><tr><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th><th>Source</th></tr></thead>
+        <tbody>
+          {% for b in bookings %}
+            <tr>
+              <td>{{ b.platform or '—' }}</td>
+              <td>{{ b.check_in }}</td>
+              <td>{{ b.check_out }}</td>
+              <td class="num">{{ b.nights }}</td>
+              <td class="num">£{{ '{:,.2f}'.format(b.net_revenue) }}</td>
+              <td class="note">{{ b.source }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="note">No reservations on file for this flat yet.</p>
+    {% endif %}
+  </div>
+{% endblock %}

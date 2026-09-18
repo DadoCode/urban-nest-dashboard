@@ -1,0 +1,44 @@
+{% extends "property/_shell.html" %}
+{% block tab_content %}
+  <div class="card">
+    <h2 style="margin-top:0">Add an expense</h2>
+    <form class="mini-form" method="post" action="{{ url_for('properties.add_expense', property_id=prop.id) }}">
+      <input name="vendor" placeholder="Vendor">
+      <input name="description" placeholder="Description">
+      <input name="amount" type="number" step="0.01" placeholder="Amount £" required>
+      <select name="category">
+        <option value="purchase">Purchase</option>
+        <option value="cleaning">Cleaning</option>
+        <option value="utilities">Utilities</option>
+        <option value="booking_income">Booking income</option>
+        <option value="other">Other</option>
+      </select>
+      <select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select>
+      <select name="year"><option value="{{ year }}" selected>{{ year }}</option><option value="{{ year - 1 }}">{{ year - 1 }}</option></select>
+      <button type="submit">Add</button>
+    </form>
+  </div>
+
+  <h2>Ledger</h2>
+  <div class="card">
+    {% if expenses %}
+      <table>
+        <thead><tr><th>Month</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount</th><th>Source</th></tr></thead>
+        <tbody>
+          {% for e in expenses %}
+            <tr>
+              <td>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][e.month] }} {{ e.year }}</td>
+              <td>{{ e.vendor or '' }}</td>
+              <td>{{ e.description or '' }}</td>
+              <td>{{ e.category }}{% if e.category == 'reconciliation' %} <span class="status-pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">historical adjustment</span>{% endif %}</td>
+              <td class="num">£{{ '{:,.2f}'.format(e.amount) }}</td>
+              <td class="note">{{ e.source }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="note" style="margin-top:10px">No itemized expenses recorded for this flat yet.</p>
+    {% endif %}
+  </div>
+{% endblock %}

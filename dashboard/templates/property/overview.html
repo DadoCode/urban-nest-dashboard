@@ -1,0 +1,97 @@
+{% extends "property/_shell.html" %}
+{% block tab_content %}
+  <div class="tiles">
+    {% for t in tiles %}
+      <div class="tile">
+        <div class="label">{{ t.label }}</div>
+        <div class="value">{{ t.value }}</div>
+        {% if t.delta is not none %}
+          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior month</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  {% if not tiles %}
+    <div class="card"><p class="note">No monthly figures for {{ month_name }} {{ year }} yet — {% if is_overhead %}add an expense on the Expenses tab to start tracking shared costs.{% else %}add an expense or upload a document to start building this flat's numbers.{% endif %}</p></div>
+  {% endif %}
+
+  {% if not is_overhead and goal_progress is not none %}
+    <div class="card">
+      <h2 style="margin-top:0">Target — {{ month_name }} {{ year }}</h2>
+      <p class="subtitle" style="margin-bottom:6px">Target £{{ '{:,.0f}'.format(goal.revenue_target) }} · {{ goal_progress }}% reached so far</p>
+      <div class="progress-bar"><div style="width: {{ [goal_progress, 100]|min }}%"></div></div>
+      <p class="note" style="margin-top:10px"><a href="{{ url_for('properties.settings_tab', property_id=prop.id) }}">Edit target on Settings</a></p>
+    </div>
+  {% endif %}
+
+  {% if is_overhead %}
+    <div class="card">
+      <h2 style="margin-top:0">Monthly cost trend</h2>
+      <canvas id="revenueChart" height="220"></canvas>
+    </div>
+  {% else %}
+    <div class="grid-2">
+      <div class="card">
+        <h2 style="margin-top:0">Revenue, costs &amp; profit</h2>
+        <canvas id="revenueChart" height="220"></canvas>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">Occupancy</h2>
+        <canvas id="occChart" height="220"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Year on year</h2>
+      {% if yoy %}
+        <table>
+          <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Same month last year</th><th class="num">Change</th></tr></thead>
+          <tbody>
+            {% for row in yoy %}
+              <tr>
+                <td>{{ row.label }}</td>
+                <td class="num">£{{ '{:,.0f}'.format(row.this_year) }}</td>
+                <td class="num">£{{ '{:,.0f}'.format(row.last_year) }}</td>
+                <td class="num" style="color: {{ '#056a4a' if row.delta_pct and row.delta_pct > 0 else ('#e0483f' if row.delta_pct and row.delta_pct < 0 else '#7c8d87') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="note">Not enough history yet for a year-over-year comparison on this flat.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <script>
+    const months = {{ months_json|safe }};
+    const income = {{ income_json|safe }};
+    const profit = {{ profit_json|safe }};
+    const costs = {{ costs_json|safe }};
+    const occupancy = {{ occupancy_json|safe }};
+    const teal = '#0ea472';
+    const amber = '#e0932e';
+    const red = '#e0483f';
+    const tealSoft = 'rgba(14,164,114,0.15)';
+
+    new Chart(document.getElementById('revenueChart'), {
+      data: {
+        labels: months,
+        datasets: [
+          { type: 'bar', label: 'Revenue (£)', data: income, backgroundColor: teal },
+          { type: 'bar', label: 'Costs (£)', data: costs, backgroundColor: red },
+          { type: 'line', label: 'Net profit (£)', data: profit, borderColor: amber, tension: 0.25 }
+        ]
+      },
+      options: { scales: { y: { beginAtZero: true } } }
+    });
+
+    if (document.getElementById('occChart')) {
+      new Chart(document.getElementById('occChart'), {
+        type: 'line',
+        data: { labels: months, datasets: [{ label: 'Occupancy %', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25 }] },
+        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+      });
+    }
+  </script>
+{% endblock %}
