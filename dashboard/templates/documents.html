@@ -6,7 +6,7 @@
 
   <div class="card">
     <h2 style="margin-top:0">Upload</h2>
-    <form class="upload-form" method="post" action="{{ url_for('upload_to_inbox') }}" enctype="multipart/form-data">
+    <form class="upload-form" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
       <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx" multiple required>
       <select name="property_id">
         <option value="">Auto-detect flat</option>
@@ -40,7 +40,7 @@
               <td>{{ d.property_name }}</td>
               <td class="note">{{ d.uploaded_at }}</td>
               <td><span class="status-pill {{ 'confirmed' if d.status == 'confirmed' else '' }}">{{ d.status }}</span></td>
-              <td>{% if d.status != 'confirmed' %}<a href="{{ url_for('review_document', doc_id=d.id) }}">review</a>{% endif %}</td>
+              <td>{% if d.status != 'confirmed' %}<a href="{{ url_for('documents.review', doc_id=d.id) }}">review</a>{% endif %}</td>
             </tr>
           {% endfor %}
         </tbody>

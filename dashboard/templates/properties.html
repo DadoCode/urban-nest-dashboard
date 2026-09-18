@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Properties — Urban Nest Estates{% endblock %}
+{% block content %}
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px">
+    <div>
+      <h1>Properties</h1>
+      <p class="subtitle" style="margin-bottom:0">{{ total_count }} {{ status }} propert{{ 'y' if total_count == 1 else 'ies' }} · {{ current_month }}</p>
+    </div>
+    <button type="button" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
+  </div>
+
+  <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:16px">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search properties...">
+    <select name="status" onchange="this.form.submit()">
+      <option value="active" {{ 'selected' if status == 'active' }}>Active</option>
+      <option value="inactive" {{ 'selected' if status == 'inactive' }}>Inactive</option>
+      <option value="all" {{ 'selected' if status == 'all' }}>All</option>
+    </select>
+    <button type="submit">Search</button>
+  </form>
+
+  <div class="card" style="margin-top:16px">
+    {% if rows %}
+      <table>
+        <thead>
+          <tr>
+            <th>Property</th>
+            <th class="num">Revenue</th>
+            <th class="num">Net profit</th>
+            <th class="num">Occupancy</th>
+            <th class="num">ADR</th>
+            <th class="num">RevPAR</th>
+            <th class="num">vs Target</th>
+            <th>Documents</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}</td>
+              <td class="num">£{{ '{:,.0f}'.format(r.revenue) }}</td>
+              <td class="num">£{{ '{:,.0f}'.format(r.profit) }}</td>
+              <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+              <td class="num">£{{ '{:,.0f}'.format(r.adr) }}</td>
+              <td class="num">£{{ '{:,.0f}'.format(r.revpar) }}</td>
+              <td class="num">{{ '%.0f'|format(r.vs_target) + '%' if r.vs_target is not none else '—' }}</td>
+              <td>
+                {% if r.has_docs %}
+                  <span class="status-pill confirmed">received this month</span>
+                {% else %}
+                  <span class="status-pill" style="background:var(--red-dim); color:var(--red)">none yet</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="note">No properties match "{{ q }}".</p>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -25,7 +25,7 @@
       <tbody>
         {% for r in rows %}
           <tr>
-            <td><a href="{{ url_for('property_page', property_id=r.id) }}">{{ r.name }}</a></td>
+            <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
             <td class="num">£{{ '{:,.0f}'.format(r.opex) }}</td>
             <td class="num">£{{ '{:,.0f}'.format(r.capex) }}</td>
             <td class="num">£{{ '{:,.0f}'.format(r.total_costs) }}</td>

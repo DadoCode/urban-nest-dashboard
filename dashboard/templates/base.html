@@ -6,6 +6,8 @@
   <title>{% block title %}Urban Nest Estates — Dashboard{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.3/dist/htmx.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -19,23 +21,20 @@
       </div>
 
       <nav class="primary">
-        <a href="{{ url_for('index') }}" class="nav-link {{ 'active' if active == 'overview' else '' }}"><span class="dot"></span>Homepage</a>
-        <a href="{{ url_for('occupancy_page') }}" class="nav-link {{ 'active' if active == 'occupancy' else '' }}"><span class="dot"></span>Occupancy</a>
-        <a href="{{ url_for('expenses_page') }}" class="nav-link {{ 'active' if active == 'expenses' else '' }}"><span class="dot"></span>Expenses</a>
-        <a href="{{ url_for('documents_inbox') }}" class="nav-link {{ 'active' if active == 'documents' else '' }}"><span class="dot"></span>Documents</a>
+        <a href="{{ url_for('overview.index') }}" class="nav-link {{ 'active' if active == 'overview' else '' }}"><span class="dot"></span>Overview</a>
+        <a href="{{ url_for('properties.index') }}" class="nav-link {{ 'active' if active == 'properties' else '' }}"><span class="dot"></span>Properties</a>
+        {% if active == 'properties' and recently_viewed %}
+          <div class="section-label" style="margin:6px 0 4px 33px">Recently viewed</div>
+          {% for p in recently_viewed %}
+            <a href="{{ url_for('properties.detail', property_id=p.id) }}" class="nav-link recent {{ 'active' if active_property == p.id else '' }}">{{ p.name }}</a>
+          {% endfor %}
+        {% endif %}
+        <a href="{{ url_for('occupancy.index') }}" class="nav-link {{ 'active' if active == 'occupancy' else '' }}"><span class="dot"></span>Occupancy</a>
+        <a href="{{ url_for('expenses.index') }}" class="nav-link {{ 'active' if active == 'expenses' else '' }}"><span class="dot"></span>Expenses</a>
+        <a href="{{ url_for('documents.index') }}" class="nav-link {{ 'active' if active == 'documents' else '' }}"><span class="dot"></span>Documents</a>
       </nav>
 
-      <div class="section-label">Flats</div>
-      <div class="flats-list">
-        {% for p in all_properties if p.type != 'overhead' %}
-          <a href="{{ url_for('property_page', property_id=p.id) }}" class="nav-link {{ 'active' if active_property == p.id else '' }}"><span class="dot"></span>{{ p.name }}</a>
-        {% endfor %}
-        {% for p in all_properties if p.type == 'overhead' %}
-          <a href="{{ url_for('property_page', property_id=p.id) }}" class="nav-link overhead {{ 'active' if active_property == p.id else '' }}"><span class="dot"></span>{{ p.name }}</a>
-        {% endfor %}
-      </div>
-
-      <button type="button" class="add-btn" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add apartment</button>
+      <button type="button" class="add-btn" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
     </aside>
 
     <div class="main-col">
@@ -45,14 +44,58 @@
             {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
           {% endif %}
         {% endwith %}
+
+        {% if context_bar %}
+          <div class="context-bar" x-data="{ open: null }">
+            <div class="context-item" x-data="{ label: '{{ ctx.display }}' }">
+              <button type="button" class="context-trigger" @click="open = open === 'period' ? null : 'period'">
+                <i class="ti-icon">▾</i>{{ ctx.display }}
+              </button>
+              <div class="context-pop" x-show="open === 'period'" @click.outside="open = null" x-cloak>
+                {% for s in ctx.shortcuts %}
+                  <a href="?{{ {'from': s.params['from'], 'to': s.params['to'], 'property': ctx.property_id or 'all', 'compare': ctx.compare}|urlencode }}"
+                     class="context-option {{ 'sel' if s.key == ctx.choice else '' }}">{{ s.label }}</a>
+                {% endfor %}
+              </div>
+            </div>
+            <span class="context-sep">·</span>
+            <div class="context-item" x-data="{ }">
+              <button type="button" class="context-trigger" @click="open = open === 'property' ? null : 'property'">
+                {{ viewing.name if viewing else 'All properties' }}
+              </button>
+              <div class="context-pop" x-show="open === 'property'" @click.outside="open = null" x-cloak>
+                <a href="?{{ {'from': ctx.from_input + '-01', 'to': ctx.to_input + '-01', 'property': 'all', 'compare': ctx.compare}|urlencode }}"
+                   class="context-option {{ 'sel' if not ctx.property_id else '' }}">All properties</a>
+                {% for p in all_properties if p.type != 'overhead' %}
+                  <a href="?{{ {'from': ctx.from_input + '-01', 'to': ctx.to_input + '-01', 'property': p.id, 'compare': ctx.compare}|urlencode }}"
+                     class="context-option {{ 'sel' if ctx.property_id == p.id else '' }}">{{ p.name }}</a>
+                {% endfor %}
+              </div>
+            </div>
+            <span class="context-sep">·</span>
+            <div class="context-item">
+              <button type="button" class="context-trigger" @click="open = open === 'compare' ? null : 'compare'">
+                {{ ctx.compare_choices|selectattr('key', 'equalto', ctx.compare)|map(attribute='label')|first }}
+              </button>
+              <div class="context-pop" x-show="open === 'compare'" @click.outside="open = null" x-cloak>
+                {% for c in ctx.compare_choices %}
+                  <a href="?{{ {'from': ctx.from_input + '-01', 'to': ctx.to_input + '-01', 'property': ctx.property_id or 'all', 'compare': c.key}|urlencode }}"
+                     class="context-option {{ 'sel' if c.key == ctx.compare else '' }}">{{ c.label }}</a>
+                {% endfor %}
+              </div>
+            </div>
+            <span class="context-hint">shared across pages via this URL</span>
+          </div>
+        {% endif %}
+
         {% block content %}{% endblock %}
       </main>
     </div>
   </div>
 
   <dialog id="add-apartment-dialog">
-    <form method="post" action="{{ url_for('add_apartment') }}">
-      <h2 style="margin-top:0">Add an apartment</h2>
+    <form method="post" action="{{ url_for('properties.add') }}">
+      <h2 style="margin-top:0">Add a property</h2>
       <label>Name <input type="text" name="name" placeholder="e.g. 12 Marlowe House" required></label>
       <label>Address <input type="text" name="address" placeholder="optional, defaults to the name"></label>
       <div class="dialog-actions">

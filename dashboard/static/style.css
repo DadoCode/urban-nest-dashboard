@@ -106,6 +106,12 @@ h1, h2, h3 { font-family: 'Inter Tight', 'Inter', sans-serif; letter-spacing: -0
 .sidebar a.nav-link.active { background: var(--sidebar-active); color: #eafff5; font-weight: 600; }
 .sidebar a.nav-link.active .dot { background: var(--accent); opacity: 1; box-shadow: 0 0 0 3px rgba(14,164,114,0.25); }
 .sidebar a.nav-link.overhead { color: var(--sidebar-muted); font-style: italic; }
+.sidebar a.nav-link.recent {
+  padding: 5px 10px 5px 33px; font-size: 0.8rem; font-weight: 400;
+  color: var(--sidebar-muted);
+}
+.sidebar a.nav-link.recent:hover { color: #fff; }
+.sidebar a.nav-link.recent.active { background: none; color: #eafff5; }
 
 .sidebar .add-btn {
   margin-top: 14px;
@@ -315,3 +321,34 @@ dialog input, dialog select {
 }
 .mini-form input[name="amount"] { width: 100px; }
 .mini-form input[name="vendor"], .mini-form input[name="description"] { width: 150px; }
+
+[x-cloak] { display: none !important; }
+
+.context-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 16px;
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+.context-item { position: relative; }
+.context-trigger {
+  background: none; border: none; padding: 4px 6px; cursor: pointer;
+  font-family: inherit; font-size: 0.85rem; font-weight: 600; color: var(--ink);
+  border-radius: 6px;
+}
+.context-trigger:hover { background: var(--accent-dim); }
+.context-sep { color: var(--line); }
+.context-hint { margin-left: auto; font-size: 0.72rem; color: var(--ink-soft); }
+.context-pop {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+  background: #fff; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(15,26,23,0.12);
+  min-width: 200px; max-height: 320px; overflow-y: auto;
+  display: flex; flex-direction: column; padding: 4px;
+}
+.context-option {
+  padding: 7px 10px; border-radius: 6px; text-decoration: none;
+  color: var(--ink); font-size: 0.85rem; white-space: nowrap;
+}
+.context-option:hover { background: var(--accent-dim); }
+.context-option.sel { background: var(--accent-ink); color: #fff; font-weight: 600; }

@@ -71,7 +71,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     category TEXT NOT NULL DEFAULT 'other',
     capex INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT 'excel_import',
-    document_id INTEGER REFERENCES documents(id)
+    document_id INTEGER REFERENCES documents(id),
+    recurring_cost_id INTEGER REFERENCES property_fixed_costs(id),
+    edited_at TEXT, edited_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -88,8 +90,61 @@ CREATE TABLE IF NOT EXISTS documents (
     uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One row per extracted/reviewed line item on a document -- the explicit
+-- lineage step between a source file and a confirmed ledger entry:
+-- Document -> document_items (extracted) -> document_items (reviewed) ->
+-- transactions/bookings (confirmed) -> kpis.py (derived). Not yet written
+-- to by app.py (Phase 2 adds the schema; Phase 6 wires the review page to
+-- it) -- documents.extracted_json remains the source of truth until then.
+CREATE TABLE IF NOT EXISTS document_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(id),
+    line_index INTEGER NOT NULL,
+    raw_description TEXT,
+    date TEXT, vendor TEXT, amount REAL,
+    direction TEXT,                -- 'income' | 'expense'
+    property_id TEXT REFERENCES properties(id),
+    category TEXT, capex INTEGER NOT NULL DEFAULT 0,
+    confidence REAL,
+    duplicate_of INTEGER REFERENCES transactions(id),
+    include INTEGER NOT NULL DEFAULT 1,
+    reviewed INTEGER NOT NULL DEFAULT 0,
+    original_extracted_value TEXT,   -- JSON snapshot of the raw extraction for this line
+    final_value TEXT                 -- JSON snapshot as confirmed, once reviewed
+);
+
+-- What documents each property is expected to produce each month, so
+-- "data completeness" is judged against that property's own real sources
+-- rather than one hardcoded list. Not yet read by app.py (Phase 2 adds the
+-- schema and seeds sensible defaults at Add-Property time; Phase 4 wires
+-- the Overview completeness card to it).
+CREATE TABLE IF NOT EXISTS property_data_requirements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id TEXT NOT NULL REFERENCES properties(id),
+    source_type TEXT NOT NULL,     -- matches documents.doc_type
+    required INTEGER NOT NULL DEFAULT 1,
+    effective_from TEXT, effective_to TEXT
+);
+
+-- What changed on a financial record and what it used to say -- separate
+-- from transactions.edited_at/edited_by (which only says *that* a row was
+-- edited). Not yet written to by app.py (Phase 2 adds the schema; Phase 5
+-- routes every transaction edit through here).
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,     -- 'transaction' | 'booking' | 'document_item'
+    entity_id INTEGER NOT NULL,
+    action TEXT NOT NULL,          -- 'create' | 'edit' | 'delete'
+    field TEXT, old_value TEXT, new_value TEXT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    user TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_bookings_property_date ON bookings(property_id, check_in);
 CREATE INDEX IF NOT EXISTS idx_transactions_property_date ON transactions(property_id, date);
+CREATE INDEX IF NOT EXISTS idx_document_items_document ON document_items(document_id);
+CREATE INDEX IF NOT EXISTS idx_data_requirements_property ON property_data_requirements(property_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity_id);
 """
 
 
@@ -110,6 +165,14 @@ def ensure_schema():
     ]:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE properties ADD COLUMN {col} {ddl}")
+    tx_cols = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)")}
+    for col, ddl in [
+        ("recurring_cost_id", "INTEGER REFERENCES property_fixed_costs(id)"),
+        ("edited_at", "TEXT"), ("edited_by", "TEXT"),
+    ]:
+        if col not in tx_cols:
+            conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {ddl}")
+
     doc_info = list(conn.execute("PRAGMA table_info(documents)"))
     doc_cols = {row["name"] for row in doc_info}
     for col, ddl in [

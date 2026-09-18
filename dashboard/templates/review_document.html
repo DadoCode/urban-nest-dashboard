@@ -7,7 +7,7 @@
   <div class="card">
     {% if items %}
       <p class="note" style="margin-top:0">Edit anything that's wrong, untick any row that shouldn't count, then confirm. Nothing is saved to the ledger until you confirm.</p>
-      <form method="post" action="{{ url_for('confirm_document', doc_id=doc.id) }}">
+      <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
         <div class="mini-form" style="margin-top:0; margin-bottom:12px">
           <button type="button" onclick="bulkSet('property_id', document.getElementById('bulk-property').value)">Set flat for checked rows</button>
           <select id="bulk-property"><option value="">—</option>{% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
@@ -52,7 +52,7 @@
         </table>
         <div class="dialog-actions" style="justify-content:flex-start; margin-top:14px">
           <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm &amp; add to ledger</button>
-          {% if prop %}<a href="{{ url_for('property_page', property_id=prop.id) }}" style="align-self:center">Cancel</a>{% else %}<a href="{{ url_for('documents_inbox') }}" style="align-self:center">Cancel</a>{% endif %}
+          {% if prop %}<a href="{{ url_for('properties.detail', property_id=prop.id) }}" style="align-self:center">Cancel</a>{% else %}<a href="{{ url_for('documents.index') }}" style="align-self:center">Cancel</a>{% endif %}
         </div>
       </form>
       <script>
@@ -67,7 +67,7 @@
       </script>
     {% else %}
       <p class="note" style="margin-top:0">Nothing was auto-extracted from this file. Add its line items by hand:</p>
-      <form method="post" action="{{ url_for('confirm_document', doc_id=doc.id) }}">
+      <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
         <table class="review-table">
           <thead><tr><th></th><th>Flat</th><th>Month</th><th>Year</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount (£)</th></tr></thead>
           <tbody>
@@ -99,7 +99,7 @@
         <p class="note">Leave the amount blank on any row you don't need — blank rows are skipped.</p>
         <div class="dialog-actions" style="justify-content:flex-start; margin-top:14px">
           <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm &amp; add to ledger</button>
-          {% if prop %}<a href="{{ url_for('property_page', property_id=prop.id) }}" style="align-self:center">Cancel</a>{% else %}<a href="{{ url_for('documents_inbox') }}" style="align-self:center">Cancel</a>{% endif %}
+          {% if prop %}<a href="{{ url_for('properties.detail', property_id=prop.id) }}" style="align-self:center">Cancel</a>{% else %}<a href="{{ url_for('documents.index') }}" style="align-self:center">Cancel</a>{% endif %}
         </div>
       </form>
     {% endif %}

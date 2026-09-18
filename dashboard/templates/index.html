@@ -1,23 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Homepage — Urban Nest Estates{% endblock %}
 {% block content %}
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px">
-    <div>
-      <h1>Portfolio Overview</h1>
-      <p class="subtitle" style="margin-bottom:0">{{ flats_count }} apartments · {{ rng.display }}{% if rng.partial %} (to date){% endif %}
-        · <a href="{{ url_for('property_page', property_id='general-overheads') }}">shared overhead costs</a></p>
-    </div>
-    <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-      {% for key, label in range_labels.items() %}
-        <button type="submit" name="range" value="{{ key }}"
-          style="background: {{ 'var(--accent-ink)' if rng.choice == key else '#fff' }}; color: {{ '#fff' if rng.choice == key else 'var(--ink)' }}; border: 1px solid var(--line);">{{ label }}</button>
-      {% endfor %}
-      {% if rng.choice == 'custom' %}
-        <input type="month" name="start" value="{{ rng.start_input }}" style="padding:7px 8px; border:1px solid var(--line); border-radius:8px">
-        <input type="month" name="end" value="{{ rng.end_input }}" style="padding:7px 8px; border:1px solid var(--line); border-radius:8px">
-        <button type="submit">Go</button>
-      {% endif %}
-    </form>
+  <div>
+    <h1>Portfolio{% if viewing %} — {{ viewing.name }}{% endif %}</h1>
+    <p class="subtitle" style="margin-bottom:0">{{ flats_count }} apartments · {{ ctx.display }}{% if ctx.partial %} (to date){% endif %}
+      {% if overhead_property %}· <a href="{{ url_for('properties.detail', property_id=overhead_property.id) }}">shared overhead costs</a>{% endif %}</p>
   </div>
 
   <div class="tiles" style="margin-top:16px">
@@ -59,14 +46,14 @@
     </div>
   </div>
 
-  <h2>Property performance — {{ rng.display }}</h2>
+  <h2>Property performance — {{ ctx.display }}</h2>
   <div class="card">
     <table>
       <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Margin</th><th class="num">Occupancy</th><th class="num">ADR</th><th class="num">vs Target</th></tr></thead>
       <tbody>
         {% for r in prop_rows %}
           <tr>
-            <td><a href="{{ url_for('property_page', property_id=r.id) }}">{{ r.name }}</a></td>
+            <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
             <td class="num">£{{ '{:,.0f}'.format(r.revenue) }}</td>
             <td class="num">£{{ '{:,.0f}'.format(r.profit) }}</td>
             <td class="num">{{ '%.0f'|format(r.margin * 100) }}%</td>
@@ -81,7 +68,7 @@
 
   <div class="grid-2">
     <div class="card">
-      <h2 style="margin-top:0">Expense breakdown — {{ rng.display }}</h2>
+      <h2 style="margin-top:0">Expense breakdown — {{ ctx.display }}</h2>
       {% if expense_rows %}
         <table>
           <thead><tr><th>Category</th><th class="num">Amount</th><th class="num">vs prior</th></tr></thead>
