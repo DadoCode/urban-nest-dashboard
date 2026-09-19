@@ -44,6 +44,7 @@ def index():
             "id": p["id"], "name": p["name"], "occupancy": cur_occ,
             "days_booked": kpis.booked_nights(conn, p["id"], cstart, cend),
             "delta": pct_delta(cur_occ, prev_occ) if f"{py}-{pm:02d}" in own_months else None,
+            "adr": kpis.adr(conn, p["id"], cstart, cend),
         })
     rows.sort(key=lambda r: r["occupancy"], reverse=True)
 
@@ -66,5 +67,4 @@ def index():
         heatmap_months=[MONTH_ABBR[int(ym.split('-')[1])] + " " + ym.split('-')[0][2:] for ym in heatmap_months],
         heatmap_rows=heatmap_rows,
         months_json=json.dumps(months), portfolio_json=json.dumps(portfolio_series),
-        series_json=json.dumps(series_by_property),
     )

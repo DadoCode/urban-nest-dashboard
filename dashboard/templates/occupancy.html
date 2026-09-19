@@ -16,7 +16,7 @@
       <div style="height:{{ rows|length * 34 + 20 }}px"><canvas id="rankedChart"></canvas></div>
     </div>
     <div class="card">
-      <h2 style="margin-top:0">Last 12 months</h2>
+      <h2 style="margin-top:0">Occupancy heatmap — last 12 months</h2>
       <div style="overflow-x:auto">
         <table style="font-size:0.8rem">
           <thead><tr><th>Flat</th>{% for m in heatmap_months %}<th class="num">{{ m }}</th>{% endfor %}</tr></thead>
@@ -59,18 +59,16 @@
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0">Compare flats over time</h2>
-    <p class="note" style="margin-top:-6px">Click a name in the legend to show or hide just that flat's line.</p>
-    <div style="height:280px"><canvas id="compareChart"></canvas></div>
+    <h2 style="margin-top:0">Occupancy vs ADR — {{ current_month }}</h2>
+    <p class="note" style="margin-top:-6px">Is a flat filling up because it's priced right, or sitting empty because it's priced too high? Each point is one flat.</p>
+    <div style="height:280px"><canvas id="scatterChart"></canvas></div>
   </div>
 
   <script>
     const months = {{ months_json|safe }};
     const portfolio = {{ portfolio_json|safe }};
-    const series = {{ series_json|safe }};
     const teal = '#0ea472';
     const tealSoft = 'rgba(14,164,114,0.15)';
-    const palette = ['#0ea472', '#e0932e', '#8e44ad', '#2980b9', '#e0483f', '#16a085', '#d35400', '#7f8c8d', '#27ae60', '#2c3e50', '#e67e22'];
     const occScale = (extra) => quietScales(pctShort, Object.assign({ y: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }, extra || {}));
 
     new Chart(document.getElementById('portfolioChart'), {
@@ -91,22 +89,19 @@
       },
     });
 
-    const datasets = Object.keys(series).map((name, i) => ({
-      label: name,
-      data: series[name],
-      borderColor: palette[i % palette.length],
-      backgroundColor: 'transparent',
-      spanGaps: false,
-      tension: 0.3,
-      hidden: i >= 4,
-    }));
-
-    new Chart(document.getElementById('compareChart'), {
-      type: 'line',
-      data: { labels: months, datasets },
+    const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map(r => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name }));
+    new Chart(document.getElementById('scatterChart'), {
+      type: 'scatter',
+      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: teal, pointRadius: 6, pointHoverRadius: 8 }] },
       options: {
-        scales: occScale(),
-        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${pctShort(i.parsed.y)}` } } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (i) => [`${i.raw.name}`, `ADR: ${moneyFull(i.raw.x)}`, `Occupancy: ${pctShort(i.raw.y)}`] } },
+        },
+        scales: {
+          x: { title: { display: true, text: 'ADR' }, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: moneyShort } },
+          y: { title: { display: true, text: 'Occupancy' }, beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort } },
+        },
       },
     });
   </script>

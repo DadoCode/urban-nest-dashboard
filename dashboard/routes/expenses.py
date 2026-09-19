@@ -17,7 +17,11 @@ def index():
     flats = get_properties(conn, include_overhead=False)
     year, month = kpis.current_period(conn)
     start, end = kpis.month_bounds(year, month)
-    months = kpis.months_with_data(conn, None)
+    # Anchored + clipped to trailing 12 months -- see the matching note in
+    # routes/overview.py; an unbounded history here would cram years of
+    # bars into one unreadable chart.
+    anchor_ym = f"{year}-{month:02d}"
+    months = [m for m in kpis.months_with_data(conn, None) if m <= anchor_ym][-12:]
 
     rows = []
     for p in flats:
