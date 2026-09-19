@@ -61,6 +61,19 @@ CREATE TABLE IF NOT EXISTS bookings (
     document_id INTEGER REFERENCES documents(id)
 );
 
+-- Normalized vendor identity, so "top vendors" and a ledger filter can
+-- work off a stable id instead of grouping raw strings (which drift --
+-- "Amazon" vs "AMAZON.CO.UK" vs "Amazon UK"). transactions.vendor stays
+-- as the raw text every row already has (source of truth for what a
+-- document/manual entry actually said); vendor_id is the resolved link,
+-- set going forward by services/vendors.py and backfilled once below by
+-- exact-string match for existing rows.
+CREATE TABLE IF NOT EXISTS vendors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     property_id TEXT NOT NULL REFERENCES properties(id),
@@ -73,6 +86,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     source TEXT NOT NULL DEFAULT 'excel_import',
     document_id INTEGER REFERENCES documents(id),
     recurring_cost_id INTEGER REFERENCES property_fixed_costs(id),
+    vendor_id INTEGER REFERENCES vendors(id),
     edited_at TEXT, edited_by TEXT
 );
 
@@ -166,12 +180,29 @@ def ensure_schema():
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE properties ADD COLUMN {col} {ddl}")
     tx_cols = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)")}
+    vendor_id_is_new = "vendor_id" not in tx_cols
     for col, ddl in [
         ("recurring_cost_id", "INTEGER REFERENCES property_fixed_costs(id)"),
+        ("vendor_id", "INTEGER REFERENCES vendors(id)"),
         ("edited_at", "TEXT"), ("edited_by", "TEXT"),
     ]:
         if col not in tx_cols:
             conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {ddl}")
+    if vendor_id_is_new:
+        # One-time backfill: every distinct non-blank vendor string already
+        # in transactions gets a vendors row, matched by exact trimmed text
+        # (good enough for existing data -- fuzzy merging of near-duplicate
+        # vendor names isn't attempted here).
+        names = [r["vendor"].strip() for r in conn.execute(
+            "SELECT DISTINCT vendor FROM transactions WHERE vendor IS NOT NULL AND TRIM(vendor) != ''"
+        )]
+        for name in names:
+            conn.execute("INSERT OR IGNORE INTO vendors (name) VALUES (?)", (name,))
+        conn.execute("""
+            UPDATE transactions SET vendor_id = (
+                SELECT v.id FROM vendors v WHERE v.name = TRIM(transactions.vendor)
+            ) WHERE vendor IS NOT NULL AND TRIM(vendor) != ''
+        """)
 
     doc_info = list(conn.execute("PRAGMA table_info(documents)"))
     doc_cols = {row["name"] for row in doc_info}

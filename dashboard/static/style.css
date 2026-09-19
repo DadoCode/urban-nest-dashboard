@@ -385,3 +385,30 @@ dialog input, dialog select {
 }
 .context-option:hover { background: var(--accent-dim); }
 .context-option.sel { background: var(--accent-ink); color: #fff; font-weight: 600; }
+
+/* ---------- transaction drawer ---------- */
+
+.drawer-backdrop {
+  position: fixed; inset: 0; background: rgba(15,26,23,0.28);
+  opacity: 0; pointer-events: none; transition: opacity 0.18s ease; z-index: 40;
+}
+.drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 90vw;
+  background: #fff; box-shadow: -8px 0 32px rgba(15,26,23,0.18);
+  padding: 20px; overflow-y: auto; z-index: 41;
+  transform: translateX(100%); transition: transform 0.18s ease;
+}
+.drawer.open { transform: translateX(0); }
+.drawer-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.drawer-amount { font-family: 'Inter Tight', sans-serif; font-size: 1.6rem; font-weight: 800; }
+.drawer-close { background: none; border: none; font-size: 1.4rem; line-height: 1; cursor: pointer; color: var(--muted); padding: 2px 6px; }
+.drawer-close:hover { color: var(--ink); }
+.drawer-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.drawer-field { display: flex; justify-content: space-between; font-size: 0.85rem; padding: 4px 0; }
+.drawer-field span { color: var(--muted); }
+.drawer-form { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.drawer-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: var(--ink-soft); font-weight: 500; }
+.drawer-form input, .drawer-form select {
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 0.85rem; font-family: inherit;
+}

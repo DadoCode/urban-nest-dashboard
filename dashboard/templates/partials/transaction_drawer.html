@@ -1,0 +1,56 @@
+<div class="drawer-head">
+  <div>
+    <div class="drawer-amount">£{{ '{:,.2f}'.format(tx.amount) }}</div>
+    <div class="note">{{ tx.vendor or '(no vendor)' }} · {{ tx.date }}</div>
+  </div>
+  <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+
+{% if tx.category == 'reconciliation' %}
+  <p class="note" style="margin-top:14px">This is a historical reconciliation adjustment imported to reconcile records with the original Urban Nest Excel accounts. It can't be edited or deleted -- doing so would break the exact match to the trusted historical totals.</p>
+{% endif %}
+
+<div class="drawer-section">
+  <div class="drawer-field"><span>Property</span><strong>{{ tx.property_name }}</strong></div>
+  <div class="drawer-field"><span>Classification</span><strong>{{ 'Capex' if tx.capex else 'Opex' }}</strong></div>
+  <div class="drawer-field"><span>Source</span><strong>{{ tx.source }}</strong></div>
+  {% if doc %}
+    <div class="drawer-field"><span>Document</span><a href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank">{{ doc.filename }}</a></div>
+  {% endif %}
+  {% if tx.edited_at %}
+    <div class="drawer-field"><span>Last edited</span><strong>{{ tx.edited_at }}</strong></div>
+  {% endif %}
+</div>
+
+{% if history %}
+  <div class="drawer-section">
+    <h3 style="margin:0 0 8px; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted)">History</h3>
+    {% for h in history %}
+      <div class="note" style="margin-bottom:4px">{{ h.timestamp }} — {{ h.action }}{% if h.field %} {{ h.field }}: "{{ h.old_value }}" → "{{ h.new_value }}"{% endif %}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if tx.category != 'reconciliation' %}
+  <form method="post" action="{{ url_for('expenses.edit_transaction', tx_id=tx.id) }}" class="drawer-form">
+    <label>Property
+      <select name="property_id">
+        {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == tx.property_id }}>{{ p.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Vendor <input name="vendor" value="{{ tx.vendor or '' }}"></label>
+    <label>Description <input name="description" value="{{ tx.description or '' }}"></label>
+    <label>Amount £ <input type="number" step="0.01" name="amount" value="{{ tx.amount }}"></label>
+    <label>Category
+      <select name="category">
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == tx.category }}>{{ c }}</option>{% endfor %}
+      </select>
+    </label>
+    <label style="flex-direction:row; align-items:center; gap:6px"><input type="checkbox" name="capex" {{ 'checked' if tx.capex }} style="width:auto"> Capex</label>
+    <button type="submit">Save changes</button>
+  </form>
+
+  <form method="post" action="{{ url_for('expenses.delete_transaction', tx_id=tx.id) }}" onsubmit="return confirm('Delete this transaction? This cannot be undone.')" style="margin-top:8px">
+    <button type="submit" style="color:var(--red); border-color:var(--red-dim)">Delete transaction</button>
+  </form>
+{% endif %}

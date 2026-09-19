@@ -18,8 +18,11 @@
     <canvas id="costsChart" height="110"></canvas>
   </div>
 
-  <h2>By flat — {{ current_month }}</h2>
+  <h2>Costs by property — {{ current_month }}</h2>
   <div class="card">
+    <canvas id="byPropertyChart" height="{{ rows|length * 32 + 20 }}"></canvas>
+  </div>
+  <div class="card" style="margin-top:14px">
     <table>
       <thead><tr><th>Flat</th><th class="num">Opex</th><th class="num">Capex</th><th class="num">Total costs</th></tr></thead>
       <tbody>
@@ -43,7 +46,7 @@
           <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
           <tbody>
             {% for c in this_month_categories %}
-              <tr><td>{{ c.category }}</td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt) }}</td></tr>
+              <tr><td><a href="{{ url_for('expenses.index') }}?t_category={{ c.category }}#ledger">{{ c.category }}</a></td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt) }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -58,7 +61,7 @@
           <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
           <tbody>
             {% for v in vendor_breakdown %}
-              <tr><td>{{ v.vendor }}</td><td class="num">{{ v.n }}</td><td class="num">£{{ '{:,.0f}'.format(v.amt) }}</td></tr>
+              <tr><td><a href="{{ url_for('expenses.index') }}?t_vendor={{ v.id }}#ledger">{{ v.name }}</a></td><td class="num">{{ v.n }}</td><td class="num">£{{ '{:,.0f}'.format(v.amt) }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -84,6 +87,59 @@
     {% endif %}
   </div>
 
+  <h2 id="ledger">Transactions</h2>
+  <div class="card">
+    <form method="get" class="mini-form" style="margin-top:0">
+      <input type="text" name="t_q" value="{{ f_q }}" placeholder="Search vendor or description...">
+      <select name="t_property">
+        <option value="">All properties</option>
+        {% for p in all_flats %}<option value="{{ p.id }}" {{ 'selected' if f_property == p.id }}>{{ p.name }}</option>{% endfor %}
+      </select>
+      <select name="t_category">
+        <option value="">All categories</option>
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if f_category == c }}>{{ c }}</option>{% endfor %}
+      </select>
+      <select name="t_type">
+        <option value="">Opex &amp; Capex</option>
+        <option value="opex" {{ 'selected' if f_type == 'opex' }}>Opex only</option>
+        <option value="capex" {{ 'selected' if f_type == 'capex' }}>Capex only</option>
+      </select>
+      <select name="t_vendor">
+        <option value="">All vendors</option>
+        {% for v in all_vendors %}<option value="{{ v.id }}" {{ 'selected' if f_vendor == v.id|string }}>{{ v.name }}</option>{% endfor %}
+      </select>
+      <input type="month" name="t_from" value="{{ f_from }}" style="width:auto">
+      <input type="month" name="t_to" value="{{ f_to }}" style="width:auto">
+      <button type="submit">Filter</button>
+      {% if f_q or f_property or f_category or f_type or f_vendor or f_from or f_to %}<a href="{{ url_for('expenses.index') }}#ledger">Clear</a>{% endif %}
+    </form>
+
+    {% if ledger %}
+      <table style="margin-top:14px">
+        <thead><tr><th>Date</th><th>Vendor</th><th>Property</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
+        <tbody>
+          {% for t in ledger %}
+            <tr hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML" style="cursor:pointer">
+              <td>{{ t.date }}</td>
+              <td>{{ t.vendor or '—' }}</td>
+              <td>{{ t.property_name }}</td>
+              <td>{{ t.category }}{% if t.category == 'reconciliation' %} <span class="status-pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">historical adjustment</span>{% endif %}</td>
+              <td>{{ 'Capex' if t.capex else 'Opex' }}</td>
+              <td class="num">£{{ '{:,.2f}'.format(t.amount) }}</td>
+              <td class="note">{{ t.source }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="note" style="margin-top:10px">Showing up to 200 matching transactions, most recent first.</p>
+    {% else %}
+      <p class="note" style="margin-top:14px">No transactions match these filters.</p>
+    {% endif %}
+  </div>
+
+  <div id="drawer-backdrop" class="drawer-backdrop" onclick="closeDrawer()"></div>
+  <div id="drawer" class="drawer"></div>
+
   <script>
     const months = {{ months_json|safe }};
     const opex = {{ opex_json|safe }};
@@ -99,6 +155,25 @@
         ],
       },
       options: { scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } },
+    });
+
+    const propLabels = {{ rows|map(attribute='name')|list|tojson }};
+    const propTotals = {{ rows|map(attribute='total_costs')|list|tojson }};
+    new Chart(document.getElementById('byPropertyChart'), {
+      type: 'bar',
+      data: { labels: propLabels, datasets: [{ label: 'Total costs (£)', data: propTotals, backgroundColor: '#0ea472', borderRadius: 4 }] },
+      options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } },
+    });
+
+    function closeDrawer() {
+      document.getElementById('drawer-backdrop').classList.remove('open');
+      document.getElementById('drawer').classList.remove('open');
+    }
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+      if (e.target.id === 'drawer') {
+        document.getElementById('drawer-backdrop').classList.add('open');
+        document.getElementById('drawer').classList.add('open');
+      }
     });
   </script>
 {% endblock %}

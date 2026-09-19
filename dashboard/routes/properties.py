@@ -10,6 +10,7 @@ import services.kpis as kpis
 from services.common import (MONTH_NAMES, get_properties, get_property, pct_delta,
                               target_row, tiles_for, yoy_pairs)
 from services.completeness import completeness_for, seed_defaults
+from services.vendors import get_or_create_vendor
 
 bp = Blueprint("properties", __name__)
 
@@ -330,10 +331,12 @@ def add_expense(property_id):
         return redirect(url_for("properties.expenses_tab", property_id=property_id))
     category = request.form.get("category", "purchase")
     direction = "income" if category == "booking_income" else "expense"
+    vendor_name = request.form.get("vendor", "")
+    vendor_id = get_or_create_vendor(conn, vendor_name)
     conn.execute(
-        """INSERT INTO transactions (property_id, date, vendor, description, amount, direction, category, source)
-           VALUES (?,?,?,?,?,?,?,'manual')""",
-        (property_id, f"{year}-{month:02d}-01", request.form.get("vendor", ""),
+        """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source)
+           VALUES (?,?,?,?,?,?,?,?,'manual')""",
+        (property_id, f"{year}-{month:02d}-01", vendor_name, vendor_id,
          request.form.get("description", ""), amount, direction, category),
     )
     conn.commit()

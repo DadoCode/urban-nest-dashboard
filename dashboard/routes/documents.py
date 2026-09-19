@@ -1,13 +1,22 @@
 import datetime
 import json
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, url_for
 
 import db
 from services.common import get_properties, get_property
 from services.documents import save_upload
+from services.vendors import get_or_create_vendor
 
 bp = Blueprint("documents", __name__)
+
+
+@bp.route("/documents/<int:doc_id>/file")
+def file(doc_id):
+    doc = db.get_conn().execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+    if not doc:
+        abort(404)
+    return send_file(doc["stored_path"], download_name=doc["filename"])
 
 
 @bp.route("/documents")
@@ -102,10 +111,11 @@ def confirm(doc_id):
             continue
         year, month = int(year_s), int(month_s)
         direction = "income" if category == "booking_income" else "expense"
+        vendor_id = get_or_create_vendor(conn, vendor)
         conn.execute(
-            """INSERT INTO transactions (property_id, date, vendor, description, amount, direction, category, source, document_id)
-               VALUES (?,?,?,?,?,?,?,'upload',?)""",
-            (pid, f"{year}-{month:02d}-01", vendor, desc, amount, direction, category, doc_id),
+            """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source, document_id)
+               VALUES (?,?,?,?,?,?,?,?,'upload',?)""",
+            (pid, f"{year}-{month:02d}-01", vendor, vendor_id, desc, amount, direction, category, doc_id),
         )
         added += 1
         final_property_id = pid
