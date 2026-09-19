@@ -103,7 +103,11 @@ def detail(property_id):
         rev_target = (target["revenue_target"] if target else 0) or 0
         goal_progress = round(cur["revenue"] / rev_target * 100, 1) if rev_target else None
 
-    series = kpis.monthly_series(conn, property_id)
+    # Anchored + clipped to trailing 12 months -- see the matching note in
+    # routes/overview.py on why a barely-started current month or years of
+    # unclipped history both make the trend chart misleading.
+    anchor_ym = f"{year}-{month:02d}"
+    series = [s for s in kpis.monthly_series(conn, property_id) if s["ym"] <= anchor_ym][-12:]
     yoy = yoy_pairs(conn, property_id, (year, month))
 
     resp = make_response(render_template(
@@ -115,6 +119,7 @@ def detail(property_id):
         income_json=json.dumps([s["revenue"] for s in series]),
         profit_json=json.dumps([s["net_profit"] for s in series]),
         costs_json=json.dumps([s["costs"] for s in series]),
+        margin_json=json.dumps([round(s["margin"] * 100, 1) for s in series]),
         occupancy_json=json.dumps([round(s["occupancy"] * 100, 1) for s in series]),
     ))
     if not is_overhead:

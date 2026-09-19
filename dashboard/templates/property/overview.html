@@ -27,17 +27,17 @@
   {% if is_overhead %}
     <div class="card">
       <h2 style="margin-top:0">Monthly cost trend</h2>
-      <canvas id="revenueChart" height="220"></canvas>
+      <div style="height:240px"><canvas id="revenueChart"></canvas></div>
     </div>
   {% else %}
     <div class="grid-2">
       <div class="card">
         <h2 style="margin-top:0">Revenue, costs &amp; profit</h2>
-        <canvas id="revenueChart" height="220"></canvas>
+        <div style="height:240px"><canvas id="revenueChart"></canvas></div>
       </div>
       <div class="card">
         <h2 style="margin-top:0">Occupancy</h2>
-        <canvas id="occChart" height="220"></canvas>
+        <div style="height:240px"><canvas id="occChart"></canvas></div>
       </div>
     </div>
 
@@ -68,29 +68,56 @@
     const income = {{ income_json|safe }};
     const profit = {{ profit_json|safe }};
     const costs = {{ costs_json|safe }};
+    const margin = {{ margin_json|safe }};
     const occupancy = {{ occupancy_json|safe }};
     const teal = '#0ea472';
     const amber = '#e0932e';
     const red = '#e0483f';
     const tealSoft = 'rgba(14,164,114,0.15)';
 
+    {% if is_overhead %}
+    new Chart(document.getElementById('revenueChart'), {
+      type: 'bar',
+      data: { labels: months, datasets: [{ label: 'Costs', data: costs, backgroundColor: red }] },
+      options: {
+        scales: quietScales(moneyShort),
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Costs: ${moneyFull(i.parsed.y)}` } } },
+      },
+    });
+    {% else %}
     new Chart(document.getElementById('revenueChart'), {
       data: {
         labels: months,
         datasets: [
-          { type: 'bar', label: 'Revenue (£)', data: income, backgroundColor: teal },
-          { type: 'bar', label: 'Costs (£)', data: costs, backgroundColor: red },
-          { type: 'line', label: 'Net profit (£)', data: profit, borderColor: amber, tension: 0.25 }
-        ]
+          { type: 'bar', label: 'Revenue', data: income, backgroundColor: teal },
+          { type: 'bar', label: 'Costs', data: costs, backgroundColor: red },
+          { type: 'line', label: 'Net profit', data: profit, borderColor: amber, tension: 0.3, pointHoverRadius: 5 },
+        ],
       },
-      options: { scales: { y: { beginAtZero: true } } }
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        scales: quietScales(moneyShort),
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}`,
+              afterBody: (items) => margin.length ? [`Margin: ${margin[items[0].dataIndex]}%`] : [],
+            },
+          },
+        },
+      },
     });
+    {% endif %}
 
     if (document.getElementById('occChart')) {
       new Chart(document.getElementById('occChart'), {
         type: 'line',
-        data: { labels: months, datasets: [{ label: 'Occupancy %', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25 }] },
-        options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+        data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.3, spanGaps: false }] },
+        options: {
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.y)}` } } },
+          scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
+        },
       });
     }
   </script>

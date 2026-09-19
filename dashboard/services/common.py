@@ -9,8 +9,13 @@ MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
 MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-def pct_delta(current, previous):
-    if not previous:
+def pct_delta(current, previous, min_base=0):
+    """None when there's nothing to compare against, or when `previous` is
+    too small (below min_base) for a percentage off it to mean anything --
+    a swing off a near-zero base is noise, not signal (e.g. "+8490%" when
+    last year's figure was a few pounds), so it's omitted rather than
+    shown literally or capped."""
+    if not previous or abs(previous) < min_base:
         return None
     return round((current - previous) / abs(previous) * 100, 1)
 
@@ -63,7 +68,7 @@ def yoy_pairs(conn, property_id, current_period):
                 "label": f"{MONTH_NAMES[month]} {year}",
                 "this_year": row["revenue"],
                 "last_year": prev["revenue"],
-                "delta_pct": pct_delta(row["revenue"], prev["revenue"]),
+                "delta_pct": pct_delta(row["revenue"], prev["revenue"], min_base=100),
             })
     return pairs
 
@@ -76,12 +81,12 @@ def tiles_for(conn, property_id, year, month):
     prev = kpis.kpi_snapshot(conn, property_id, pstart, pend)
     tiles = [
         {"label": f"Revenue — {MONTH_NAMES[month]} {year}", "value": f"£{cur['revenue']:,.0f}",
-         "delta": pct_delta(cur["revenue"], prev["revenue"])},
+         "delta": pct_delta(cur["revenue"], prev["revenue"], min_base=100)},
         {"label": "Net profit", "value": f"£{cur['net_profit']:,.0f}",
-         "delta": pct_delta(cur["net_profit"], prev["net_profit"])},
+         "delta": pct_delta(cur["net_profit"], prev["net_profit"], min_base=300)},
         {"label": "Occupancy", "value": f"{cur['occupancy'] * 100:.0f}%",
-         "delta": pct_delta(cur["occupancy"], prev["occupancy"])},
+         "delta": pct_delta(cur["occupancy"], prev["occupancy"], min_base=0.05)},
         {"label": "Booked nights", "value": cur["booked_nights"],
-         "delta": pct_delta(cur["booked_nights"], prev["booked_nights"])},
+         "delta": pct_delta(cur["booked_nights"], prev["booked_nights"], min_base=2)},
     ]
     return tiles, cur, prev

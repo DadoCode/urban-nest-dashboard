@@ -32,14 +32,28 @@ def _kpi_rows(conn, property_id, ctx):
     prev_start, prev_end = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
     prev_avg_stay = kpis.avg_stay(conn, property_id, prev_start, prev_end)
 
+    # A prior-period/prior-year base below this is too small for a percent
+    # swing off it to mean anything -- "+8490%" off a near-zero base is
+    # noise, not signal, so it's suppressed rather than shown capped or
+    # literal (the tile just omits that delta line instead). Net profit's
+    # threshold is much higher than revenue's: a thin-margin month can
+    # have a genuinely small profit base (a real month, not "no data"),
+    # and revenue growth alone can make profit swing by thousands of
+    # percent off it without that being the meaningful story.
+    MIN_BASE = {"revenue": 100, "net_profit": 1000, "adr": 20, "revpar": 20,
+                "occupancy": 0.05, "margin": 0.05, "booked_nights": 2, "avg_stay": 0.5}
+
     def tile(label, key, value_fmt, extra_note=None, cur_val=None, prev_val=None):
         cv = cur_val if cur_val is not None else cur[key]
         pv = prev_val if prev_val is not None else prev[key]
         lv = (last_year[key] if key in last_year.keys() else None) if cur_val is None else None
+        min_base = MIN_BASE.get(key, 0)
+        delta = pct_delta(cv, pv, min_base=min_base)
+        delta_ly = pct_delta(cv, lv, min_base=min_base) if lv is not None else None
         return {
             "label": label, "value": value_fmt(cv),
-            "delta": pct_delta(cv, pv),
-            "delta_ly": pct_delta(cv, lv) if lv is not None else None,
+            "delta": delta,
+            "delta_ly": delta_ly,
             "note": extra_note,
         }
 
@@ -155,7 +169,14 @@ def index():
     insights = compute_insights(conn, insight_scope, ctx)
     completeness = _completeness_summary(conn, insight_scope)
 
-    portfolio_series = kpis.monthly_series(conn, ctx["property_id"])
+    # Trailing 12 months by default (brief §6), regardless of how much
+    # history exists -- a 3-year line is unreadable as the main chart.
+    # Anchored at ctx's end month, not just "whatever the last entry in
+    # monthly_series happens to be" -- a barely-started current month with
+    # one stray transaction would otherwise show up as a misleading cliff
+    # down to near-zero at the end of the line.
+    anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
+    portfolio_series = [s for s in kpis.monthly_series(conn, ctx["property_id"]) if s["ym"] <= anchor_ym][-12:]
     yoy = yoy_pairs(conn, ctx["property_id"], (ctx["end_year"], ctx["end_month"]))
     overhead_property = next((p for p in nav_properties if p["type"] == "overhead"), None)
 
@@ -167,6 +188,8 @@ def index():
         insights=insights, completeness=completeness, doc_type_labels=DOC_TYPE_LABELS,
         months_json=json.dumps([s["ym"] for s in portfolio_series]),
         income_json=json.dumps([s["revenue"] for s in portfolio_series]),
+        costs_json=json.dumps([s["costs"] for s in portfolio_series]),
         profit_json=json.dumps([s["net_profit"] for s in portfolio_series]),
+        margin_json=json.dumps([round(s["margin"] * 100, 1) for s in portfolio_series]),
         occupancy_json=json.dumps([round(s["occupancy"] * 100, 1) for s in portfolio_series]),
     )

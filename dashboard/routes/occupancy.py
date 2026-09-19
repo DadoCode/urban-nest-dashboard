@@ -15,7 +15,12 @@ def index():
     flats = get_properties(conn, include_overhead=False)
     year, month = kpis.current_period(conn)
     py, pm = kpis.prior_month(year, month)
-    months = kpis.months_with_data(conn, None)
+    # Anchored at the current period and clipped to trailing 12 months --
+    # otherwise a barely-started current month (or years of history) would
+    # either fake a cliff at the end of the trend line or make it
+    # unreadable. See the matching note in routes/overview.py.
+    anchor_ym = f"{year}-{month:02d}"
+    months = [m for m in kpis.months_with_data(conn, None) if m <= anchor_ym][-12:]
 
     series_by_property = {}
     rows = []

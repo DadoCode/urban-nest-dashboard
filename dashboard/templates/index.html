@@ -77,16 +77,15 @@
     </div>
   {% endif %}
 
-  <div class="grid-2">
-    <div class="card">
-      <h2 style="margin-top:0">Revenue &amp; profit trend</h2>
-      <canvas id="revenueChart" height="220"></canvas>
-      <p class="note">Months with nothing recorded are simply absent, not drawn as zero.</p>
-    </div>
-    <div class="card">
-      <h2 style="margin-top:0">Portfolio occupancy trend</h2>
-      <canvas id="occChart" height="220"></canvas>
-    </div>
+  <div class="card">
+    <h2 style="margin-top:0">Portfolio performance</h2>
+    <p class="subtitle" style="margin-bottom:12px">Trailing 12 months · months with nothing recorded are simply absent, not drawn as zero</p>
+    <div style="height:280px"><canvas id="revenueChart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Occupancy trend</h2>
+    <div style="height:180px"><canvas id="occChart"></canvas></div>
   </div>
 
   <h2>Property performance — {{ ctx.display }}</h2>
@@ -154,9 +153,12 @@
   <script>
     const months = {{ months_json|safe }};
     const income = {{ income_json|safe }};
+    const costs = {{ costs_json|safe }};
     const profit = {{ profit_json|safe }};
+    const margin = {{ margin_json|safe }};
     const occupancy = {{ occupancy_json|safe }};
     const teal = '#0ea472';
+    const red = '#e0483f';
     const amber = '#e0932e';
     const tealSoft = 'rgba(14,164,114,0.15)';
 
@@ -164,17 +166,33 @@
       data: {
         labels: months,
         datasets: [
-          { type: 'bar', label: 'Revenue (£)', data: income, backgroundColor: teal },
-          { type: 'line', label: 'Net profit (£)', data: profit, borderColor: amber, tension: 0.25 }
-        ]
+          { type: 'bar', label: 'Revenue', data: income, backgroundColor: teal },
+          { type: 'bar', label: 'Costs', data: costs, backgroundColor: red },
+          { type: 'line', label: 'Net profit', data: profit, borderColor: amber, tension: 0.3, pointHoverRadius: 5 },
+        ],
       },
-      options: { scales: { y: { beginAtZero: true } } }
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        scales: quietScales(moneyShort),
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: {
+            callbacks: {
+              label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}`,
+              afterBody: (items) => [`Margin: ${margin[items[0].dataIndex]}%`],
+            },
+          },
+        },
+      },
     });
 
     new Chart(document.getElementById('occChart'), {
       type: 'line',
-      data: { labels: months, datasets: [{ label: 'Occupancy %', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25 }] },
-      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } }
+      data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.3, spanGaps: false }] },
+      options: {
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (item) => `Occupancy: ${pctShort(item.parsed.y)}` } } },
+        scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
+      },
     });
   </script>
 {% endblock %}

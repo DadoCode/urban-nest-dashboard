@@ -6,14 +6,14 @@
 
   <div class="card">
     <h2 style="margin-top:0">Portfolio occupancy trend</h2>
-    <canvas id="portfolioChart" height="90"></canvas>
+    <div style="height:180px"><canvas id="portfolioChart"></canvas></div>
     <p class="note">Gaps are months with nothing recorded yet, not 0%.</p>
   </div>
 
   <div class="grid-2">
     <div class="card">
       <h2 style="margin-top:0">By flat — {{ current_month }}</h2>
-      <canvas id="rankedChart" height="{{ rows|length * 34 + 20 }}"></canvas>
+      <div style="height:{{ rows|length * 34 + 20 }}px"><canvas id="rankedChart"></canvas></div>
     </div>
     <div class="card">
       <h2 style="margin-top:0">Last 12 months</h2>
@@ -61,7 +61,7 @@
   <div class="card">
     <h2 style="margin-top:0">Compare flats over time</h2>
     <p class="note" style="margin-top:-6px">Click a name in the legend to show or hide just that flat's line.</p>
-    <canvas id="compareChart" height="110"></canvas>
+    <div style="height:280px"><canvas id="compareChart"></canvas></div>
   </div>
 
   <script>
@@ -71,22 +71,23 @@
     const teal = '#0ea472';
     const tealSoft = 'rgba(14,164,114,0.15)';
     const palette = ['#0ea472', '#e0932e', '#8e44ad', '#2980b9', '#e0483f', '#16a085', '#d35400', '#7f8c8d', '#27ae60', '#2c3e50', '#e67e22'];
+    const occScale = (extra) => quietScales(pctShort, Object.assign({ y: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }, extra || {}));
 
     new Chart(document.getElementById('portfolioChart'), {
       type: 'line',
-      data: { labels: months, datasets: [{ label: 'Occupancy %', data: portfolio, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.25, spanGaps: false }] },
-      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 } } },
+      data: { labels: months, datasets: [{ label: 'Occupancy', data: portfolio, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.3, spanGaps: false }] },
+      options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.y)}` } } }, scales: occScale() },
     });
 
     const rankedLabels = {{ rows|map(attribute='name')|list|tojson }};
     const rankedValues = {{ rows|map(attribute='occupancy')|list|tojson }}.map(v => Math.round(v * 1000) / 10);
     new Chart(document.getElementById('rankedChart'), {
       type: 'bar',
-      data: { labels: rankedLabels, datasets: [{ label: 'Occupancy %', data: rankedValues, backgroundColor: teal, borderRadius: 4 }] },
+      data: { labels: rankedLabels, datasets: [{ label: 'Occupancy', data: rankedValues, backgroundColor: teal }] },
       options: {
         indexAxis: 'y',
-        plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, max: 100 } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.x)}` } } },
+        scales: { x: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort } }, y: { grid: { display: false }, border: { display: false } } },
       },
     });
 
@@ -96,8 +97,7 @@
       borderColor: palette[i % palette.length],
       backgroundColor: 'transparent',
       spanGaps: false,
-      tension: 0.25,
-      pointRadius: 2,
+      tension: 0.3,
       hidden: i >= 4,
     }));
 
@@ -105,8 +105,8 @@
       type: 'line',
       data: { labels: months, datasets },
       options: {
-        scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: 'Occupancy %' } } },
-        plugins: { legend: { position: 'bottom' } },
+        scales: occScale(),
+        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${pctShort(i.parsed.y)}` } } },
       },
     });
   </script>

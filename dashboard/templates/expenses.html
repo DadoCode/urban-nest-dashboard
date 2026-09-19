@@ -15,12 +15,12 @@
 
   <div class="card" style="margin-top:20px">
     <h2 style="margin-top:0">Monthly Opex vs Capex, whole portfolio</h2>
-    <canvas id="costsChart" height="110"></canvas>
+    <div style="height:240px"><canvas id="costsChart"></canvas></div>
   </div>
 
   <h2>Costs by property — {{ current_month }}</h2>
   <div class="card">
-    <canvas id="byPropertyChart" height="{{ rows|length * 32 + 20 }}"></canvas>
+    <div style="height:{{ rows|length * 32 + 20 }}px"><canvas id="byPropertyChart"></canvas></div>
   </div>
   <div class="card" style="margin-top:14px">
     <table>
@@ -150,19 +150,26 @@
       data: {
         labels: months,
         datasets: [
-          { label: 'Opex (£)', data: opex, backgroundColor: '#0ea472' },
-          { label: 'Capex (£)', data: capex, backgroundColor: '#e0932e' },
+          { label: 'Opex', data: opex, backgroundColor: '#0ea472' },
+          { label: 'Capex', data: capex, backgroundColor: '#e0932e' },
         ],
       },
-      options: { scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } },
+      options: {
+        scales: quietScales(moneyShort, { x: { stacked: true, grid: { display: false }, border: { display: false } }, y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: moneyShort, maxTicksLimit: 6 } } }),
+        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
+      },
     });
 
     const propLabels = {{ rows|map(attribute='name')|list|tojson }};
     const propTotals = {{ rows|map(attribute='total_costs')|list|tojson }};
     new Chart(document.getElementById('byPropertyChart'), {
       type: 'bar',
-      data: { labels: propLabels, datasets: [{ label: 'Total costs (£)', data: propTotals, backgroundColor: '#0ea472', borderRadius: 4 }] },
-      options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } },
+      data: { labels: propLabels, datasets: [{ label: 'Total costs', data: propTotals, backgroundColor: '#0ea472' }] },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Total costs: ${moneyFull(i.parsed.x)}` } } },
+        scales: { x: { beginAtZero: true, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: moneyShort } }, y: { grid: { display: false }, border: { display: false } } },
+      },
     });
 
     function closeDrawer() {
