@@ -2,106 +2,135 @@
 {% block title %}Review document{% endblock %}
 {% block content %}
   <h1>Review: {{ doc.filename }}</h1>
-  <p class="subtitle">{{ prop.name if prop else 'Flat not detected — choose one per row below' }} · uploaded {{ doc.uploaded_at }} · status: {{ doc.status }}</p>
+  <p class="subtitle">{{ prop.name if prop else 'Flat not detected — choose one per row below' }} · uploaded {{ doc.uploaded_at }} · status: {{ 'needs review' if doc.status in ('pending', 'extracted') else doc.status }}</p>
 
-  <div class="card">
-    {% if items %}
-      <p class="note" style="margin-top:0">Edit anything that's wrong, untick any row that shouldn't count, then confirm. Nothing is saved to the ledger until you confirm.</p>
-      <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
-        <div class="mini-form" style="margin-top:0; margin-bottom:12px">
-          <button type="button" onclick="bulkSet('property_id', document.getElementById('bulk-property').value)">Set flat for checked rows</button>
-          <select id="bulk-property"><option value="">—</option>{% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
-          <button type="button" onclick="bulkSet('category', document.getElementById('bulk-category').value)">Set category for checked rows</button>
-          <select id="bulk-category">{% for c in ['purchase','cleaning','utilities','booking_income','other'] %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+  <div class="review-split">
+    <div class="review-preview">
+      {% if is_pdf %}
+        <iframe src="{{ url_for('documents.file', doc_id=doc.id) }}"></iframe>
+      {% elif is_image %}
+        <img src="{{ url_for('documents.file', doc_id=doc.id) }}" alt="{{ doc.filename }}">
+      {% else %}
+        <div style="height:200px; display:flex; align-items:center; justify-content:center; color:var(--muted)">
+          <div>
+            <p>No inline preview for this file type.</p>
+            <a href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank">Download {{ doc.filename }}</a>
+          </div>
         </div>
-        <table class="review-table">
-          <thead><tr><th></th><th>Flat</th><th>Month</th><th>Year</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount (£)</th><th>Confidence</th></tr></thead>
-          <tbody>
-            {% for item in items %}
-              {% set item_month = (item.date[5:7]|int) if item.date and item.date|length >= 7 else month %}
-              {% set item_year = (item.date[0:4]|int) if item.date and item.date|length >= 4 else year %}
-              <tr>
-                <td><input type="checkbox" class="row-include" name="include" value="{{ loop.index0 }}" checked></td>
-                <td>
+      {% endif %}
+    </div>
+
+    <div>
+      {% if doc.status == 'confirmed' %}
+        <div class="card">
+          <p class="note" style="margin:0">This document was confirmed{% if doc.reviewed %} and its transactions are on the ledger{% endif %}. Shown here read-only for reference.</p>
+        </div>
+        {% for item in items %}
+          <div class="review-row">
+            <div class="review-row-top">
+              <strong>{{ item.vendor or '(no vendor)' }} — £{{ '{:,.2f}'.format(item.amount) if item.amount is not none else '—' }}</strong>
+              <span class="status-pill {{ 'confirmed' if item.include else '' }}">{{ 'included' if item.include else 'excluded' }}</span>
+            </div>
+            <div class="note">{{ item.description or '' }} · {{ item.category }} · {{ item.date or '' }}</div>
+          </div>
+        {% endfor %}
+        {% if prop %}<a href="{{ url_for('properties.detail', property_id=prop.id) }}">Back to {{ prop.name }}</a>{% else %}<a href="{{ url_for('documents.index') }}">Back to Documents</a>{% endif %}
+
+      {% elif items %}
+        <p class="note" style="margin-top:0">Edit anything that's wrong, untick any row that shouldn't count, then confirm. Nothing is saved to the ledger until you confirm.</p>
+        <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}" id="review-form">
+          <div class="mini-form" style="margin-top:0; margin-bottom:14px">
+            <button type="button" onclick="bulkSet('property_id', document.getElementById('bulk-property').value)">Set flat</button>
+            <select id="bulk-property"><option value="">—</option>{% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+            <button type="button" onclick="bulkSet('category', document.getElementById('bulk-category').value)">Set category</button>
+            <select id="bulk-category">{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+          </div>
+
+          {% for item in items %}
+            {% set item_month = (item.date[5:7]|int) if item.date and item.date|length >= 7 else month %}
+            {% set item_year = (item.date[0:4]|int) if item.date and item.date|length >= 4 else year %}
+            <div class="review-row" data-row>
+              <input type="hidden" name="item_id" value="{{ item.id }}">
+              <div class="review-row-top">
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem">
+                  <input type="checkbox" class="row-include" name="include" value="{{ item.id }}" {{ 'checked' if item.include }} onchange="this.closest('[data-row]').classList.toggle('excluded', !this.checked)">
+                  Include
+                </label>
+                <span>
+                  {% if item.duplicate_of %}<span class="status-pill" style="background:var(--red-dim); color:var(--red)">possible duplicate</span>{% endif %}
+                  {% if item.confidence is not none and item.confidence < 0.7 %}<span class="status-pill">low confidence</span>{% endif %}
+                </span>
+              </div>
+              <div class="review-row-grid">
+                <label>Flat
                   <select name="property_id" class="row-property">
                     <option value="">Choose…</option>
-                    {% for p in flats %}
-                      <option value="{{ p.id }}" {{ 'selected' if (doc.property_id and p.id == doc.property_id) }}>{{ p.name }}</option>
-                    {% endfor %}
+                    {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == item.property_id }}>{{ p.name }}</option>{% endfor %}
                   </select>
-                </td>
-                <td><select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == item_month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select></td>
-                <td><input name="year" value="{{ item_year }}" size="4"></td>
-                <td><input name="vendor" value="{{ item.vendor or '' }}"></td>
-                <td><input name="description" value="{{ item.description or '' }}"></td>
-                <td>
+                </label>
+                <label>Month
+                  <select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == item_month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select>
+                </label>
+                <label>Year <input name="year" value="{{ item_year }}"></label>
+                <label>Vendor <input name="vendor" value="{{ item.vendor or '' }}"></label>
+                <label>Description <input name="description" value="{{ item.description or '' }}"></label>
+                <label>Category
                   <select name="category" class="row-category">
-                    {% for c in ['purchase','cleaning','utilities','booking_income','other'] %}
-                      <option value="{{ c }}" {{ 'selected' if item.category == c }}>{{ c }}</option>
-                    {% endfor %}
+                    {% for c in categories %}<option value="{{ c }}" {{ 'selected' if item.category == c }}>{{ c }}</option>{% endfor %}
                   </select>
-                </td>
-                <td><input name="amount" type="number" step="0.01" value="{{ item.amount }}"></td>
-                <td>
-                  {% if item.possible_duplicate %}<span class="status-pill" style="background:var(--red-dim); color:var(--red)">possible duplicate</span>{% endif %}
-                  {% if item.confidence is not none and item.confidence < 0.7 %}<span class="status-pill">low confidence</span>{% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        <div class="dialog-actions" style="justify-content:flex-start; margin-top:14px">
-          <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm &amp; add to ledger</button>
-          {% if prop %}<a href="{{ url_for('properties.detail', property_id=prop.id) }}" style="align-self:center">Cancel</a>{% else %}<a href="{{ url_for('documents.index') }}" style="align-self:center">Cancel</a>{% endif %}
-        </div>
-      </form>
-      <script>
-        function bulkSet(field, value) {
-          if (!value) return;
-          document.querySelectorAll('.row-include:checked').forEach(cb => {
-            const row = cb.closest('tr');
-            const el = row.querySelector(field === 'property_id' ? '.row-property' : '.row-category');
-            if (el) el.value = value;
-          });
-        }
-      </script>
-    {% else %}
-      <p class="note" style="margin-top:0">Nothing was auto-extracted from this file. Add its line items by hand:</p>
-      <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
-        <table class="review-table">
-          <thead><tr><th></th><th>Flat</th><th>Month</th><th>Year</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount (£)</th></tr></thead>
-          <tbody>
-            {% for i in range(5) %}
-              <tr>
-                <td><input type="checkbox" name="include" value="{{ i }}" checked></td>
-                <td>
+                </label>
+                <label>Amount (£) <input name="amount" type="number" step="0.01" value="{{ item.amount }}"></label>
+              </div>
+            </div>
+          {% endfor %}
+
+          <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm {{ items|length }} transaction{{ 's' if items|length != 1 }}</button>
+        </form>
+        <script>
+          function bulkSet(field, value) {
+            if (!value) return;
+            document.querySelectorAll('.row-include:checked').forEach(cb => {
+              const row = cb.closest('[data-row]');
+              const el = row.querySelector(field === 'property_id' ? '.row-property' : '.row-category');
+              if (el) el.value = value;
+            });
+          }
+        </script>
+
+      {% else %}
+        <p class="note" style="margin-top:0">Nothing was auto-extracted from this file. Add its line items by hand:</p>
+        <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
+          {% for i in range(5) %}
+            <div class="review-row" data-row>
+              <div class="review-row-top">
+                <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem">
+                  <input type="checkbox" name="include" value="{{ i }}" checked> Include
+                </label>
+              </div>
+              <div class="review-row-grid">
+                <label>Flat
                   <select name="property_id">
                     <option value="">Choose…</option>
-                    {% for p in flats %}
-                      <option value="{{ p.id }}" {{ 'selected' if (doc.property_id and p.id == doc.property_id) }}>{{ p.name }}</option>
-                    {% endfor %}
+                    {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if (doc.property_id and p.id == doc.property_id) }}>{{ p.name }}</option>{% endfor %}
                   </select>
-                </td>
-                <td><select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select></td>
-                <td><input name="year" value="{{ year }}" size="4"></td>
-                <td><input name="vendor"></td>
-                <td><input name="description"></td>
-                <td>
-                  <select name="category">
-                    {% for c in ['purchase','cleaning','utilities','booking_income','other'] %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-                  </select>
-                </td>
-                <td><input name="amount" type="number" step="0.01"></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        <p class="note">Leave the amount blank on any row you don't need — blank rows are skipped.</p>
-        <div class="dialog-actions" style="justify-content:flex-start; margin-top:14px">
+                </label>
+                <label>Month
+                  <select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select>
+                </label>
+                <label>Year <input name="year" value="{{ year }}"></label>
+                <label>Vendor <input name="vendor"></label>
+                <label>Description <input name="description"></label>
+                <label>Category
+                  <select name="category">{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+                </label>
+                <label>Amount (£) <input name="amount" type="number" step="0.01"></label>
+              </div>
+            </div>
+          {% endfor %}
+          <p class="note">Leave the amount blank on any row you don't need — blank rows are skipped.</p>
           <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm &amp; add to ledger</button>
-          {% if prop %}<a href="{{ url_for('properties.detail', property_id=prop.id) }}" style="align-self:center">Cancel</a>{% else %}<a href="{{ url_for('documents.index') }}" style="align-self:center">Cancel</a>{% endif %}
-        </div>
-      </form>
-    {% endif %}
+        </form>
+      {% endif %}
+    </div>
   </div>
 {% endblock %}

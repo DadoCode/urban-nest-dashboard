@@ -412,3 +412,27 @@ dialog input, dialog select {
 .drawer-form input, .drawer-form select {
   padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 0.85rem; font-family: inherit;
 }
+
+/* ---------- document inbox ---------- */
+
+.dropzone {
+  border: 2px dashed var(--line); border-radius: var(--radius); padding: 36px 20px;
+  text-align: center; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.dropzone.drag-over { border-color: var(--accent); background: var(--accent-dim); }
+.dropzone-label { font-size: 1.1rem; font-weight: 700; margin-bottom: 4px; }
+
+/* ---------- document review workspace ---------- */
+
+.review-split { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .review-split { grid-template-columns: 1fr; } }
+.review-preview { position: sticky; top: 20px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.review-preview iframe, .review-preview img { width: 100%; height: 640px; border: none; border-radius: 6px; object-fit: contain; background: var(--bg); }
+.review-row { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 10px; background: var(--card); }
+.review-row.excluded { opacity: 0.5; }
+.review-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.review-row-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.review-row-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 0.72rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.review-row-grid input, .review-row-grid select {
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 0.85rem; font-family: inherit; text-transform: none; font-weight: 400;
+}

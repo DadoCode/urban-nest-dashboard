@@ -5,13 +5,10 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 import db
 import services.kpis as kpis
 from services.audit import record, record_edits
-from services.common import MONTH_NAMES, get_properties, get_property
+from services.common import CATEGORIES, MONTH_NAMES, get_properties, get_property
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("expenses", __name__)
-
-CATEGORIES = ["purchase", "cleaning", "utilities", "maintenance", "management_fee",
-              "insurance", "software", "accounting", "furniture", "booking_income", "other"]
 
 
 @bp.route("/expenses")

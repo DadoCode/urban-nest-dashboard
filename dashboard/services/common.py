@@ -8,6 +8,9 @@ MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+CATEGORIES = ["purchase", "cleaning", "utilities", "maintenance", "management_fee",
+              "insurance", "software", "accounting", "furniture", "booking_income", "other"]
+
 
 def pct_delta(current, previous, min_base=0):
     """None when there's nothing to compare against, or when `previous` is

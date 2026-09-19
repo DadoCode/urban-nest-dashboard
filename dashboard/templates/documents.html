@@ -2,51 +2,107 @@
 {% block title %}Documents — Urban Nest Estates{% endblock %}
 {% block content %}
   <h1>Documents</h1>
-  <p class="subtitle">Upload whatever came in this month — the system tries to work out the flat, the period and the line items; nothing touches the ledger until you review and confirm it.</p>
+  <p class="subtitle">Upload, process and review financial source documents. Nothing touches the ledger until you review and confirm it.</p>
+
+  <div class="tiles" style="margin-bottom:20px">
+    <div class="tile"><div class="label">Needs review</div><div class="value">{{ counts.needs_review or 0 }}</div></div>
+    <div class="tile"><div class="label">Failed to extract</div><div class="value">{{ counts.failed or 0 }}</div></div>
+    <div class="tile"><div class="label">Complete</div><div class="value">{{ counts.complete or 0 }}</div></div>
+  </div>
 
   <div class="card">
-    <h2 style="margin-top:0">Upload</h2>
-    <form class="upload-form" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
-      <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx" multiple required>
-      <select name="property_id">
-        <option value="">Auto-detect flat</option>
-        {% for p in all_properties %}
-          <option value="{{ p.id }}">{{ p.name }}</option>
-        {% endfor %}
-      </select>
-      <select name="doc_type">
-        <option value="amazon_order">Amazon / Temu order</option>
-        <option value="cleaning_invoice">Cleaning invoice</option>
-        <option value="booking_statement">Booking / Airbnb statement</option>
-        <option value="bank_statement">Bank statement</option>
-        <option value="utility_bill">Utility bill</option>
-        <option value="other">Other</option>
-      </select>
-      <button type="submit">Upload</button>
+    <form id="upload-form" class="upload-form" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
+      <div id="dropzone" class="dropzone">
+        <div class="dropzone-label">Drop files anywhere</div>
+        <div class="note">PDF · CSV · XLSX · JPG · PNG</div>
+        <div class="note" style="margin:8px 0">or</div>
+        <button type="button" onclick="document.getElementById('file-input').click()">Select files</button>
+        <input id="file-input" type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx" multiple required style="display:none">
+        <div id="file-list" class="note" style="margin-top:10px"></div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+        <select name="property_id">
+          <option value="">Auto-detect flat</option>
+          {% for p in all_properties %}
+            <option value="{{ p.id }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+        <select name="doc_type">
+          {% for key, label in doc_types.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+        <button type="submit">Upload</button>
+      </div>
     </form>
-    <p class="note" style="margin-top:10px">PDF, photo, CSV or XLSX. Multiple files at once go straight into the list below — open each to review.</p>
   </div>
 
   <h2>All documents</h2>
   <div class="card">
+    <form method="get" class="mini-form" style="margin-top:0">
+      <input type="text" name="d_q" value="{{ f_q }}" placeholder="Search filename...">
+      <select name="d_property">
+        <option value="">All properties</option>
+        {% for p in all_properties %}<option value="{{ p.id }}" {{ 'selected' if f_property == p.id }}>{{ p.name }}</option>{% endfor %}
+      </select>
+      <select name="d_type">
+        <option value="">All types</option>
+        {% for key, label in doc_types.items() %}<option value="{{ key }}" {{ 'selected' if f_type == key }}>{{ label }}</option>{% endfor %}
+      </select>
+      <select name="d_status">
+        <option value="">Any status</option>
+        <option value="pending" {{ 'selected' if f_status == 'pending' }}>Pending</option>
+        <option value="extracted" {{ 'selected' if f_status == 'extracted' }}>Needs review</option>
+        <option value="confirmed" {{ 'selected' if f_status == 'confirmed' }}>Confirmed</option>
+        <option value="failed" {{ 'selected' if f_status == 'failed' }}>Failed</option>
+      </select>
+      <button type="submit">Filter</button>
+      {% if f_q or f_property or f_type or f_status %}<a href="{{ url_for('documents.index') }}">Clear</a>{% endif %}
+    </form>
+
     {% if docs %}
-      <table>
-        <thead><tr><th>File</th><th>Type</th><th>Flat</th><th>Uploaded</th><th>Status</th><th></th></tr></thead>
+      <table style="margin-top:14px">
+        <thead><tr><th>Document</th><th>Property</th><th>Uploaded</th><th>Type</th><th class="num">Transactions</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead>
         <tbody>
           {% for d in docs %}
             <tr>
               <td>{{ d.filename }}</td>
-              <td>{{ d.doc_type or '—' }}</td>
               <td>{{ d.property_name }}</td>
               <td class="note">{{ d.uploaded_at }}</td>
-              <td><span class="status-pill {{ 'confirmed' if d.status == 'confirmed' else '' }}">{{ d.status }}</span></td>
-              <td>{% if d.status != 'confirmed' %}<a href="{{ url_for('documents.review', doc_id=d.id) }}">review</a>{% endif %}</td>
+              <td>{{ d.doc_type_label }}</td>
+              <td class="num">{{ d.item_count }}</td>
+              <td class="num">{{ '£{:,.2f}'.format(d.item_amount) if d.item_amount else '—' }}</td>
+              <td><span class="status-pill {{ 'confirmed' if d.status == 'confirmed' else '' }}">{{ 'needs review' if d.status in ('pending', 'extracted') else d.status }}</span></td>
+              <td><a href="{{ url_for('documents.review', doc_id=d.id) }}">{{ 'view' if d.status == 'confirmed' else 'review' }}</a></td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="note">Nothing uploaded yet.</p>
+      <p class="note" style="margin-top:14px">No documents match these filters.</p>
     {% endif %}
   </div>
+
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const fileList = document.getElementById('file-list');
+
+    function showFiles() {
+      const names = Array.from(fileInput.files).map(f => f.name);
+      fileList.textContent = names.length ? `${names.length} file(s): ${names.join(', ')}` : '';
+    }
+    fileInput.addEventListener('change', showFiles);
+
+    ['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+      e.preventDefault(); dropzone.classList.add('drag-over');
+    }));
+    ['dragleave', 'drop'].forEach(evt => dropzone.addEventListener(evt, (e) => {
+      e.preventDefault(); dropzone.classList.remove('drag-over');
+    }));
+    dropzone.addEventListener('drop', (e) => {
+      if (e.dataTransfer.files.length) {
+        fileInput.files = e.dataTransfer.files;
+        showFiles();
+      }
+    });
+  </script>
 {% endblock %}
