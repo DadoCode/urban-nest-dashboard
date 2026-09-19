@@ -4,7 +4,6 @@
     <h2 style="margin-top:0">Setup</h2>
     <ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px; font-size:0.9rem">
       <li style="color:var(--accent-ink)">✓ Property created</li>
-      <li style="color: {{ 'var(--accent-ink)' if checklist.has_target else 'var(--ink-soft)' }}">{{ '✓' if checklist.has_target else '○' }} Set a financial target</li>
       {% if not is_overhead %}
         <li style="color: {{ 'var(--accent-ink)' if checklist.has_calendar else 'var(--ink-soft)' }}">{{ '✓' if checklist.has_calendar else '○' }} Add a booking calendar</li>
       {% endif %}
@@ -15,17 +14,12 @@
   {% if not is_overhead %}
   <div class="card">
     <h2 style="margin-top:0">Target — {{ month_name }} {{ year }}</h2>
-    {% if goal_progress is not none %}
-      <p class="subtitle" style="margin-bottom:6px">Target £{{ '{:,.0f}'.format(goal.revenue_target) }} · {{ goal_progress }}% reached so far</p>
+    {% if rev_target %}
+      <p class="subtitle" style="margin-bottom:0">£{{ '{:,.0f}'.format(rev_target) }} · {{ goal_progress }}% reached so far</p>
+      <p class="note" style="margin-top:6px">Based on this flat's trailing 3-month average revenue -- recalculated every month from real performance, not a fixed number. <a href="{{ url_for('properties.detail', property_id=prop.id) }}">See it on Overview</a>.</p>
     {% else %}
-      <p class="note">No revenue target set for this month yet.</p>
+      <p class="note">Not enough history yet to set a target -- once a few months of real revenue are on the ledger, a target based on that average will show up here automatically.</p>
     {% endif %}
-    <form class="goal-form" method="post" action="{{ url_for('properties.update_goal', property_id=prop.id) }}">
-      <label>Revenue target £ <input type="number" step="10" name="income_target" value="{{ goal.revenue_target if goal and goal.revenue_target is not none else '' }}"></label>
-      <label>Profit target £ <input type="number" step="10" name="profit_target" value="{{ goal.profit_target if goal and goal.profit_target is not none else '' }}"></label>
-      <label>Occupancy target % <input type="number" step="1" min="0" max="100" name="occupancy_target" value="{{ goal.occupancy_target if goal and goal.occupancy_target is not none else '' }}"></label>
-      <button type="submit">Save target</button>
-    </form>
   </div>
 
   <div class="card">
@@ -39,7 +33,7 @@
   </div>
   {% else %}
   <div class="card">
-    <h2 style="margin-top:0">Target — {{ month_name }} {{ year }}</h2>
+    <h2 style="margin-top:0">Target</h2>
     <p class="note">Shared overheads aren't measured against a revenue target.</p>
   </div>
   {% endif %}

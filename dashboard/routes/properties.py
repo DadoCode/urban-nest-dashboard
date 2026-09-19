@@ -7,8 +7,7 @@ import db
 import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
-from services.common import (MONTH_NAMES, get_properties, get_property, pct_delta,
-                              target_row, tiles_for, yoy_pairs)
+from services.common import MONTH_NAMES, get_properties, get_property, pct_delta, tiles_for, yoy_pairs
 from services.completeness import completeness_for, seed_defaults
 from services.vendors import get_or_create_vendor
 
@@ -36,8 +35,7 @@ def index():
     rows = []
     for p in flats:
         snap = kpis.kpi_snapshot(conn, p["id"], start, end)
-        target = target_row(conn, p["id"], year, month)
-        rev_target = (target["revenue_target"] if target else 0) or 0
+        rev_target = kpis.dynamic_target(conn, p["id"], year, month, year, month, "revenue")
         completeness = completeness_for(conn, p["id"], start, end)
         rows.append({
             "id": p["id"], "name": p["name"], "active": p["active"],
@@ -67,10 +65,9 @@ def _load(conn, property_id):
 
 
 def _checklist(conn, property_id, is_overhead, year, month):
-    has_target = bool(target_row(conn, property_id, year, month))
     has_calendar = bool(conn.execute("SELECT ical_url FROM properties WHERE id=?", (property_id,)).fetchone()["ical_url"])
     has_documents = bool(conn.execute("SELECT 1 FROM documents WHERE property_id=? LIMIT 1", (property_id,)).fetchone())
-    return {"has_target": has_target, "has_calendar": has_calendar, "has_documents": has_documents}
+    return {"has_calendar": has_calendar, "has_documents": has_documents}
 
 
 def _remember_visit(resp, property_id):
@@ -94,13 +91,12 @@ def detail(property_id):
         prev_cost = kpis.costs(conn, property_id, pstart, pend)
         tiles = [{"label": f"Total costs — {MONTH_NAMES[month]} {year}", "value": f"£{cur_cost:,.0f}",
                   "delta": pct_delta(cur_cost, prev_cost)}] if cur_cost or prev_cost else []
-        goal_progress, target = None, None
+        goal_progress, rev_target = None, None
     else:
         tiles, cur, prev = tiles_for(conn, property_id, year, month)
         if f"{year}-{month:02d}" not in kpis.months_with_data(conn, property_id):
             tiles = []
-        target = target_row(conn, property_id, year, month)
-        rev_target = (target["revenue_target"] if target else 0) or 0
+        rev_target = kpis.dynamic_target(conn, property_id, year, month, year, month, "revenue")
         goal_progress = round(cur["revenue"] / rev_target * 100, 1) if rev_target else None
 
     # Anchored + clipped to trailing 12 months -- see the matching note in
@@ -113,7 +109,7 @@ def detail(property_id):
     resp = make_response(render_template(
         "property/overview.html", active="properties", all_properties=get_properties(conn),
         active_property=property_id, active_tab="overview",
-        prop=prop, is_overhead=is_overhead, tiles=tiles, goal=target, goal_progress=goal_progress,
+        prop=prop, is_overhead=is_overhead, tiles=tiles, rev_target=rev_target, goal_progress=goal_progress,
         year=year, month=month, month_name=MONTH_NAMES[month], yoy=yoy,
         months_json=json.dumps([s["ym"] for s in series]),
         income_json=json.dumps([s["revenue"] for s in series]),
@@ -213,10 +209,9 @@ def settings_tab(property_id):
         flash(f"Unknown property '{property_id}'.")
         return redirect(url_for("overview.index"))
 
-    target = target_row(conn, property_id, year, month)
-    goal_progress = None
+    goal_progress, rev_target = None, None
     if not is_overhead:
-        rev_target = (target["revenue_target"] if target else 0) or 0
+        rev_target = kpis.dynamic_target(conn, property_id, year, month, year, month, "revenue")
         if rev_target:
             start, end = kpis.month_bounds(year, month)
             cur_rev = kpis.revenue(conn, property_id, start, end)
@@ -226,7 +221,7 @@ def settings_tab(property_id):
         "property/settings.html", active="properties", all_properties=get_properties(conn),
         active_property=property_id, active_tab="settings",
         prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
-        goal=target, goal_progress=goal_progress,
+        rev_target=rev_target, goal_progress=goal_progress,
         checklist=_checklist(conn, property_id, is_overhead, year, month),
     ))
     if not is_overhead:
@@ -254,31 +249,6 @@ def add():
     conn.commit()
     flash(f"Added {name}. Upload its first document or add an entry to get it on the board.")
     return redirect(url_for("properties.detail", property_id=slug))
-
-
-@bp.route("/property/<property_id>/goal", methods=["POST"])
-def update_goal(property_id):
-    conn = db.get_conn()
-    year, month = kpis.current_period(conn)
-    try:
-        revenue_target = float(request.form["income_target"])
-        profit_target = float(request.form["profit_target"])
-        occ_raw = request.form.get("occupancy_target", "").strip()
-        occupancy_target = float(occ_raw) if occ_raw else None
-    except (KeyError, ValueError):
-        flash("Enter numbers for the goal fields.")
-        return redirect(request.referrer or url_for("overview.index"))
-    conn.execute(
-        """INSERT INTO targets (property_id, year, month, revenue_target, profit_target, occupancy_target, source)
-           VALUES (?,?,?,?,?,?,'manual')
-           ON CONFLICT(property_id, year, month) DO UPDATE SET
-             revenue_target=excluded.revenue_target, profit_target=excluded.profit_target,
-             occupancy_target=excluded.occupancy_target""",
-        (property_id, year, month, revenue_target, profit_target, occupancy_target),
-    )
-    conn.commit()
-    flash("Goal updated.")
-    return redirect(url_for("properties.settings_tab", property_id=property_id))
 
 
 @bp.route("/property/<property_id>/sync_calendar", methods=["POST"])

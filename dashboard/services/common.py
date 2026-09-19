@@ -40,23 +40,6 @@ def get_property(conn, property_id):
     return conn.execute("SELECT * FROM properties WHERE id = ?", (property_id,)).fetchone()
 
 
-def target_row(conn, property_id, year, month):
-    return conn.execute(
-        "SELECT * FROM targets WHERE property_id=? AND year=? AND month=?",
-        (property_id, year, month),
-    ).fetchone()
-
-
-def target_total(conn, property_id, rng, field="revenue_target"):
-    clause, params = ("AND property_id=?", (property_id,)) if property_id else ("", ())
-    row = conn.execute(
-        f"""SELECT SUM({field}) t FROM targets WHERE {field} IS NOT NULL {clause}
-            AND (year*100+month) BETWEEN ? AND ?""",
-        (*params, rng["start_year"] * 100 + rng["start_month"], rng["end_year"] * 100 + rng["end_month"]),
-    ).fetchone()
-    return row["t"] or 0
-
-
 def yoy_pairs(conn, property_id, current_period):
     """[(label, this_year, last_year, delta_pct), ...] for every month up to
     current_period where the same month exists a year earlier too."""

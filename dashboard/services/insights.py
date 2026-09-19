@@ -6,7 +6,7 @@ capping them. Every finding must be specific and numerical -- no vague
 AI-style commentary, and nothing here is invented, only read from the
 database (see the brief's "no fake UI" / "no generic AI insights" rules)."""
 import services.kpis as kpis
-from services.common import pct_delta, target_row
+from services.common import pct_delta
 from services.completeness import completeness_for, DOC_TYPE_LABELS
 
 
@@ -73,17 +73,20 @@ def find_occupancy_declines(conn, flats, end_year, end_month):
 def find_target_variances(conn, flats, end_year, end_month, is_partial):
     findings = []
     for p in flats:
-        target = target_row(conn, p["id"], end_year, end_month)
-        rev_target = (target["revenue_target"] if target else 0) or 0
+        rev_target = kpis.dynamic_target(conn, p["id"], end_year, end_month, end_year, end_month, "revenue")
         if not rev_target:
             continue
         start, end = kpis.month_bounds(end_year, end_month)
         actual = kpis.revenue(conn, p["id"], start, end)
         pct = round(actual / rev_target * 100)
-        if pct >= 100:
-            findings.append({"type": "positive", "text": f"{p['name']} has reached {pct}% of its revenue target"})
-        elif not is_partial and pct <= 50:
-            findings.append({"type": "warning", "text": f"{p['name']} is at only {pct}% of its revenue target"})
+        # The target is now a trailing 3-month average, not a fixed goal --
+        # "hit 100%" is just "matched recent pace" and would fire constantly
+        # as routine noise, so the bar for calling it out is meaningfully
+        # ahead of or behind that recent pace, not merely at or under it.
+        if pct >= 120:
+            findings.append({"type": "positive", "text": f"{p['name']} is at {pct}% of its trailing-average pace"})
+        elif not is_partial and pct <= 60:
+            findings.append({"type": "warning", "text": f"{p['name']} is at only {pct}% of its trailing-average pace"})
     return findings
 
 

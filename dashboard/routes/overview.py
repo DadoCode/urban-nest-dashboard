@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request
 
 import db
 import services.kpis as kpis
-from services.common import get_properties, pct_delta, target_row, target_total, yoy_pairs
+from services.common import get_properties, pct_delta, yoy_pairs
 from services.completeness import completeness_for, DOC_TYPE_LABELS
 from services.context import resolve_context
 from services.insights import compute_insights
@@ -57,10 +57,11 @@ def _kpi_rows(conn, property_id, ctx):
             "note": extra_note,
         }
 
-    rev_target = target_total(conn, property_id, ctx, "revenue_target")
+    rev_target = kpis.dynamic_target(conn, property_id, ctx["start_year"], ctx["start_month"],
+                                      ctx["end_year"], ctx["end_month"], "revenue")
     primary = [
         tile(f"Revenue — {period_label}", "revenue", lambda v: f"£{v:,.0f}",
-             (f"{cur['revenue'] / rev_target * 100:.0f}% of £{rev_target:,.0f} target" if rev_target else None)),
+             (f"{cur['revenue'] / rev_target * 100:.0f}% of £{rev_target:,.0f} trailing-average target" if rev_target else None)),
         tile("Net profit", "net_profit", lambda v: f"£{v:,.0f}"),
         tile("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%"),
         tile("RevPAR", "revpar", lambda v: f"£{v:,.0f}"),
@@ -76,18 +77,16 @@ def _kpi_rows(conn, property_id, ctx):
 
 def _target_bars(conn, property_id, ctx, cur):
     """Distinct bars per metric -- never merge revenue/profit/occupancy
-    targets into one ambiguous figure."""
-    rev_target = target_total(conn, property_id, ctx, "revenue_target")
-    profit_target = target_total(conn, property_id, ctx, "profit_target")
-    if property_id:
-        occ_row = target_row(conn, property_id, ctx["end_year"], ctx["end_month"])
-        occ_target = (occ_row["occupancy_target"] if occ_row else None)
-    else:
-        occ_rows = conn.execute(
-            "SELECT occupancy_target FROM targets WHERE year=? AND month=? AND occupancy_target IS NOT NULL",
-            (ctx["end_year"], ctx["end_month"]),
-        ).fetchall()
-        occ_target = (sum(r["occupancy_target"] for r in occ_rows) / len(occ_rows)) if occ_rows else None
+    targets into one ambiguous figure. Targets are computed from each
+    property's own trailing 3-month average rather than a stored number
+    someone typed in once -- a hand-set target from the original Excel
+    import stops meaning anything once the business has grown past it
+    (routinely showing "400% of target"); a trailing average self-adjusts
+    every month instead of going stale."""
+    args = (ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+    rev_target = kpis.dynamic_target(conn, property_id, *args, "revenue")
+    profit_target = kpis.dynamic_target(conn, property_id, *args, "net_profit")
+    occ_target = kpis.dynamic_target(conn, property_id, *args, "occupancy")
 
     bars = []
     if rev_target:
@@ -100,9 +99,10 @@ def _target_bars(conn, property_id, ctx, cur):
                       "actual_fmt": f"£{cur['net_profit']:,.0f}", "target_fmt": f"£{profit_target:,.0f}"})
     if occ_target:
         cur_occ_pct = cur["occupancy"] * 100
-        bars.append({"label": "Occupancy", "actual": cur_occ_pct, "target": occ_target,
-                      "pct": min(round(cur_occ_pct / occ_target * 100), 999),
-                      "actual_fmt": f"{cur_occ_pct:.0f}%", "target_fmt": f"{occ_target:.0f}%"})
+        occ_target_pct = occ_target * 100
+        bars.append({"label": "Occupancy", "actual": cur_occ_pct, "target": occ_target_pct,
+                      "pct": min(round(cur_occ_pct / occ_target_pct * 100), 999) if occ_target_pct else 0,
+                      "actual_fmt": f"{cur_occ_pct:.0f}%", "target_fmt": f"{occ_target_pct:.0f}%"})
     return bars
 
 
@@ -138,7 +138,8 @@ def index():
     prop_rows = []
     for p in flats:
         snap = kpis.kpi_snapshot(conn, p["id"], start, end)
-        target = target_total(conn, p["id"], ctx, "revenue_target")
+        target = kpis.dynamic_target(conn, p["id"], ctx["start_year"], ctx["start_month"],
+                                      ctx["end_year"], ctx["end_month"], "revenue")
         prop_rows.append({
             "id": p["id"], "name": p["name"],
             "revenue": snap["revenue"], "profit": snap["net_profit"], "margin": snap["margin"],
