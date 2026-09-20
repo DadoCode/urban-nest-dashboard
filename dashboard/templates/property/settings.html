@@ -23,8 +23,8 @@
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0">Booking calendar</h2>
-    <p class="note" style="margin-top:-6px">Paste this flat's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Never overwrites a reservation already on file.</p>
+    <h2 style="margin-top:0">Booking calendar (optional)</h2>
+    <p class="note" style="margin-top:-6px">Paste this flat's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>
     <form class="goal-form" method="post" action="{{ url_for('properties.sync_calendar', property_id=prop.id) }}">
       <input type="url" name="ical_url" placeholder="https://www.airbnb.com/calendar/ical/....ics" value="{{ prop.ical_url or '' }}" style="flex: 1 1 320px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;">
       <button type="submit">Sync now</button>

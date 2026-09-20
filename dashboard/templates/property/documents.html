@@ -5,7 +5,7 @@
     <p class="note" style="margin-top:-6px">Amazon/Temu orders, cleaning invoices, booking-platform statements, bank statements, receipts — PDF or photo. Upload whatever came in, review the extracted lines, confirm, and this flat's numbers update automatically.
       {% if not extraction_available %}No extraction key is configured right now, so you'll enter the line items by hand after uploading.{% else %}Claude will pull out the line items for you to review before anything's added to the ledger.{% endif %}</p>
     <form class="upload-form" method="post" action="{{ url_for('documents.upload_property', property_id=prop.id) }}" enctype="multipart/form-data">
-      <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp" required>
+      <input type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx" required>
       <select name="doc_type">
         <option value="amazon_order">Amazon / Temu order</option>
         <option value="cleaning_invoice">Cleaning invoice</option>

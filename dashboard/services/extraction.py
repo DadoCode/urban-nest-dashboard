@@ -47,6 +47,123 @@ than line items, return that as a single item. On a bank statement, skip \
 anything that's clearly a personal transaction rather than this business's."""
 
 
+RESERVATION_PROMPT = """You are looking at a payout/earnings/reservation statement from a \
+short-term-rental booking platform (Airbnb, Booking.com, Vrbo or similar) for a UK \
+property business. It lists individual guest reservations, possibly for several flats.
+
+Return ONLY a JSON object (no prose, no markdown fences) shaped like:
+{
+  "document_hint": "the listing/property name(s) printed on the statement, or null",
+  "period_hint": "YYYY-MM for the month this statement covers, or null",
+  "platform": "airbnb" | "booking_com" | "vrbo" | "other",
+  "items": [
+    {"reservation_id": "the confirmation/reservation code, or null",
+     "description": "the listing/property name this reservation was for, or null",
+     "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD",
+     "gross": number (guest total before platform fees, or null),
+     "fees": number (platform/host/service fees deducted, or 0),
+     "net": number (what the host actually receives for this reservation),
+     "confidence": number from 0 to 1}
+  ]
+}
+
+One item per reservation -- skip payout-summary lines, adjustments without dates, \
+and totals. Never invent a date or amount that isn't printed. All amounts positive."""
+
+
+def _parse_date(value):
+    """Best-effort date -> 'YYYY-MM-DD'. Day-first for ambiguous d/m/y,
+    since this is a UK business exporting UK-locale statements."""
+    import datetime
+    if value is None:
+        return None
+    if isinstance(value, (datetime.date, datetime.datetime)):
+        return value.strftime("%Y-%m-%d")
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y", "%m/%d/%Y"):
+        try:
+            return datetime.datetime.strptime(text[:20] if fmt != "%Y-%m-%d" else text[:10], fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _num(value):
+    if value is None:
+        return None
+    raw = str(value).replace(",", "").replace("£", "").replace("$", "").replace("€", "").strip()
+    if raw in ("", "-"):
+        return None
+    neg = raw.startswith("(") and raw.endswith(")")
+    try:
+        n = float(raw.strip("()"))
+    except ValueError:
+        return None
+    return -n if neg else n
+
+
+_RES_COLUMN_HINTS = {
+    "reservation_id": ("confirmation code", "confirmation", "reservation number", "reservation id", "reservation", "booking number", "booking id", "book number"),
+    "check_in": ("start date", "check-in", "check in", "checkin", "arrival", "arriving"),
+    "check_out": ("end date", "check-out", "check out", "checkout", "departure"),
+    "nights": ("nights",),
+    "listing": ("listing", "property", "accommodation", "unit", "apartment"),
+    "gross": ("gross earnings", "gross", "total price", "price", "reservation amount"),
+    "fees": ("service fee", "host fee", "commission", "platform fee", "fee"),
+    "net": ("paid out", "net", "payout", "host earnings", "amount paid", "earnings"),
+    "type": ("type",),
+}
+
+
+def _guess_reservation_columns(header):
+    lower = [str(h or "").strip().lower() for h in header]
+    found = {}
+    for field, hints in _RES_COLUMN_HINTS.items():
+        for hint in hints:  # earlier hints are more specific -- try them first
+            idx = next((i for i, col in enumerate(lower) if hint in col and i not in found.values()), None)
+            if idx is not None:
+                found[field] = idx
+                break
+    return found
+
+
+def _rows_to_reservations(header, rows):
+    import datetime
+    cols = _guess_reservation_columns(header)
+    if "check_in" not in cols or not ({"net", "gross"} & set(cols)):
+        return None  # can't be read as a reservation statement
+    items = []
+    for row in rows:
+        def cell(field):
+            i = cols.get(field)
+            return row[i] if i is not None and i < len(row) else None
+        row_type = str(cell("type") or "").lower()
+        if row_type and "reserv" not in row_type and "booking" not in row_type:
+            continue  # payout / adjustment / tax lines
+        check_in = _parse_date(cell("check_in"))
+        if not check_in:
+            continue
+        check_out = _parse_date(cell("check_out"))
+        nights = _num(cell("nights"))
+        if not check_out and nights:
+            check_out = (datetime.date.fromisoformat(check_in) + datetime.timedelta(days=int(nights))).isoformat()
+        if not check_out:
+            continue
+        gross, fees, net = _num(cell("gross")), _num(cell("fees")), _num(cell("net"))
+        if net is None and gross is not None:
+            net = gross - abs(fees or 0)
+        if net is None:
+            continue
+        items.append({"reservation_id": (str(cell("reservation_id")).strip() or None) if cell("reservation_id") else None,
+                      "description": (str(cell("listing")).strip() or None) if cell("listing") else None,
+                      "check_in": check_in, "check_out": check_out,
+                      "gross": abs(gross) if gross is not None else abs(net),
+                      "fees": abs(fees or 0), "net": abs(net), "confidence": 0.7})
+    return items
+
+
 def _load_key():
     return os.environ.get("ANTHROPIC_API_KEY")
 
@@ -55,17 +172,22 @@ def available():
     return bool(_load_key())
 
 
-def extract(file_path, mime_type=None):
+def extract(file_path, mime_type=None, doc_type=None):
+    """doc_type == 'booking_statement' means "read reservations" (each
+    item is a real booking with check-in/out); anything else reads plain
+    money-in/money-out transaction lines."""
     mime_type = mime_type or mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
     name = str(file_path).lower()
+    reservations = doc_type == "booking_statement"
     if name.endswith(".csv") or mime_type == "text/csv":
-        return _extract_csv(file_path)
+        return _extract_csv(file_path, reservations)
     if name.endswith(".xlsx") or mime_type in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",):
-        return _extract_xlsx(file_path)
-    return _extract_via_claude(file_path, mime_type)
+        return _extract_xlsx(file_path, reservations)
+    return _extract_via_claude(file_path, mime_type, RESERVATION_PROMPT if reservations else EXTRACTION_PROMPT, reservations)
 
 
-def _extract_via_claude(file_path, mime_type):
+def _extract_via_claude(file_path, mime_type, prompt=None, reservations=False):
+    prompt = prompt or EXTRACTION_PROMPT
     api_key = _load_key()
     if not api_key:
         return None
@@ -86,8 +208,8 @@ def _extract_via_claude(file_path, mime_type):
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
             model="claude-sonnet-5",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": [content_block, {"type": "text", "text": EXTRACTION_PROMPT}]}],
+            max_tokens=4096 if reservations else 2048,
+            messages=[{"role": "user", "content": [content_block, {"type": "text", "text": prompt}]}],
         )
         text = "".join(block.text for block in response.content if block.type == "text").strip()
         if text.startswith("```"):
@@ -100,6 +222,8 @@ def _extract_via_claude(file_path, mime_type):
             "items": result["items"],
             "document_hint": result.get("document_hint"),
             "period_hint": result.get("period_hint"),
+            "kind": "reservation" if reservations else "transaction",
+            "platform": result.get("platform"),
         }
     except Exception:
         return None
@@ -153,19 +277,22 @@ def _rows_to_items(header, rows):
     return items
 
 
-def _extract_csv(file_path):
+def _extract_csv(file_path, reservations=False):
     with open(file_path, newline="", encoding="utf-8-sig", errors="replace") as f:
         reader = csv.reader(f)
         rows = list(reader)
     if not rows:
         return None
+    if reservations:
+        items = _rows_to_reservations(rows[0], rows[1:])
+        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
     items = _rows_to_items(rows[0], rows[1:])
     if items is None:
         return None
-    return {"items": items, "document_hint": None, "period_hint": None}
+    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}
 
 
-def _extract_xlsx(file_path):
+def _extract_xlsx(file_path, reservations=False):
     try:
         import openpyxl
     except ImportError:
@@ -176,10 +303,13 @@ def _extract_xlsx(file_path):
     if not rows:
         return None
     header = [str(c) if c is not None else "" for c in rows[0]]
+    if reservations:
+        items = _rows_to_reservations(header, rows[1:])
+        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
     items = _rows_to_items(header, rows[1:])
     if items is None:
         return None
-    return {"items": items, "document_hint": None, "period_hint": None}
+    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}
 
 
 _NON_WORD = re.compile(r"[^a-z0-9]+")

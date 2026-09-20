@@ -191,6 +191,7 @@ def delete_transaction(tx_id):
         flash("Historical reconciliation adjustments can't be deleted -- they preserve the original Excel totals.")
         return redirect(url_for("expenses.index"))
     record(conn, "transaction", tx_id, "delete", old_value=f"{tx['vendor']} £{tx['amount']}")
+    conn.execute("UPDATE document_items SET duplicate_of=NULL WHERE duplicate_of=?", (tx_id,))
     conn.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
     conn.commit()
     flash("Transaction deleted.")

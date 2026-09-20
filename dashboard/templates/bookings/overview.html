@@ -17,7 +17,7 @@
     {% if upcoming.reservations %}
       <p class="subtitle" style="margin-bottom:0">{{ '%.0f'|format(upcoming.occupancy * 100) }}% booked · £{{ '{:,.0f}'.format(upcoming.revenue) }} confirmed revenue · {{ upcoming.reservations }} reservation{{ 's' if upcoming.reservations != 1 }}</p>
     {% else %}
-      <p class="note">No reservations on file with a check-in in the next 30 days. Connect a booking calendar on a flat's Settings tab to keep this current automatically.</p>
+      <p class="note">No reservations on file with a check-in in the next 30 days. Upload a booking statement on the Documents page to fill in real reservations.</p>
     {% endif %}
   </div>
 

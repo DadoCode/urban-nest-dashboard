@@ -7,12 +7,8 @@
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0">Booking calendar sync</h2>
-    {% if prop.ical_synced_at %}
-      <p class="note" style="margin-top:-6px">Last synced {{ prop.ical_synced_at }}. <a href="{{ url_for('properties.settings_tab', property_id=prop.id) }}">Change the calendar URL on Settings</a>.</p>
-    {% else %}
-      <p class="note" style="margin-top:-6px">No calendar connected yet. <a href="{{ url_for('properties.settings_tab', property_id=prop.id) }}">Add one on Settings</a> to fill in reservations automatically.</p>
-    {% endif %}
+    <h2 style="margin-top:0">Where reservations come from</h2>
+    <p class="note" style="margin-top:-6px">Reservations on this page come from the booking statements (Airbnb, Booking.com…) you upload. <a href="{{ url_for('properties.documents_tab', property_id=prop.id) }}">Upload a statement</a> and they appear here, replacing the Excel-imported figures for those months.</p>
   </div>
 
   <h2>Reservations</h2>

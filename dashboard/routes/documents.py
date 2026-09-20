@@ -4,8 +4,11 @@ import json
 from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, url_for
 
 import db
+from services.audit import record
 from services.common import CATEGORIES, get_properties, get_property
-from services.documents import save_upload
+import services.kpis as kpis
+from services.common import MONTH_NAMES
+from services.documents import find_duplicate_reservation, save_upload
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("documents", __name__)
@@ -46,14 +49,14 @@ def index():
     docs = conn.execute(
         f"SELECT * FROM documents WHERE {' AND '.join(clauses)} ORDER BY uploaded_at DESC LIMIT 200", params
     ).fetchall()
-    properties_by_id = {p["id"]: p for p in get_properties(conn)}
+    property_names = {p["id"]: p["name"] for p in get_properties(conn)}
     rows = []
     for d in docs:
         item_stats = conn.execute(
             "SELECT COUNT(*) n, COALESCE(SUM(amount),0) amt FROM document_items WHERE document_id=? AND include=1",
             (d["id"],),
         ).fetchone()
-        rows.append({**dict(d), "property_name": properties_by_id.get(d["property_id"], {}).get("name", "Unassigned"),
+        rows.append({**dict(d), "property_name": property_names.get(d["property_id"], "Unassigned"),
                      "doc_type_label": DOC_TYPE_LABELS.get(d["doc_type"], d["doc_type"] or "—"),
                      "item_count": item_stats["n"], "item_amount": item_stats["amt"]})
 
@@ -115,13 +118,16 @@ def review(doc_id):
     today = datetime.date.today()
     year = doc["detected_year"] or today.year
     month = doc["detected_month"] or today.month
+    res_mode = bool(items and items[0]["item_kind"] == "reservation") or (not items and doc["doc_type"] == "booking_statement")
+    item_dups = {i["id"] for i in items if i["item_kind"] == "reservation"
+                 and find_duplicate_reservation(conn, i["property_id"], {"reservation_id": i["reservation_id"], "check_in": i["check_in"], "check_out": i["check_out"]})}
     is_pdf = (doc["filename"] or "").lower().endswith(".pdf")
     is_image = (doc["filename"] or "").lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
     return render_template(
         "review_document.html", active="documents", all_properties=get_properties(conn),
         active_property=doc["property_id"], prop=prop, doc=doc, items=items,
         flats=get_properties(conn, include_overhead=False), year=year, month=month,
-        categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image,
+        categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image, res_mode=res_mode, item_dups=item_dups,
     )
 
 
@@ -140,6 +146,10 @@ def confirm(doc_id):
     included = set(request.form.getlist("include"))
     added = 0
     final_property_id = doc["property_id"]
+
+    first_kind = conn.execute("SELECT item_kind FROM document_items WHERE document_id=? LIMIT 1", (doc_id,)).fetchone()
+    if (first_kind and first_kind["item_kind"] == "reservation") or (not has_items and doc["doc_type"] == "booking_statement"):
+        return _confirm_reservations(conn, doc, doc_id, bool(has_items), included)
 
     if has_items:
         item_ids = request.form.getlist("item_id")
@@ -217,3 +227,86 @@ def confirm(doc_id):
     conn.commit()
     flash(f"{added} transaction{'s' if added != 1 else ''} added.")
     return redirect(url_for("properties.detail", property_id=final_property_id) if final_property_id else url_for("documents.index"))
+
+
+
+def _num(text):
+    try:
+        return abs(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def _confirm_reservations(conn, doc, doc_id, has_items, included):
+    """Booking-statement lines become real `bookings` rows (source='upload'),
+    never income transactions -- kpis.py sums both, so writing a reservation
+    as both would count it twice."""
+    f = request.form
+    item_ids = f.getlist("item_id")
+    n = len(f.getlist("check_in"))
+    added, skipped, final_property_id = 0, 0, doc["property_id"]
+    touched = {}  # (property_id, 'YYYY-MM') -> revenue before this upload
+    for i in range(n):
+        row_key = item_ids[i] if has_items else str(i)
+        pid = f.getlist("property_id")[i]
+        check_in, check_out = f.getlist("check_in")[i], f.getlist("check_out")[i]
+        net, gross, fees = _num(f.getlist("net")[i]), _num(f.getlist("gross")[i]), _num(f.getlist("fees")[i]) or 0
+        if net is None and gross is not None:
+            net = max(gross - fees, 0)
+        platform = f.getlist("platform")[i].strip() or None
+        code = f.getlist("reservation_id")[i].strip() or None
+        include_row = row_key in included
+        if has_items:
+            conn.execute(
+                """UPDATE document_items SET property_id=?, platform=?, reservation_id=?, check_in=?, check_out=?,
+                     gross_revenue=?, platform_fees=?, net_revenue=?, amount=?, include=?, reviewed=1 WHERE id=?""",
+                (pid, platform, code, check_in, check_out, gross, fees, net, net, 1 if include_row else 0, row_key))
+        if not include_row or not pid or not check_in or not check_out or net is None or check_out <= check_in:
+            if include_row:
+                skipped += 1
+            continue
+        key = (pid, check_in[:7])
+        if key not in touched:
+            y, m = map(int, key[1].split("-"))
+            touched[key] = kpis.revenue(conn, pid, *kpis.month_bounds(y, m))
+        conn.execute(
+            """INSERT INTO bookings (property_id, platform, reservation_id, check_in, check_out, gross_revenue,
+                   platform_fees, cleaning_fee, net_revenue, status, source, document_id)
+               VALUES (?,?,?,?,?,?,?,0,?,'confirmed','upload',?)""",
+            (pid, platform, code, check_in, check_out, gross if gross is not None else net, fees, net, doc_id))
+        added += 1
+        final_property_id = pid
+    conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?", (final_property_id, doc_id))
+    conn.commit()
+    flash(f"{added} reservation{'s' if added != 1 else ''} added."
+          + (f" {skipped} skipped -- each needs a flat, valid dates and an amount." if skipped else ""))
+    names = {p["id"]: p["name"] for p in get_properties(conn)}
+    for (pid, ym), before in touched.items():
+        y, m = map(int, ym.split("-"))
+        after = kpis.revenue(conn, pid, *kpis.month_bounds(y, m))
+        flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y} is now based on the reservations on file: "
+              f"£{before:,.0f} before, £{after:,.0f} now. If that looks low, the statement may not cover every "
+              f"channel or reservation for the month -- upload the rest, or delete these to restore the Excel figure.")
+    return redirect(url_for("bookings.index"))
+
+
+@bp.route("/documents/<int:doc_id>/undo", methods=["POST"])
+def undo(doc_id):
+    """Reverses a confirmed import: removes the transactions/reservations it
+    created and puts the document back to 'needs review' with its extracted
+    lines intact, so it can be corrected and confirmed again."""
+    conn = db.get_conn()
+    doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+    if not doc or doc["status"] != "confirmed":
+        flash("Only a confirmed document can be undone.")
+        return redirect(url_for("documents.index"))
+    # confirm() points document_items.duplicate_of at the transaction each line became
+    conn.execute("UPDATE document_items SET duplicate_of=NULL, reviewed=0 WHERE document_id=?", (doc_id,))
+    n_tx = conn.execute("DELETE FROM transactions WHERE document_id=? AND source='upload'", (doc_id,)).rowcount
+    n_bk = conn.execute("DELETE FROM bookings WHERE document_id=? AND source='upload'", (doc_id,)).rowcount
+    conn.execute("UPDATE documents SET status='extracted', reviewed=0 WHERE id=?", (doc_id,))
+    record(conn, "document", doc_id, "delete", field="import", old_value=f"{n_tx} transactions, {n_bk} reservations")
+    conn.commit()
+    flash(f"Import undone: removed {n_tx} transaction{'s' if n_tx != 1 else ''} and {n_bk} reservation{'s' if n_bk != 1 else ''}. "
+          f"Any month that was based on those reservations goes back to its earlier figures.")
+    return redirect(url_for("documents.review", doc_id=doc_id))

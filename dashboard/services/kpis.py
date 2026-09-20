@@ -60,18 +60,52 @@ def _prop_clause(property_id, column="property_id"):
     return (f"AND {column} = ?", (property_id,)) if property_id else ("", ())
 
 
+
+# Real reservations (uploaded from a booking statement, or entered by hand)
+# supersede the Excel import's monthly figures for that flat and month:
+# the import carries that month's income as lump booking_income entries plus a
+# synthetic "monthly-aggregate" booking row for its nights, so counting both
+# the lump and the real reservations would double the month. Derived on
+# read, nothing is deleted -- remove the reservations and the Excel figures
+# for that month come straight back.
+_REAL_RES = ("rb.status='confirmed' AND rb.reservation_id != 'monthly-aggregate' "
+             "AND rb.source IN ('upload','manual')")
+_TX_NOT_SUPERSEDED = (
+    "AND NOT (transactions.source='excel_import' AND transactions.direction='income' AND EXISTS ("
+    "SELECT 1 FROM bookings rb WHERE rb.property_id = transactions.property_id AND " + _REAL_RES +
+    " AND substr(rb.check_in,1,7) = substr(transactions.date,1,7)))")
+_BK_NOT_SUPERSEDED = (
+    "AND NOT (bookings.reservation_id='monthly-aggregate' AND EXISTS ("
+    "SELECT 1 FROM bookings rb WHERE rb.property_id = bookings.property_id AND " + _REAL_RES +
+    " AND substr(rb.check_in,1,7) = substr(bookings.check_in,1,7)))")
+
+def _booking_revenue(conn, clause, params, start, end):
+    """Reservation income falling inside [start, end): a stay that straddles
+    a month boundary is prorated by nights, so it isn't counted in full in
+    both months."""
+    rows = conn.execute(
+        f"SELECT check_in, check_out, net_revenue FROM bookings WHERE status='confirmed' AND check_in<? AND check_out>? {clause}",
+        (end, start, *params),
+    ).fetchall()
+    start_d, end_d = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+    total = 0.0
+    for r in rows:
+        ci_full, co_full = datetime.date.fromisoformat(r["check_in"]), datetime.date.fromisoformat(r["check_out"])
+        span = (co_full - ci_full).days
+        inside = (min(co_full, end_d) - max(ci_full, start_d)).days
+        if span > 0 and inside > 0:
+            total += r["net_revenue"] * inside / span
+    return total
+
+
 def revenue(conn, property_id, start, end):
     """All accommodation + ancillary income for the period."""
     clause, params = _prop_clause(property_id)
     tx = conn.execute(
-        f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='income' AND date>=? AND date<? {clause}",
+        f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='income' AND date>=? AND date<? {clause} {_TX_NOT_SUPERSEDED}",
         (start, end, *params),
     ).fetchone()[0]
-    bk = conn.execute(
-        f"SELECT COALESCE(SUM(net_revenue),0) FROM bookings WHERE status='confirmed' AND check_in<? AND check_out>? {clause}",
-        (end, start, *params),
-    ).fetchone()[0]
-    return tx + bk
+    return tx + _booking_revenue(conn, clause, params, start, end)
 
 
 def accommodation_revenue(conn, property_id, start, end):
@@ -79,14 +113,10 @@ def accommodation_revenue(conn, property_id, start, end):
     real bookings) -- excludes ancillary/other income -- for ADR/RevPAR."""
     clause, params = _prop_clause(property_id)
     tx = conn.execute(
-        f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='income' AND category='booking_income' AND date>=? AND date<? {clause}",
+        f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='income' AND category='booking_income' AND date>=? AND date<? {clause} {_TX_NOT_SUPERSEDED}",
         (start, end, *params),
     ).fetchone()[0]
-    bk = conn.execute(
-        f"SELECT COALESCE(SUM(net_revenue),0) FROM bookings WHERE status='confirmed' AND check_in<? AND check_out>? {clause}",
-        (end, start, *params),
-    ).fetchone()[0]
-    return tx + bk
+    return tx + _booking_revenue(conn, clause, params, start, end)
 
 
 def costs(conn, property_id, start, end, capex=None):
@@ -108,7 +138,7 @@ def booked_nights(conn, property_id, start, end):
     actually fall inside the requested period."""
     clause, params = _prop_clause(property_id)
     rows = conn.execute(
-        f"SELECT check_in, check_out FROM bookings WHERE status='confirmed' AND check_in<? AND check_out>? {clause}",
+        f"SELECT check_in, check_out FROM bookings WHERE status='confirmed' AND check_in<? AND check_out>? {clause} {_BK_NOT_SUPERSEDED}",
         (end, start, *params),
     ).fetchall()
     start_d, end_d = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
@@ -133,9 +163,22 @@ def reservation_count(conn, property_id, start, end):
 
 
 def avg_stay(conn, property_id, start, end):
-    """Average Length of Stay: occupied nights / reservations."""
-    n = reservation_count(conn, property_id, start, end)
-    return booked_nights(conn, property_id, start, end) / n if n else 0.0
+    """Average Length of Stay: nights on real reservations / real
+    reservations. Only real reservations on both sides -- dividing all
+    booked nights (which include the Excel import's aggregate nights) by
+    the count of real ones would be meaningless."""
+    clause, params = _prop_clause(property_id)
+    rows = conn.execute(
+        f"""SELECT check_in, check_out FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
+            AND check_in<? AND check_out>? {clause}""",
+        (end, start, *params),
+    ).fetchall()
+    if not rows:
+        return 0.0
+    start_d, end_d = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+    nights = sum(max((min(datetime.date.fromisoformat(r["check_out"]), end_d)
+                      - max(datetime.date.fromisoformat(r["check_in"]), start_d)).days, 0) for r in rows)
+    return nights / len(rows)
 
 
 def available_nights(conn, property_id, start, end):

@@ -41,6 +41,24 @@ def find_duplicate(conn, property_id, item):
     return row["id"] if row else None
 
 
+def find_duplicate_reservation(conn, property_id, item):
+    """A reservation already on file for this flat: same confirmation code,
+    or the same check-in/check-out dates. Returns the booking id or None."""
+    if not property_id:
+        return None
+    code = (item.get("reservation_id") or "").strip()
+    if code:
+        row = conn.execute("SELECT id FROM bookings WHERE property_id=? AND reservation_id=? LIMIT 1", (property_id, code)).fetchone()
+        if row:
+            return row["id"]
+    row = conn.execute(
+        """SELECT id FROM bookings WHERE property_id=? AND check_in=? AND check_out=?
+           AND reservation_id != 'monthly-aggregate' AND status='confirmed' LIMIT 1""",
+        (property_id, item.get("check_in"), item.get("check_out")),
+    ).fetchone()
+    return row["id"] if row else None
+
+
 def save_upload(conn, file, doc_type, property_id, flash):
     """Handles a single uploaded file: saves it, extracts line items into
     document_items (the reviewable Document -> extracted -> reviewed ->
@@ -62,7 +80,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
     doc_id = cur.lastrowid
     conn.commit()
 
-    result = extraction.extract(dest_path, mime_type)
+    result = extraction.extract(dest_path, mime_type, doc_type)
     if result is None:
         conn.execute("UPDATE documents SET status='failed' WHERE id=?", (doc_id,))
         conn.commit()
@@ -79,8 +97,31 @@ def save_upload(conn, file, doc_type, property_id, flash):
             detected_property_id = guessed_id
 
     period = period_from_hint(result.get("period_hint"))
+    is_reservations = result.get("kind") == "reservation"
+    properties = [dict(p) for p in get_properties(conn, include_overhead=False)]
     dupes = 0
     for i, item in enumerate(items):
+        if is_reservations:
+            # a statement covers several flats -- match each reservation to its own by listing name
+            item_property = property_id
+            if not item_property and item.get("description"):
+                item_property = extraction.guess_property(item["description"], properties)[0]
+            item_property = item_property or detected_property_id
+            duplicate_of = find_duplicate_reservation(conn, item_property, item)
+            dupes += bool(duplicate_of)
+            platform = item.get("platform") or result.get("platform")
+            conn.execute(
+                """INSERT INTO document_items (document_id, line_index, raw_description, date, vendor, amount,
+                       direction, property_id, category, capex, confidence, include, original_extracted_value,
+                       item_kind, check_in, check_out, reservation_id, platform, gross_revenue, platform_fees, net_revenue)
+                   VALUES (?,?,?,?,?,?,'income',?,'booking_income',0,?,?,?,'reservation',?,?,?,?,?,?,?)""",
+                (doc_id, i, item.get("description"), item.get("check_in"), platform, item.get("net"),
+                 item_property, item.get("confidence"), 0 if duplicate_of else 1, json.dumps(item),
+                 item.get("check_in"), item.get("check_out"), item.get("reservation_id"), platform,
+                 item.get("gross"), item.get("fees"), item.get("net")),
+            )
+            continue
+        item["possible_duplicate"] = None
         duplicate_of = find_duplicate(conn, detected_property_id, item)
         dupes += bool(duplicate_of)
         category = item.get("category") or "other"
@@ -100,8 +141,9 @@ def save_upload(conn, file, doc_type, property_id, flash):
          period[1] if period else None, doc_id),
     )
     conn.commit()
-    msg = f"Extracted {len(items)} line item(s) from {file.filename} — review and confirm below."
+    noun = "reservation" if is_reservations else "line item"
+    msg = f"Extracted {len(items)} {noun}(s) from {file.filename} — review and confirm below."
     if dupes:
-        msg += f" {dupes} look like they might already be on file."
+        msg += f" {dupes} look like they might already be on file" + (" (unticked so they aren't counted twice)." if is_reservations else ".")
     flash(msg)
     return doc_id

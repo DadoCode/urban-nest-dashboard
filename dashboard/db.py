@@ -124,7 +124,10 @@ CREATE TABLE IF NOT EXISTS document_items (
     include INTEGER NOT NULL DEFAULT 1,
     reviewed INTEGER NOT NULL DEFAULT 0,
     original_extracted_value TEXT,   -- JSON snapshot of the raw extraction for this line
-    final_value TEXT                 -- JSON snapshot as confirmed, once reviewed
+    final_value TEXT,                -- JSON snapshot as confirmed, once reviewed
+    item_kind TEXT NOT NULL DEFAULT 'transaction',   -- 'transaction' | 'reservation'
+    check_in TEXT, check_out TEXT, reservation_id TEXT, platform TEXT,
+    gross_revenue REAL, platform_fees REAL, net_revenue REAL   -- reservation lines only
 );
 
 -- What documents each property is expected to produce each month, so
@@ -203,6 +206,15 @@ def ensure_schema():
                 SELECT v.id FROM vendors v WHERE v.name = TRIM(transactions.vendor)
             ) WHERE vendor IS NOT NULL AND TRIM(vendor) != ''
         """)
+
+    item_cols = {row["name"] for row in conn.execute("PRAGMA table_info(document_items)")}
+    for col, ddl in [
+        ("item_kind", "TEXT NOT NULL DEFAULT 'transaction'"), ("check_in", "TEXT"), ("check_out", "TEXT"),
+        ("reservation_id", "TEXT"), ("platform", "TEXT"), ("gross_revenue", "REAL"),
+        ("platform_fees", "REAL"), ("net_revenue", "REAL"),
+    ]:
+        if col not in item_cols:
+            conn.execute(f"ALTER TABLE document_items ADD COLUMN {col} {ddl}")
 
     doc_info = list(conn.execute("PRAGMA table_info(documents)"))
     doc_cols = {row["name"] for row in doc_info}
