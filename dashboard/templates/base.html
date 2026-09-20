@@ -34,6 +34,7 @@
         <a href="{{ url_for('expenses.index') }}" class="nav-link {{ 'active' if active == 'expenses' else '' }}"><span class="dot"></span>Expenses</a>
         <a href="{{ url_for('documents.index') }}" class="nav-link {{ 'active' if active == 'documents' else '' }}"><span class="dot"></span>Documents</a>
         <a href="{{ url_for('reports.index') }}" class="nav-link {{ 'active' if active == 'reports' else '' }}"><span class="dot"></span>Reports</a>
+        <a href="{{ url_for('targets.index') }}" class="nav-link {{ 'active' if active == 'targets' else '' }}"><span class="dot"></span>Targets</a>
       </nav>
 
       <button type="button" class="add-btn" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>

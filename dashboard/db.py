@@ -45,6 +45,12 @@ CREATE TABLE IF NOT EXISTS targets (
     PRIMARY KEY (property_id, year, month)
 );
 
+CREATE TABLE IF NOT EXISTS property_targets (
+    property_id TEXT PRIMARY KEY REFERENCES properties(id),
+    revenue_target REAL, profit_target REAL, occupancy_target REAL,
+    updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS bookings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     property_id TEXT NOT NULL REFERENCES properties(id),

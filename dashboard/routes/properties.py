@@ -35,13 +35,11 @@ def index():
     rows = []
     for p in flats:
         snap = kpis.kpi_snapshot(conn, p["id"], start, end)
-        rev_target = kpis.dynamic_target(conn, p["id"], year, month, year, month, "revenue")
         completeness = completeness_for(conn, p["id"], start, end)
         rows.append({
             "id": p["id"], "name": p["name"], "active": p["active"],
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"], "adr": snap["adr"], "revpar": snap["revpar"],
-            "vs_target": round(snap["revenue"] / rev_target * 100, 1) if rev_target else None,
             "completeness": completeness,
         })
     rows.sort(key=lambda r: r["revenue"], reverse=True)
@@ -91,13 +89,10 @@ def detail(property_id):
         prev_cost = kpis.costs(conn, property_id, pstart, pend)
         tiles = [{"label": f"Total costs — {MONTH_NAMES[month]} {year}", "value": f"£{cur_cost:,.0f}",
                   "delta": pct_delta(cur_cost, prev_cost)}] if cur_cost or prev_cost else []
-        goal_progress, rev_target = None, None
     else:
         tiles, cur, prev = tiles_for(conn, property_id, year, month)
         if f"{year}-{month:02d}" not in kpis.months_with_data(conn, property_id):
             tiles = []
-        rev_target = kpis.dynamic_target(conn, property_id, year, month, year, month, "revenue")
-        goal_progress = round(cur["revenue"] / rev_target * 100, 1) if rev_target else None
 
     # Anchored + clipped to trailing 12 months -- see the matching note in
     # routes/overview.py on why a barely-started current month or years of
@@ -109,7 +104,7 @@ def detail(property_id):
     resp = make_response(render_template(
         "property/overview.html", active="properties", all_properties=get_properties(conn),
         active_property=property_id, active_tab="overview",
-        prop=prop, is_overhead=is_overhead, tiles=tiles, rev_target=rev_target, goal_progress=goal_progress,
+        prop=prop, is_overhead=is_overhead, tiles=tiles,
         year=year, month=month, month_name=MONTH_NAMES[month], yoy=yoy,
         months_json=json.dumps([s["ym"] for s in series]),
         income_json=json.dumps([s["revenue"] for s in series]),
@@ -209,19 +204,10 @@ def settings_tab(property_id):
         flash(f"Unknown property '{property_id}'.")
         return redirect(url_for("overview.index"))
 
-    goal_progress, rev_target = None, None
-    if not is_overhead:
-        rev_target = kpis.dynamic_target(conn, property_id, year, month, year, month, "revenue")
-        if rev_target:
-            start, end = kpis.month_bounds(year, month)
-            cur_rev = kpis.revenue(conn, property_id, start, end)
-            goal_progress = round(cur_rev / rev_target * 100, 1)
-
     resp = make_response(render_template(
         "property/settings.html", active="properties", all_properties=get_properties(conn),
         active_property=property_id, active_tab="settings",
         prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
-        rev_target=rev_target, goal_progress=goal_progress,
         checklist=_checklist(conn, property_id, is_overhead, year, month),
     ))
     if not is_overhead:

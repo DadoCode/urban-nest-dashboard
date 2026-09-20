@@ -57,11 +57,8 @@ def _kpi_rows(conn, property_id, ctx):
             "note": extra_note,
         }
 
-    rev_target = kpis.dynamic_target(conn, property_id, ctx["start_year"], ctx["start_month"],
-                                      ctx["end_year"], ctx["end_month"], "revenue")
     primary = [
-        tile(f"Revenue — {period_label}", "revenue", lambda v: f"£{v:,.0f}",
-             (f"{cur['revenue'] / rev_target * 100:.0f}% of £{rev_target:,.0f} trailing-average target" if rev_target else None)),
+        tile(f"Revenue — {period_label}", "revenue", lambda v: f"£{v:,.0f}"),
         tile("Net profit", "net_profit", lambda v: f"£{v:,.0f}"),
         tile("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%"),
         tile("RevPAR", "revpar", lambda v: f"£{v:,.0f}"),
@@ -73,37 +70,6 @@ def _kpi_rows(conn, property_id, ctx):
         tile("Avg stay", "avg_stay", lambda v: f"{v:.1f} nights", cur_val=avg_stay, prev_val=prev_avg_stay),
     ]
     return primary, secondary, cur
-
-
-def _target_bars(conn, property_id, ctx, cur):
-    """Distinct bars per metric -- never merge revenue/profit/occupancy
-    targets into one ambiguous figure. Targets are computed from each
-    property's own trailing 3-month average rather than a stored number
-    someone typed in once -- a hand-set target from the original Excel
-    import stops meaning anything once the business has grown past it
-    (routinely showing "400% of target"); a trailing average self-adjusts
-    every month instead of going stale."""
-    args = (ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
-    rev_target = kpis.dynamic_target(conn, property_id, *args, "revenue")
-    profit_target = kpis.dynamic_target(conn, property_id, *args, "net_profit")
-    occ_target = kpis.dynamic_target(conn, property_id, *args, "occupancy")
-
-    bars = []
-    if rev_target:
-        bars.append({"label": "Revenue", "actual": cur["revenue"], "target": rev_target,
-                      "pct": min(round(cur["revenue"] / rev_target * 100), 999),
-                      "actual_fmt": f"£{cur['revenue']:,.0f}", "target_fmt": f"£{rev_target:,.0f}"})
-    if profit_target:
-        bars.append({"label": "Profit", "actual": cur["net_profit"], "target": profit_target,
-                      "pct": min(round(cur["net_profit"] / profit_target * 100), 999),
-                      "actual_fmt": f"£{cur['net_profit']:,.0f}", "target_fmt": f"£{profit_target:,.0f}"})
-    if occ_target:
-        cur_occ_pct = cur["occupancy"] * 100
-        occ_target_pct = occ_target * 100
-        bars.append({"label": "Occupancy", "actual": cur_occ_pct, "target": occ_target_pct,
-                      "pct": min(round(cur_occ_pct / occ_target_pct * 100), 999) if occ_target_pct else 0,
-                      "actual_fmt": f"{cur_occ_pct:.0f}%", "target_fmt": f"{occ_target_pct:.0f}%"})
-    return bars
 
 
 def _completeness_summary(conn, flats):
@@ -132,20 +98,15 @@ def index():
     ctx = resolve_context(conn, request.args)
     viewing = next((p for p in nav_properties if p["id"] == ctx["property_id"]), None) if ctx["property_id"] else None
     primary_tiles, secondary_tiles, cur = _kpi_rows(conn, ctx["property_id"], ctx)
-    target_bars = _target_bars(conn, ctx["property_id"], ctx, cur)
 
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     prop_rows = []
     for p in flats:
         snap = kpis.kpi_snapshot(conn, p["id"], start, end)
-        target = kpis.dynamic_target(conn, p["id"], ctx["start_year"], ctx["start_month"],
-                                      ctx["end_year"], ctx["end_month"], "revenue")
         prop_rows.append({
             "id": p["id"], "name": p["name"],
             "revenue": snap["revenue"], "profit": snap["net_profit"], "margin": snap["margin"],
             "occupancy": snap["occupancy"], "adr": snap["adr"],
-            "target": target,
-            "vs_target": round(snap["revenue"] / target * 100, 1) if target else None,
         })
     prop_rows.sort(key=lambda r: r["revenue"], reverse=True)
 
@@ -184,7 +145,7 @@ def index():
     return render_template(
         "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats),
         active_property=ctx["property_id"], viewing=viewing, overhead_property=overhead_property,
-        primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, target_bars=target_bars, ctx=ctx,
+        primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, ctx=ctx,
         context_bar=True, prop_rows=prop_rows, yoy=yoy, expense_rows=expense_rows,
         insights=insights, completeness=completeness, doc_type_labels=DOC_TYPE_LABELS,
         months_json=json.dumps([s["ym"] for s in portfolio_series]),

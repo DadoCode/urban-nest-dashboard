@@ -18,9 +18,9 @@ import services.kpis as kpis
 SHORTCUTS = ["this_month", "last_month", "ytd", "last12", "custom"]
 SHORTCUT_LABELS = {"this_month": "This month", "last_month": "Last month",
                     "ytd": "Year to date", "last12": "Last 12 months", "custom": "Custom"}
-COMPARE_CHOICES = ["previous_period", "previous_year", "target", "none"]
+COMPARE_CHOICES = ["previous_period", "previous_year", "none"]
 COMPARE_LABELS = {"previous_period": "vs previous period", "previous_year": "vs same period last year",
-                   "target": "vs target", "none": "No comparison"}
+                   "none": "No comparison"}
 
 
 def _iso_bounds(sy, sm, ey, em):

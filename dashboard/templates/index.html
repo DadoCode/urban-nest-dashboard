@@ -32,22 +32,7 @@
     {% endfor %}
   </div>
 
-  <div class="grid-2" style="margin-top:20px">
-    {% if target_bars %}
-      <div class="card">
-        <h2 style="margin-top:0">Performance against target — {{ ctx.display }}</h2>
-        {% for b in target_bars %}
-          <div class="target-bar-row">
-            <div class="target-labels">
-              <span class="name">{{ b.label }}</span>
-              <span class="figures">{{ b.actual_fmt }} / {{ b.target_fmt }} · {{ b.pct }}%</span>
-            </div>
-            <div class="target-bar-track"><div class="target-bar-fill {{ 'over' if b.pct >= 100 else '' }}" style="width: {{ [b.pct, 100]|min }}%"></div></div>
-          </div>
-        {% endfor %}
-      </div>
-    {% endif %}
-
+  <div style="margin-top:20px">
     {% if completeness %}
       <div class="card">
         <h2 style="margin-top:0">Data completeness — this month</h2>
@@ -91,7 +76,7 @@
   <h2>Property performance — {{ ctx.display }}</h2>
   <div class="card">
     <table>
-      <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Margin</th><th class="num">Occupancy</th><th class="num">ADR</th><th class="num">vs Target</th></tr></thead>
+      <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Margin</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
       <tbody>
         {% for r in prop_rows %}
           <tr>
@@ -101,7 +86,6 @@
             <td class="num">{{ '%.0f'|format(r.margin * 100) }}%</td>
             <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
             <td class="num">£{{ '{:,.0f}'.format(r.adr) }}</td>
-            <td class="num">{{ '%.0f'|format(r.vs_target) + '%' if r.vs_target is not none else '—' }}</td>
           </tr>
         {% endfor %}
       </tbody>

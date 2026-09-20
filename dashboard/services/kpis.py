@@ -220,37 +220,6 @@ def kpi_snapshot(conn, property_id, start, end):
     }
 
 
-def trailing_average(conn, property_id, end_year, end_month, key, window=3):
-    """Average of `key` (a kpi_snapshot()/monthly_series() field, e.g.
-    'revenue', 'net_profit', 'occupancy') over the `window` real months
-    immediately before (end_year, end_month) -- None if there's no prior
-    history at all. This is the actual data a target is now based on,
-    replacing the old hand-typed targets table: a property's own recent
-    real performance sets the bar, not a number someone guessed once and
-    never revisited as the business grew."""
-    end_ym = f"{end_year}-{end_month:02d}"
-    prior = [s for s in monthly_series(conn, property_id) if s["ym"] < end_ym][-window:]
-    if not prior:
-        return None
-    return sum(s[key] for s in prior) / len(prior)
-
-
-def dynamic_target(conn, property_id, start_year, start_month, end_year, end_month, key, window=3):
-    """The trailing-average baseline (as of just before the period starts)
-    extrapolated across however many months the period covers -- for an
-    additive metric (revenue, net_profit) that's baseline x month-count;
-    a ratio metric (occupancy, margin) doesn't scale with month-count, so
-    the baseline average is returned as-is. None if there's no prior
-    history to base a target on (a brand new property, say) -- no target
-    bar is shown rather than inventing one from nothing."""
-    baseline = trailing_average(conn, property_id, start_year, start_month, key, window)
-    if baseline is None:
-        return None
-    if key in ("occupancy", "margin", "adr", "revpar"):
-        return baseline
-    return baseline * months_in_range(start_year, start_month, end_year, end_month)
-
-
 def months_with_data(conn, property_id):
     """Sorted ['YYYY-MM', ...] for every month that has at least one
     transaction or booking -- the whole point being that a future month
@@ -273,6 +242,26 @@ def monthly_series(conn, property_id):
         snap["year"], snap["month"], snap["ym"] = year, month, ym
         out.append(snap)
     return out
+
+
+def data_average(conn, property_id, months=None):
+    """Average monthly revenue / net profit / occupancy % over the months
+    up to the current period that actually have revenue -- optionally only
+    the latest `months` of them. This is the starting suggestion for a
+    target, not a stored number; None where there is nothing to average."""
+    cur = "%04d-%02d" % current_period(conn)
+    rows = [r for r in monthly_series(conn, property_id) if r["ym"] <= cur and r["revenue"] > 0]
+    if months:
+        rows = rows[-months:]
+    if not rows:
+        return None
+    n = len(rows)
+    return {
+        "revenue": sum(r["revenue"] for r in rows) / n,
+        "profit": sum(r["net_profit"] for r in rows) / n,
+        "occupancy": sum(r["occupancy"] for r in rows) / n * 100,
+        "months": n,
+    }
 
 
 def current_period(conn):

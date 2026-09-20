@@ -13,16 +13,6 @@
 
   {% if not is_overhead %}
   <div class="card">
-    <h2 style="margin-top:0">Target — {{ month_name }} {{ year }}</h2>
-    {% if rev_target %}
-      <p class="subtitle" style="margin-bottom:0">£{{ '{:,.0f}'.format(rev_target) }} · {{ goal_progress }}% reached so far</p>
-      <p class="note" style="margin-top:6px">Based on this flat's trailing 3-month average revenue -- recalculated every month from real performance, not a fixed number. <a href="{{ url_for('properties.detail', property_id=prop.id) }}">See it on Overview</a>.</p>
-    {% else %}
-      <p class="note">Not enough history yet to set a target -- once a few months of real revenue are on the ledger, a target based on that average will show up here automatically.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
     <h2 style="margin-top:0">Booking calendar (optional)</h2>
     <p class="note" style="margin-top:-6px">Paste this flat's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>
     <form class="goal-form" method="post" action="{{ url_for('properties.sync_calendar', property_id=prop.id) }}">
@@ -30,11 +20,6 @@
       <button type="submit">Sync now</button>
     </form>
     {% if prop.ical_synced_at %}<p class="note" style="margin-top:8px">Last synced {{ prop.ical_synced_at }}.</p>{% endif %}
-  </div>
-  {% else %}
-  <div class="card">
-    <h2 style="margin-top:0">Target</h2>
-    <p class="note">Shared overheads aren't measured against a revenue target.</p>
   </div>
   {% endif %}
 {% endblock %}

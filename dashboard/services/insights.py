@@ -70,26 +70,6 @@ def find_occupancy_declines(conn, flats, end_year, end_month):
     return findings
 
 
-def find_target_variances(conn, flats, end_year, end_month, is_partial):
-    findings = []
-    for p in flats:
-        rev_target = kpis.dynamic_target(conn, p["id"], end_year, end_month, end_year, end_month, "revenue")
-        if not rev_target:
-            continue
-        start, end = kpis.month_bounds(end_year, end_month)
-        actual = kpis.revenue(conn, p["id"], start, end)
-        pct = round(actual / rev_target * 100)
-        # The target is now a trailing 3-month average, not a fixed goal --
-        # "hit 100%" is just "matched recent pace" and would fire constantly
-        # as routine noise, so the bar for calling it out is meaningfully
-        # ahead of or behind that recent pace, not merely at or under it.
-        if pct >= 120:
-            findings.append({"type": "positive", "text": f"{p['name']} is at {pct}% of its trailing-average pace"})
-        elif not is_partial and pct <= 60:
-            findings.append({"type": "warning", "text": f"{p['name']} is at only {pct}% of its trailing-average pace"})
-    return findings
-
-
 def find_missing_sources(conn, flats, rng, start):
     findings = []
     no_docs = [p["name"] for p in flats if not conn.execute(
@@ -123,7 +103,6 @@ def compute_insights(conn, flats, rng):
     start, end = kpis.range_bounds(rng["start_year"], rng["start_month"], rng["end_year"], rng["end_month"])
     pstart, pend = kpis.range_bounds(*kpis.prior_period(rng["start_year"], rng["start_month"], rng["end_year"], rng["end_month"]))
     findings = [
-        *find_target_variances(conn, flats, rng["end_year"], rng["end_month"], rng["partial"]),
         *find_revenue_declines(conn, flats, start, end, pstart, pend),
         *find_occupancy_declines(conn, flats, rng["end_year"], rng["end_month"]),
         *find_occupancy_highlights(conn, flats, start, end),
