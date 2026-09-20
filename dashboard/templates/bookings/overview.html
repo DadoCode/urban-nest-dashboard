@@ -1,0 +1,39 @@
+{% extends "bookings/_shell.html" %}
+{% block tab_content %}
+  <div class="tiles">
+    {% for t in tiles %}
+      <div class="tile">
+        <div class="label">{{ t.label }}</div>
+        <div class="value">{{ t.value }}</div>
+        {% if t.delta is not none %}
+          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior month</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Upcoming 30 days</h2>
+    {% if upcoming.reservations %}
+      <p class="subtitle" style="margin-bottom:0">{{ '%.0f'|format(upcoming.occupancy * 100) }}% booked · £{{ '{:,.0f}'.format(upcoming.revenue) }} confirmed revenue · {{ upcoming.reservations }} reservation{{ 's' if upcoming.reservations != 1 }}</p>
+    {% else %}
+      <p class="note">No reservations on file with a check-in in the next 30 days. Connect a booking calendar on a flat's Settings tab to keep this current automatically.</p>
+    {% endif %}
+  </div>
+
+  <h2>Channel mix — {{ current_month }}</h2>
+  <div class="card">
+    {% if channel_rows %}
+      <table>
+        <thead><tr><th>Platform</th><th class="num">Reservations</th><th class="num">Revenue</th></tr></thead>
+        <tbody>
+          {% for c in channel_rows %}
+            <tr><td>{{ c.platform }}</td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt or 0) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="note">No reservations recorded for this month yet.</p>
+    {% endif %}
+  </div>
+{% endblock %}

@@ -1,8 +1,6 @@
-{% extends "base.html" %}
-{% block title %}Occupancy — Urban Nest Estates{% endblock %}
-{% block content %}
-  <h1>Occupancy</h1>
-  <p class="subtitle">Portfolio-wide, then by flat · current month: {{ current_month }}</p>
+{% extends "bookings/_shell.html" %}
+{% block tab_content %}
+  <p class="subtitle" style="margin-top:-16px">Portfolio-wide, then by flat · current month: {{ current_month }}</p>
 
   <div class="card">
     <h2 style="margin-top:0">Portfolio occupancy trend</h2>

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Bookings — Urban Nest Estates{% endblock %}
+{% block content %}
+  <h1>Bookings</h1>
+  <p class="subtitle">What's been booked, what's coming, and how occupancy is trending.</p>
+
+  <div class="tabs">
+    <a href="{{ url_for('bookings.index') }}" class="tab {{ 'active' if active_bookings_tab == 'overview' else '' }}">Overview</a>
+    <a href="{{ url_for('bookings.calendar_tab') }}" class="tab {{ 'active' if active_bookings_tab == 'calendar' else '' }}">Calendar</a>
+    <a href="{{ url_for('bookings.performance') }}" class="tab {{ 'active' if active_bookings_tab == 'performance' else '' }}">Performance</a>
+  </div>
+
+  {% block tab_content %}{% endblock %}
+{% endblock %}
