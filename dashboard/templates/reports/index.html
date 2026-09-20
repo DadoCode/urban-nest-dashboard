@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Reports — Urban Nest Estates{% endblock %}
+{% block content %}
+  <h1>Reports</h1>
+  <p class="subtitle">What happened in a given month, year or property. Preview on screen, then export to PDF, Excel or CSV — every format is built from the same numbers as the rest of the dashboard.</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h2 style="margin-top:0">{{ report_types.portfolio_monthly }}</h2>
+      <p class="note" style="margin-top:-6px">Revenue, costs, profit, occupancy vs last month and last year, by property and by expense category.</p>
+      <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
+        <input type="hidden" name="type" value="portfolio_monthly">
+        <input type="month" name="month" value="{{ default_month }}" style="width:auto">
+        <button type="submit">Preview</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">{{ report_types.property_monthly }}</h2>
+      <p class="note" style="margin-top:-6px">One flat for one month, including its transactions — the kind of thing you'd send a landlord.</p>
+      <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
+        <input type="hidden" name="type" value="property_monthly">
+        <select name="property" required>
+          <option value="">Choose a property…</option>
+          {% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+        <input type="month" name="month" value="{{ default_month }}" style="width:auto">
+        <button type="submit">Preview</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">{{ report_types.annual_portfolio }}</h2>
+      <p class="note" style="margin-top:-6px">A year at a glance: month by month, against last year, and by property.</p>
+      <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
+        <input type="hidden" name="type" value="annual_portfolio">
+        <input type="number" name="year" value="{{ default_year }}" min="2000" max="2100" style="width:100px">
+        <button type="submit">Preview</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">{{ report_types.expense }}</h2>
+      <p class="note" style="margin-top:-6px">Where the money went over any range: totals, categories, top vendors and the full ledger.</p>
+      <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
+        <input type="hidden" name="type" value="expense">
+        <input type="month" name="from" value="{{ default_from }}" style="width:auto">
+        <input type="month" name="to" value="{{ default_month }}" style="width:auto">
+        <select name="property">
+          <option value="">All properties</option>
+          {% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select>
+        <button type="submit">Preview</button>
+      </form>
+    </div>
+  </div>
+{% endblock %}

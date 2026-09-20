@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ report.title }} — Urban Nest Estates{% endblock %}
+{% block content %}
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px">
+    <div>
+      <p class="note" style="margin:0"><a href="{{ url_for('reports.index') }}">&larr; All reports</a></p>
+      <h1>{{ report.title }}</h1>
+      <p class="subtitle">{{ report.subtitle }}</p>
+    </div>
+    <div class="mini-form" style="margin-top:0">
+      <a href="{{ url_for('reports.export', format='pdf', **params) }}"><button type="button">Export PDF</button></a>
+      <a href="{{ url_for('reports.export', format='xlsx', **params) }}"><button type="button">Export Excel</button></a>
+      <a href="{{ url_for('reports.export', format='csv', **params) }}"><button type="button">Export CSV</button></a>
+    </div>
+  </div>
+
+  {% for s in sections %}
+    <h2>{{ s.heading }}</h2>
+    <div class="card">
+      {% if s.display_rows %}
+        <table>
+          <thead><tr>{% for c in s.columns %}<th class="{{ '' if c.fmt == 'text' else 'num' }}">{{ c.label }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for row in s.display_rows %}
+              <tr>{% for cell in row %}<td class="{{ '' if s.columns[loop.index0].fmt == 'text' else 'num' }}">{{ cell }}</td>{% endfor %}</tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if s.note %}<p class="note" style="margin-top:10px">{{ s.note }}</p>{% endif %}
+      {% else %}
+        <p class="note">No data for this period.</p>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% endblock %}
