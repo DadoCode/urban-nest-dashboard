@@ -37,6 +37,7 @@ address, a listing name) -- null if nothing like that appears",
 magnitude, never negative, "category": one of "booking_income" (money the \
 business received from a guest/booking platform), "purchase", "cleaning", \
 "utilities", "other" (anything the business paid out), \
+"page": integer, the page of the document this line is printed on (1 if a single page), \
 "confidence": number from 0 to 1, how sure you are this line is read correctly}
   ]
 }
@@ -63,6 +64,7 @@ Return ONLY a JSON object (no prose, no markdown fences) shaped like:
      "gross": number (guest total before platform fees, or null),
      "fees": number (platform/host/service fees deducted, or 0),
      "net": number (what the host actually receives for this reservation),
+     "page": integer, the page of the statement this reservation is printed on,
      "confidence": number from 0 to 1}
   ]
 }
@@ -135,7 +137,7 @@ def _rows_to_reservations(header, rows):
     if "check_in" not in cols or not ({"net", "gross"} & set(cols)):
         return None  # can't be read as a reservation statement
     items = []
-    for row in rows:
+    for row_no, row in enumerate(rows, start=2):
         def cell(field):
             i = cols.get(field)
             return row[i] if i is not None and i < len(row) else None
@@ -160,7 +162,8 @@ def _rows_to_reservations(header, rows):
                       "description": (str(cell("listing")).strip() or None) if cell("listing") else None,
                       "check_in": check_in, "check_out": check_out,
                       "gross": abs(gross) if gross is not None else abs(net),
-                      "fees": abs(fees or 0), "net": abs(net), "confidence": 0.7})
+                      "fees": abs(fees or 0), "net": abs(net), "confidence": 0.9 if (check_out and net is not None and cell("reservation_id")) else 0.7,
+                      "row": row_no})
     return items
 
 
@@ -179,14 +182,47 @@ def extract(file_path, mime_type=None, doc_type=None):
     mime_type = mime_type or mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
     name = str(file_path).lower()
     reservations = doc_type == "booking_statement"
-    if name.endswith(".csv") or mime_type == "text/csv":
-        return _extract_csv(file_path, reservations)
-    if name.endswith(".xlsx") or mime_type in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",):
-        return _extract_xlsx(file_path, reservations)
-    return _extract_via_claude(file_path, mime_type, RESERVATION_PROMPT if reservations else EXTRACTION_PROMPT, reservations)
+    prompt = RESERVATION_PROMPT if reservations else EXTRACTION_PROMPT
+    if name.endswith((".xlsx", ".xlsm")) or mime_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return _extract_xlsx(file_path, reservations, doc_type)
+    if name.endswith(".xls"):
+        return _extract_xls(file_path, reservations, doc_type)
+    if name.endswith((".csv", ".tsv")) or mime_type in ("text/csv", "text/tab-separated-values"):
+        return _extract_csv(file_path, reservations, doc_type)
+    if name.endswith((".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif")) or mime_type == "application/pdf" or (mime_type or "").startswith("image/"):
+        return _extract_via_claude(file_path, mime_type, prompt, reservations)
+    # Anything else (txt, docx, json, eml, html...): a delimited text file
+    # can still be read as a table; otherwise hand the text to the model.
+    text = read_text(file_path)
+    if text is None:
+        return None
+    if name.endswith(".txt"):
+        tabular = _extract_csv(file_path, reservations, doc_type)
+        if tabular:
+            return tabular
+    return _extract_via_claude(file_path, mime_type, prompt, reservations, text=text)
 
 
-def _extract_via_claude(file_path, mime_type, prompt=None, reservations=False):
+def read_text(file_path):
+    """Plain text of a text-like file (docx paragraphs included), or None
+    for binary content we can't read."""
+    path = str(file_path)
+    try:
+        if path.lower().endswith(".docx"):
+            import zipfile
+            xml = zipfile.ZipFile(path).read("word/document.xml").decode("utf-8", errors="replace")
+            xml = re.sub(r"</w:p>", "\n", xml)
+            xml = re.sub(r"<w:tab/>", "\t", xml)
+            return re.sub(r"<[^>]+>", "", xml).strip() or None
+        raw = open(path, "rb").read(2_000_000)
+    except Exception:
+        return None
+    if b"\x00" in raw[:4096]:
+        return None
+    return raw.decode("utf-8-sig", errors="replace").strip() or None
+
+
+def _extract_via_claude(file_path, mime_type, prompt=None, reservations=False, text=None):
     prompt = prompt or EXTRACTION_PROMPT
     api_key = _load_key()
     if not api_key:
@@ -196,13 +232,16 @@ def _extract_via_claude(file_path, mime_type, prompt=None, reservations=False):
     except ImportError:
         return None
 
-    data = base64.standard_b64encode(open(file_path, "rb").read()).decode()
-    if mime_type == "application/pdf":
-        content_block = {"type": "document", "source": {"type": "base64", "media_type": mime_type, "data": data}}
-    elif mime_type and mime_type.startswith("image/"):
-        content_block = {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": data}}
+    if text is not None:
+        content_block = {"type": "text", "text": "DOCUMENT TEXT:\n" + text[:60000]}
     else:
-        return None
+        data = base64.standard_b64encode(open(file_path, "rb").read()).decode()
+        if mime_type == "application/pdf":
+            content_block = {"type": "document", "source": {"type": "base64", "media_type": mime_type, "data": data}}
+        elif mime_type and mime_type.startswith("image/"):
+            content_block = {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": data}}
+        else:
+            return None
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -248,12 +287,15 @@ def _guess_columns(header):
     return found
 
 
-def _rows_to_items(header, rows):
+_DOC_TYPE_CATEGORY = {"amazon_order": "purchase", "cleaning_invoice": "cleaning", "utility_bill": "utilities"}
+
+
+def _rows_to_items(header, rows, doc_type=None):
     cols = _guess_columns(header)
     if "amount" not in cols:
         return None  # can't make sense of this sheet without an amount column
     items = []
-    for row in rows:
+    for row_no, row in enumerate(rows, start=2):
         if not row or cols["amount"] >= len(row):
             continue
         raw_amount = str(row[cols["amount"]]).replace(",", "").replace("£", "").strip()
@@ -267,32 +309,73 @@ def _rows_to_items(header, rows):
             continue
         category = "booking_income" if amount > 0 and "date" not in cols else ("purchase" if amount < 0 else "other")
         items.append({
-            "date": row[cols["date"]] if "date" in cols and cols["date"] < len(row) else None,
+            "date": _parse_date(row[cols["date"]]) if "date" in cols and cols["date"] < len(row) else None,
             "vendor": row[cols["vendor"]] if "vendor" in cols and cols["vendor"] < len(row) else None,
             "description": row[cols["description"]] if "description" in cols and cols["description"] < len(row) else None,
             "amount": abs(amount),
-            "category": "booking_income" if amount > 0 else "other",
-            "confidence": 0.6,  # heuristic column-guessing, not a verified read
+            "category": _DOC_TYPE_CATEGORY.get(doc_type) or ("booking_income" if amount > 0 else "other"),
+            # column-guessing, not a verified read: confident only when the sheet has a
+            # date and a vendor or description column alongside the amount
+            "confidence": 0.9 if ("date" in cols and ("vendor" in cols or "description" in cols)) else 0.6,
+            "row": row_no,
         })
     return items
 
 
-def _extract_csv(file_path, reservations=False):
+def _extract_csv(file_path, reservations=False, doc_type=None):
     with open(file_path, newline="", encoding="utf-8-sig", errors="replace") as f:
-        reader = csv.reader(f)
+        sample = f.read(4096)
+        f.seek(0)
+        delimiter = "\t" if str(file_path).lower().endswith(".tsv") else _sniff_delimiter(sample)
+        reader = csv.reader(f, delimiter=delimiter)
         rows = list(reader)
     if not rows:
         return None
     if reservations:
         items = _rows_to_reservations(rows[0], rows[1:])
         return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
-    items = _rows_to_items(rows[0], rows[1:])
+    items = _rows_to_items(rows[0], rows[1:], doc_type)
     if items is None:
         return None
     return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}
 
 
-def _extract_xlsx(file_path, reservations=False):
+def _sniff_delimiter(sample):
+    try:
+        return csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+    except csv.Error:
+        return ","
+
+
+def _extract_xls(file_path, reservations=False, doc_type=None):
+    """Legacy .xls -- needs the optional xlrd package; without it the file
+    is still saved and can be entered by hand."""
+    try:
+        import xlrd
+    except ImportError:
+        return None
+    try:
+        ws = xlrd.open_workbook(file_path).sheet_by_index(0)
+    except Exception:
+        return None
+    rows = [[ws.cell_value(r, c) for c in range(ws.ncols)] for r in range(ws.nrows)]
+    return _sheet_result(rows, reservations, doc_type)
+
+
+def _sheet_result(rows, reservations, doc_type=None):
+    if not rows:
+        return None
+    header = [str(c) if c is not None else "" for c in rows[0]]
+    if reservations:
+        items = _rows_to_reservations(header, rows[1:])
+        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
+    items = _rows_to_items(header, rows[1:], doc_type)
+    if items is None:
+        return None
+    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}
+
+
+def _extract_xlsx(file_path, reservations=False, doc_type=None):
     try:
         import openpyxl
     except ImportError:
@@ -306,7 +389,7 @@ def _extract_xlsx(file_path, reservations=False):
     if reservations:
         items = _rows_to_reservations(header, rows[1:])
         return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
-    items = _rows_to_items(header, rows[1:])
+    items = _rows_to_items(header, rows[1:], doc_type)
     if items is None:
         return None
     return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}

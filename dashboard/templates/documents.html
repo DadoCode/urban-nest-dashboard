@@ -8,9 +8,9 @@
     <form id="upload-form" class="upload-form" style="display:block" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
       <div id="dropzone" class="dropzone">
         <div class="dropzone-label">Drop statements, invoices or receipts here</div>
-        <div class="note">PDF · CSV · XLSX · JPG · PNG — we extract the lines, you check them, then confirm</div>
+        <div class="note">Any file: PDF, Excel, CSV, Word, text, photos… — we read what we can, you check it, then confirm</div>
         <div style="margin-top:var(--s3)"><button type="button" class="secondary" onclick="document.getElementById('file-input').click()">Choose files</button></div>
-        <input id="file-input" type="file" name="document" accept=".pdf,.png,.jpg,.jpeg,.webp,.csv,.xlsx" multiple required style="display:none">
+        <input id="file-input" type="file" name="document" multiple required style="display:none">
         <div id="file-list" class="note" style="margin-top:var(--s2)"></div>
       </div>
       <div class="filter-bar" style="margin:var(--s3) 0 0">

@@ -1,221 +1,264 @@
 {% extends "base.html" %}
-{% block title %}Review document{% endblock %}
+{% from "_components.html" import pill %}
+{% block title %}Review — {{ doc.filename }}{% endblock %}
+{% block body_class %}wide{% endblock %}
+
 {% block content %}
-  <h1>Review: {{ doc.filename }}</h1>
-  <p class="subtitle">{{ prop.name if prop else 'Flat not detected — choose one per row below' }} · uploaded {{ doc.uploaded_at }} · status: {{ 'needs review' if doc.status in ('pending', 'extracted') else doc.status }}</p>
-
-  <div class="review-split">
-    <div class="review-preview">
-      {% if is_pdf %}
-        <iframe src="{{ url_for('documents.file', doc_id=doc.id) }}"></iframe>
-      {% elif is_image %}
-        <img src="{{ url_for('documents.file', doc_id=doc.id) }}" alt="{{ doc.filename }}">
-      {% else %}
-        <div style="height:200px; display:flex; align-items:center; justify-content:center; color:var(--muted)">
-          <div>
-            <p>No inline preview for this file type.</p>
-            <a href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank">Download {{ doc.filename }}</a>
-          </div>
-        </div>
-      {% endif %}
+{% macro viewer_pane() %}
+  <div class="rv-viewer">
+    <div class="rv-viewer-bar">
+      <span class="rv-viewer-title">Source document</span>
+      <span class="rv-viewer-tools">
+        {% if is_pdf %}
+          <button type="button" class="secondary" data-viewer="prev" title="Previous page">‹</button>
+          <button type="button" class="secondary" data-viewer="next" title="Next page">›</button>
+        {% endif %}
+        {% if is_pdf or is_image %}
+          <button type="button" class="secondary" data-viewer="out" title="Zoom out">−</button>
+          <button type="button" class="secondary" data-viewer="in" title="Zoom in">+</button>
+          <span id="viewer-label" class="note"></span>
+        {% endif %}
+        <a class="btn secondary" href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank" title="Open the original in a new tab">Open</a>
+      </span>
     </div>
-
-    <div>
-      {% if doc.status == 'confirmed' %}
-        <div class="card">
-          <p class="note" style="margin:0">This document was confirmed{% if doc.reviewed %} and its transactions are on the ledger{% endif %}. Shown here read-only for reference.</p>
+    {% if is_pdf %}
+      <div id="viewer" class="rv-frame" data-type="pdf" data-src="{{ url_for('documents.file', doc_id=doc.id) }}"></div>
+    {% elif is_image %}
+      <div id="viewer" class="rv-frame rv-scroll" data-type="image"><img src="{{ url_for('documents.file', doc_id=doc.id) }}" alt="{{ doc.filename }}" style="width:100%"></div>
+    {% elif preview %}
+      <div id="preview-scroll" class="rv-frame rv-scroll">
+        <table class="rv-preview">
+          <tbody>
+            {% for r in preview %}
+              <tr data-r="{{ loop.index }}"><th>{{ loop.index }}</th>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="rv-frame rv-nopreview">
+        <div>
+          <p>No inline preview for this file type.</p>
+          <a class="btn secondary" href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank">Download {{ doc.filename }}</a>
         </div>
-        {% for item in items %}
-          <div class="review-row">
-            <div class="review-row-top">
-              <strong>{{ item.vendor or '(no vendor)' }} — £{{ '{:,.2f}'.format(item.amount) if item.amount is not none else '—' }}</strong>
-              <span class="status-pill {{ 'confirmed' if item.include else '' }}">{{ 'included' if item.include else 'excluded' }}</span>
-            </div>
-            <div class="note">{{ item.description or '' }} · {% if item.item_kind == 'reservation' %}{{ item.check_in }} to {{ item.check_out }}{% else %}{{ item.category }} · {{ item.date or '' }}{% endif %}</div>
-          </div>
-        {% endfor %}
-        <form method="post" action="{{ url_for('documents.undo', doc_id=doc.id) }}" onsubmit="return confirm('Undo this import? The transactions/reservations it created will be removed and the document goes back to needs-review.')" style="margin:12px 0">
-          <button type="submit" style="color:var(--red); border-color:var(--red-dim)">Undo this import</button>
-        </form>
-        {% if prop %}<a href="{{ url_for('properties.detail', property_id=prop.id) }}">Back to {{ prop.name }}</a>{% else %}<a href="{{ url_for('documents.index') }}">Back to Documents</a>{% endif %}
+      </div>
+    {% endif %}
+  </div>
+{% endmacro %}
 
-      {% elif items and res_mode %}
-        <p class="note" style="margin-top:0">These are the reservations on the statement. "You receive" is what counts as revenue. Once confirmed, they replace the Excel-imported figures for that flat and month. Untick anything that shouldn't count.</p>
-        <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
-          <div class="mini-form" style="margin-top:0; margin-bottom:14px">
-            <button type="button" onclick="bulkSet('property_id', document.getElementById('bulk-property').value)">Set flat</button>
-            <select id="bulk-property"><option value="">—</option>{% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
-          </div>
-          {% for item in items %}
-            <div class="review-row {{ '' if item.include else 'excluded' }}" data-row>
-              <input type="hidden" name="item_id" value="{{ item.id }}">
-              <div class="review-row-top">
-                <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem">
-                  <input type="checkbox" class="row-include" name="include" value="{{ item.id }}" {{ 'checked' if item.include }} onchange="this.closest('[data-row]').classList.toggle('excluded', !this.checked)">
-                  Include
-                </label>
-                <span>
-                  {% if item.id in item_dups %}<span class="status-pill" style="background:var(--red-dim); color:var(--red)">already on file</span>{% endif %}
-                  {% if item.confidence is not none and item.confidence < 0.7 %}<span class="status-pill">low confidence</span>{% endif %}
-                </span>
-              </div>
-              <div class="note" style="margin-bottom:8px">{{ item.description or '' }}</div>
-              <div class="review-row-grid">
-                <label>Flat
-                  <select name="property_id" class="row-property">
-                    <option value="">Choose…</option>
-                    {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == item.property_id }}>{{ p.name }}</option>{% endfor %}
-                  </select>
-                </label>
-                <label>Platform <input name="platform" value="{{ item.platform if item.platform is not none else '' }}" placeholder="airbnb"></label>
-                <label>Reservation ID <input name="reservation_id" value="{{ item.reservation_id if item.reservation_id is not none else '' }}"></label>
-                <label>Check-in <input type="date" name="check_in" value="{{ item.check_in if item.check_in is not none else '' }}"></label>
-                <label>Check-out <input type="date" name="check_out" value="{{ item.check_out if item.check_out is not none else '' }}"></label>
-                <label>Gross (£) <input name="gross" type="number" step="0.01" value="{{ item.gross_revenue if item.gross_revenue is not none else '' }}"></label>
-                <label>Fees (£) <input name="fees" type="number" step="0.01" value="{{ item.platform_fees if item.platform_fees is not none else '' }}"></label>
-                <label>You receive (£) <input name="net" type="number" step="0.01" value="{{ item.net_revenue if item.net_revenue is not none else '' }}"></label>
-              </div>
+{% macro src_link(it) %}
+  {% if it.source_page %}<a href="#" class="src-link" data-page="{{ it.source_page }}">Source: page {{ it.source_page }}</a>
+  {% elif it.source_row %}<a href="#" class="src-link" data-src-row="{{ it.source_row }}">Source: row {{ it.source_row }}</a>{% endif %}
+{% endmacro %}
+
+{% macro dup_box(v, it) %}
+  {% if v.dup %}
+    <div class="rv-dup">
+      <div class="rv-dup-head"><strong>Possible duplicate</strong> — a similar {{ 'reservation' if v.dup.kind == 'reservation' else 'transaction' }} is already on file</div>
+      <div class="rv-dup-cmp">
+        <div><span class="note">This line</span><br>{% if it.item_kind == 'reservation' %}{{ it.platform or 'Reservation' }} · {{ it.check_in }}–{{ it.check_out }} · {{ (it.net_revenue or 0)|money2 }}{% else %}{{ it.vendor or it.description or 'Line' }} · {{ (it.amount or 0)|money2 }} · {{ it.date or '' }}{% endif %}</div>
+        <div><span class="note">Already on file{% if v.dup.property %} ({{ v.dup.property }}){% endif %}</span><br>{{ v.dup.text }}</div>
+      </div>
+      <div class="rv-dup-actions">
+        {% if v.dup.kind == 'transaction' %}
+          <a href="#" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=v.dup.id) }}" hx-target="#drawer" hx-swap="innerHTML">View existing</a>
+        {% else %}
+          <a href="{{ url_for('properties.bookings', property_id=v.dup.property_id) }}" target="_blank">View existing</a>
+        {% endif %}
+        <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="keep" {{ 'checked' if it.dup_decision == 'keep' }}> Keep both</label>
+        <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="exclude" {{ 'checked' if it.dup_decision == 'exclude' }}> Exclude new</label>
+      </div>
+    </div>
+  {% endif %}
+{% endmacro %}
+
+  <p class="note" style="margin:0 0 var(--s2)"><a href="{{ url_for('documents.index') }}">&larr; All documents</a></p>
+  <div class="page-head" style="margin-bottom:var(--s4)">
+    <div>
+      <h1 style="font-size:22px">{{ doc.filename }}</h1>
+      <p class="subtitle">{{ doc_type_label }} · {{ prop.name if prop else 'Property not detected' }}{% if period_label %} · {{ period_label }}{% endif %} · uploaded {{ doc.uploaded_at[:10] }}</p>
+    </div>
+    <div class="page-actions">
+      {% if confirmed %}{{ pill('Confirmed', 'pos') }}{% elif doc.status == 'failed' %}{{ pill('Could not read automatically', 'neg') }}{% else %}{{ pill('Needs review', 'warn') }}{% endif %}
+    </div>
+  </div>
+
+  <div class="rv-split">
+    {{ viewer_pane() }}
+
+    <div class="rv-work">
+      {% if confirmed %}
+        {% if summary %}
+          <div class="rv-success">
+            <div class="rv-success-title">✓ {{ summary.added }} {{ summary.noun }}{{ 's' if summary.added != 1 }} added</div>
+            <div class="note">{% if summary.excluded %}{{ summary.excluded }} excluded{% endif %}{% if summary.excluded and summary.corrected %} · {% endif %}{% if summary.corrected %}{{ summary.corrected }} manually corrected{% endif %}{% if not summary.excluded and not summary.corrected %}Imported exactly as read.{% endif %}</div>
+            <div class="rv-success-actions">
+              {% if summary.noun == 'reservation' %}<a class="btn secondary" href="{{ url_for('bookings.index') }}">View bookings</a>
+              {% else %}<a class="btn secondary" href="{{ url_for('expenses.index') }}#ledger">View in Expenses</a>{% endif %}
+              {% if prop %}<a class="btn secondary" href="{{ url_for('properties.detail', property_id=prop.id) }}">Open {{ prop.name }}</a>{% endif %}
+              <form method="post" action="{{ url_for('documents.undo', doc_id=doc.id) }}" onsubmit="return confirm('Undo this import? The transactions/reservations it created will be removed and the document goes back to needs-review.')" style="display:inline">
+                <button type="submit" class="danger">Undo this import</button>
+              </form>
             </div>
-          {% endfor %}
-          <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm reservations</button>
-        </form>
-        <script>
-          function bulkSet(field, value) {
-            if (!value) return;
-            document.querySelectorAll('.row-include:checked').forEach(cb => {
-              const el = cb.closest('[data-row]').querySelector('.row-property');
-              if (el) el.value = value;
-            });
-          }
-        </script>
+          </div>
+        {% endif %}
+        <div class="card flush">
+          <table>
+            <thead><tr><th>Line</th><th>Details</th><th class="num">Amount</th><th>Status</th></tr></thead>
+            <tbody>
+              {% for v in items %}{% set it = v.row %}{% set amt = it.net_revenue if it.item_kind == 'reservation' else it.amount %}
+                <tr class="{{ '' if it.include else 'muted' }}">
+                  <td class="truncate">{{ it.vendor or it.description or '—' }}</td>
+                  <td class="note">{% if it.item_kind == 'reservation' %}{{ it.check_in }} → {{ it.check_out }}{% else %}{{ it.category }} · {{ it.date or '' }}{% endif %}</td>
+                  <td class="num">{{ amt|money2 if amt is not none else '—' }}</td>
+                  <td>{% if it.include %}{{ pill('Included', 'pos') }}{% else %}{{ pill('Excluded') }}{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
 
       {% elif items %}
-        <p class="note" style="margin-top:0">Edit anything that's wrong, untick any row that shouldn't count, then confirm. Nothing is saved to the ledger until you confirm.</p>
-        <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}" id="review-form">
-          <div class="mini-form" style="margin-top:0; margin-bottom:14px">
-            <button type="button" onclick="bulkSet('property_id', document.getElementById('bulk-property').value)">Set flat</button>
-            <select id="bulk-property"><option value="">—</option>{% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
-            <button type="button" onclick="bulkSet('category', document.getElementById('bulk-category').value)">Set category</button>
-            <select id="bulk-category">{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+        <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}" id="review-form" data-kind="{{ 'res' if res_mode else 'tx' }}">
+          <div class="rv-head">
+            <label class="rv-selectall"><input type="checkbox" id="select-all"> <span id="rv-total" class="note"></span></label>
+            <label class="note"><input type="checkbox" id="only-attention"> Only lines needing attention</label>
           </div>
 
-          {% for item in items %}
-            {% set item_month = (item.date[5:7]|int) if item.date and item.date|length >= 7 else month %}
-            {% set item_year = (item.date[0:4]|int) if item.date and item.date|length >= 4 else year %}
-            <div class="review-row" data-row>
-              <input type="hidden" name="item_id" value="{{ item.id }}">
-              <div class="review-row-top">
-                <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem">
-                  <input type="checkbox" class="row-include" name="include" value="{{ item.id }}" {{ 'checked' if item.include }} onchange="this.closest('[data-row]').classList.toggle('excluded', !this.checked)">
-                  Include
-                </label>
-                <span>
-                  {% if item.duplicate_of %}<span class="status-pill" style="background:var(--red-dim); color:var(--red)">possible duplicate</span>{% endif %}
-                  {% if item.confidence is not none and item.confidence < 0.7 %}<span class="status-pill">low confidence</span>{% endif %}
+          {% for v in items %}{% set it = v.row %}
+            {% set date_ok = it.date and it.date|length == 10 %}
+            <div class="rv-row" data-row data-conf="{{ it.confidence if it.confidence is not none else '' }}"
+                 data-orig='{{ v.orig|tojson }}' data-dup="{{ 1 if v.dup else 0 }}"
+                 data-page="{{ it.source_page or '' }}" data-src-row="{{ it.source_row or '' }}"
+                 {% if not res_mode and not date_ok %}data-date-guess="{{ year }}-{{ '%02d'|format(month) }}-01"{% endif %}>
+              <input type="hidden" name="item_id" value="{{ it.id }}">
+              <input type="checkbox" class="row-include" name="include" value="{{ it.id }}" hidden {{ 'checked' if v.include }}>
+
+              <div class="rv-main">
+                <input type="checkbox" class="row-select" aria-label="Select this line">
+                <span class="rv-status ok">✓</span>
+                {% if res_mode %}
+                  <span class="rv-title">{{ it.description or 'Reservation' }}{% if it.check_in and it.check_out %}<span class="note"> · {{ it.check_in }} → {{ it.check_out }}</span>{% endif %}</span>
+                  <span class="rv-amount"><span class="note">You receive £</span><input class="q" name="net" type="number" step="0.01" value="{{ it.net_revenue if it.net_revenue is not none else '' }}"></span>
+                {% else %}
+                  <input class="q rv-title" name="description" value="{{ it.description or '' }}" placeholder="Description">
+                  <span class="rv-amount">£<input class="q" name="amount" type="number" step="0.01" value="{{ it.amount if it.amount is not none else '' }}"></span>
+                {% endif %}
+              </div>
+
+              {% if res_mode %}
+                <div class="rv-fields">
+                  <select class="q row-property" name="property_id">
+                    <option value="">Choose property…</option>
+                    {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == it.property_id }}>{{ p.name }}</option>{% endfor %}
+                  </select>
+                  <input class="q" name="platform" value="{{ it.platform if it.platform is not none else '' }}" placeholder="Platform" style="width:96px">
+                  <input class="q" name="reservation_id" value="{{ it.reservation_id if it.reservation_id is not none else '' }}" placeholder="Reservation ID" style="width:120px">
+                  <input class="q" type="date" name="check_in" value="{{ it.check_in if it.check_in is not none else '' }}">
+                  <input class="q" type="date" name="check_out" value="{{ it.check_out if it.check_out is not none else '' }}">
+                  <input class="q" name="gross" type="number" step="0.01" placeholder="Gross £" value="{{ it.gross_revenue if it.gross_revenue is not none else '' }}" style="width:90px">
+                  <input class="q" name="fees" type="number" step="0.01" placeholder="Fees £" value="{{ it.platform_fees if it.platform_fees is not none else '' }}" style="width:80px">
+                </div>
+              {% else %}
+                <div class="rv-fields">
+                  <select class="q row-property" name="property_id">
+                    <option value="">Choose property…</option>
+                    {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == it.property_id }}>{{ p.name }}</option>{% endfor %}
+                  </select>
+                  <input class="q" name="vendor" value="{{ it.vendor or '' }}" placeholder="Vendor" style="width:120px">
+                  <select class="q row-category" name="category">
+                    {% for c in categories %}<option value="{{ c }}" {{ 'selected' if it.category == c }}>{{ c|replace('_', ' ') }}</option>{% endfor %}
+                  </select>
+                  <select class="q" name="type">
+                    <option value="opex" {{ 'selected' if not it.capex }}>Opex</option>
+                    <option value="capex" {{ 'selected' if it.capex }}>Capex</option>
+                  </select>
+                  <input class="q" type="date" name="date" value="{{ it.date if date_ok else year ~ '-' ~ ('%02d'|format(month)) ~ '-01' }}">
+                </div>
+              {% endif %}
+
+              <div class="rv-foot">
+                <span class="rv-flags"></span>
+                <span class="rv-foot-right">
+                  {{ src_link(it) }}
+                  <button type="button" class="quiet row-toggle">Exclude</button>
                 </span>
               </div>
-              <div class="review-row-grid">
-                <label>Flat
-                  <select name="property_id" class="row-property">
-                    <option value="">Choose…</option>
-                    {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == item.property_id }}>{{ p.name }}</option>{% endfor %}
-                  </select>
-                </label>
-                <label>Month
-                  <select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == item_month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select>
-                </label>
-                <label>Year <input name="year" value="{{ item_year }}"></label>
-                <label>Vendor <input name="vendor" value="{{ item.vendor or '' }}"></label>
-                <label>Description <input name="description" value="{{ item.description or '' }}"></label>
-                <label>Category
-                  <select name="category" class="row-category">
-                    {% for c in categories %}<option value="{{ c }}" {{ 'selected' if item.category == c }}>{{ c }}</option>{% endfor %}
-                  </select>
-                </label>
-                <label>Amount (£) <input name="amount" type="number" step="0.01" value="{{ item.amount }}"></label>
-              </div>
+              {{ dup_box(v, it) }}
             </div>
           {% endfor %}
 
-          <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm {{ items|length }} transaction{{ 's' if items|length != 1 }}</button>
+          <div class="rv-dock">
+            <div id="bulk-bar" class="rv-bulk" hidden>
+              <strong id="bulk-count"></strong>
+              <select id="bulk-property"><option value="">Set property…</option>{% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+              {% if not res_mode %}
+                <select id="bulk-category"><option value="">Set category…</option>{% for c in categories %}<option value="{{ c }}">{{ c|replace('_', ' ') }}</option>{% endfor %}</select>
+                <button type="button" class="secondary" data-bulk="opex">Mark opex</button>
+                <button type="button" class="secondary" data-bulk="capex">Mark capex</button>
+              {% endif %}
+              <button type="button" class="secondary" data-bulk="exclude">Exclude</button>
+              <button type="button" class="secondary" data-bulk="restore">Restore</button>
+            </div>
+            <div class="rv-confirm">
+              <div id="confirm-note" class="note"></div>
+              <button type="submit" id="confirm-btn">Confirm</button>
+            </div>
+          </div>
         </form>
-        <script>
-          function bulkSet(field, value) {
-            if (!value) return;
-            document.querySelectorAll('.row-include:checked').forEach(cb => {
-              const row = cb.closest('[data-row]');
-              const el = row.querySelector(field === 'property_id' ? '.row-property' : '.row-category');
-              if (el) el.value = value;
-            });
-          }
-        </script>
 
       {% elif res_mode %}
-        <p class="note" style="margin-top:0">Nothing was read automatically (PDFs need an extraction key; CSV/Excel exports are read without one). Enter the reservations from the statement by hand:</p>
-        <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
-          {% for i in range(6) %}
-            <div class="review-row" data-row>
-              <div class="review-row-top">
-                <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem">
-                  <input type="checkbox" name="include" value="{{ i }}" checked> Include
-                </label>
-              </div>
-              
-              <div class="review-row-grid">
-                <label>Flat
-                  <select name="property_id" class="row-property">
-                    <option value="">Choose…</option>
+        <div class="card">
+          <p class="note" style="margin:0 0 var(--s3)">Nothing could be read from this file automatically{% if doc.status == 'failed' %} (PDFs and photos need an extraction key; spreadsheets and text files are read without one){% endif %}. Enter the reservations from the statement by hand; blank rows are ignored.</p>
+          <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
+            {% for i in range(6) %}
+              <div class="rv-row" data-row>
+                <input type="checkbox" name="include" value="{{ i }}" checked hidden>
+                <div class="rv-fields">
+                  <select class="q row-property" name="property_id">
+                    <option value="">Choose property…</option>
                     {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if (doc.property_id and p.id == doc.property_id) }}>{{ p.name }}</option>{% endfor %}
                   </select>
-                </label>
-                <label>Platform <input name="platform" value="" placeholder="airbnb"></label>
-                <label>Reservation ID <input name="reservation_id" value=""></label>
-                <label>Check-in <input type="date" name="check_in" value=""></label>
-                <label>Check-out <input type="date" name="check_out" value=""></label>
-                <label>Gross (£) <input name="gross" type="number" step="0.01" value=""></label>
-                <label>Fees (£) <input name="fees" type="number" step="0.01" value=""></label>
-                <label>You receive (£) <input name="net" type="number" step="0.01" value=""></label>
+                  <input class="q" name="platform" placeholder="Platform" style="width:96px">
+                  <input class="q" name="reservation_id" placeholder="Reservation ID" style="width:120px">
+                  <input class="q" type="date" name="check_in"><input class="q" type="date" name="check_out">
+                  <input class="q" name="gross" type="number" step="0.01" placeholder="Gross £" style="width:90px">
+                  <input class="q" name="fees" type="number" step="0.01" placeholder="Fees £" style="width:80px">
+                  <input class="q" name="net" type="number" step="0.01" placeholder="You receive £" style="width:110px">
+                </div>
               </div>
-            </div>
-          {% endfor %}
-          <p class="note">Leave "You receive" blank on rows you don't need — they're skipped.</p>
-          <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm reservations</button>
-        </form>
+            {% endfor %}
+            <button type="submit">Add reservations</button>
+          </form>
+        </div>
 
       {% else %}
-        <p class="note" style="margin-top:0">Nothing was auto-extracted from this file. Add its line items by hand:</p>
-        <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
-          {% for i in range(5) %}
-            <div class="review-row" data-row>
-              <div class="review-row-top">
-                <label style="display:flex; align-items:center; gap:6px; font-size:0.85rem">
-                  <input type="checkbox" name="include" value="{{ i }}" checked> Include
-                </label>
-              </div>
-              <div class="review-row-grid">
-                <label>Flat
-                  <select name="property_id">
-                    <option value="">Choose…</option>
+        <div class="card">
+          <p class="note" style="margin:0 0 var(--s3)">Nothing could be read from this file automatically{% if doc.status == 'failed' %} (PDFs and photos need an extraction key; spreadsheets and text files are read without one){% endif %}. Add its lines by hand; rows without an amount are ignored.</p>
+          <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
+            {% for i in range(5) %}
+              <div class="rv-row" data-row>
+                <input type="checkbox" name="include" value="{{ i }}" checked hidden>
+                <div class="rv-fields">
+                  <select class="q" name="property_id">
+                    <option value="">Choose property…</option>
                     {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if (doc.property_id and p.id == doc.property_id) }}>{{ p.name }}</option>{% endfor %}
                   </select>
-                </label>
-                <label>Month
-                  <select name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select>
-                </label>
-                <label>Year <input name="year" value="{{ year }}"></label>
-                <label>Vendor <input name="vendor"></label>
-                <label>Description <input name="description"></label>
-                <label>Category
-                  <select name="category">{% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
-                </label>
-                <label>Amount (£) <input name="amount" type="number" step="0.01"></label>
+                  <select class="q" name="month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if m == month }}>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m] }}</option>{% endfor %}</select>
+                  <input class="q" name="year" value="{{ year }}" style="width:64px">
+                  <input class="q" name="vendor" placeholder="Vendor" style="width:120px">
+                  <input class="q" name="description" placeholder="Description">
+                  <select class="q" name="category">{% for c in categories %}<option value="{{ c }}">{{ c|replace('_', ' ') }}</option>{% endfor %}</select>
+                  <input class="q" name="amount" type="number" step="0.01" placeholder="Amount £" style="width:100px">
+                </div>
               </div>
-            </div>
-          {% endfor %}
-          <p class="note">Leave the amount blank on any row you don't need — blank rows are skipped.</p>
-          <button type="submit" style="background:var(--accent-ink); color:#fff; border-color:var(--accent-ink)">Confirm &amp; add to ledger</button>
-        </form>
+            {% endfor %}
+            <button type="submit">Add to ledger</button>
+          </form>
+        </div>
       {% endif %}
     </div>
   </div>
+
+  <script src="{{ url_for('static', filename='review.js') }}"></script>
 {% endblock %}

@@ -218,6 +218,8 @@ def ensure_schema():
         ("item_kind", "TEXT NOT NULL DEFAULT 'transaction'"), ("check_in", "TEXT"), ("check_out", "TEXT"),
         ("reservation_id", "TEXT"), ("platform", "TEXT"), ("gross_revenue", "REAL"),
         ("platform_fees", "REAL"), ("net_revenue", "REAL"),
+        ("source_page", "INTEGER"), ("source_row", "INTEGER"),   # where in the source file this line came from
+        ("dup_decision", "TEXT"),                                # 'keep' | 'exclude', chosen by the reviewer
     ]:
         if col not in item_cols:
             conn.execute(f"ALTER TABLE document_items ADD COLUMN {col} {ddl}")

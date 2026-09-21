@@ -8,6 +8,7 @@ from services.audit import record
 from services.common import CATEGORIES, get_properties, get_property
 import services.kpis as kpis
 from services.common import MONTH_NAMES
+import services.review as review_helpers
 from services.documents import find_duplicate_reservation, save_upload
 from services.vendors import get_or_create_vendor
 
@@ -127,16 +128,78 @@ def review(doc_id):
     year = doc["detected_year"] or today.year
     month = doc["detected_month"] or today.month
     res_mode = bool(items and items[0]["item_kind"] == "reservation") or (not items and doc["doc_type"] == "booking_statement")
-    item_dups = {i["id"] for i in items if i["item_kind"] == "reservation"
-                 and find_duplicate_reservation(conn, i["property_id"], {"reservation_id": i["reservation_id"], "check_in": i["check_in"], "check_out": i["check_out"]})}
-    is_pdf = (doc["filename"] or "").lower().endswith(".pdf")
-    is_image = (doc["filename"] or "").lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+    confirmed = doc["status"] == "confirmed"
+
+    views = []
+    for it in items:
+        orig = review_helpers.original_of(it)
+        dup = None if confirmed else review_helpers.duplicate_info(conn, it, find_duplicate_reservation)
+        include = bool(it["include"])
+        if dup:  # a duplicate is undecided until the reviewer picks; only "exclude" leaves it out
+            include = it["dup_decision"] != "exclude"
+        views.append({
+            "row": it, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it),
+            "orig": {"vendor": orig.get("vendor"), "description": orig.get("description"), "amount": orig.get("amount"),
+                     "category": orig.get("category"), "date": orig.get("date"),
+                     "check_in": orig.get("check_in"), "check_out": orig.get("check_out"), "net": orig.get("net"),
+                     "gross": orig.get("gross"), "fees": orig.get("fees")},
+        })
+
+    summary = None
+    if confirmed:
+        added = conn.execute("SELECT COUNT(*) FROM transactions WHERE document_id=?", (doc_id,)).fetchone()[0] \
+            + conn.execute("SELECT COUNT(*) FROM bookings WHERE document_id=?", (doc_id,)).fetchone()[0]
+        summary = {"added": added, "excluded": sum(1 for v in views if not v["row"]["include"]),
+                   "corrected": sum(1 for v in views if v["changed"]),
+                   "noun": "reservation" if res_mode else "transaction"}
+
+    fname = (doc["filename"] or "").lower()
+    is_pdf = fname.endswith(".pdf")
+    is_image = fname.endswith((".png", ".jpg", ".jpeg", ".webp"))
+    preview = review_helpers.file_preview(doc["stored_path"]) if not (is_pdf or is_image) else None
     return render_template(
         "review_document.html", active="documents", all_properties=get_properties(conn),
-        active_property=doc["property_id"], prop=prop, doc=doc, items=items,
+        active_property=doc["property_id"], prop=prop, doc=doc, items=views,
         flats=get_properties(conn, include_overhead=False), year=year, month=month,
-        categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image, res_mode=res_mode, item_dups=item_dups,
+        categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image, res_mode=res_mode, confirmed=confirmed,
+        summary=summary, preview=preview, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
+        period_label=f"{MONTH_NAMES[doc['detected_month']]} {doc['detected_year']}" if doc["detected_year"] and doc["detected_month"] else None,
     )
+
+
+def _valid_date(text):
+    try:
+        datetime.date.fromisoformat(text or "")
+        return True
+    except ValueError:
+        return False
+
+
+def _num(text):
+    try:
+        return abs(float(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def _problem_message(problems, noun):
+    parts = []
+    if problems["duplicate"]:
+        parts.append(f"{problems['duplicate']} possible duplicate{'s' if problems['duplicate'] != 1 else ''} to decide on")
+    if problems["property"]:
+        parts.append(f"{problems['property']} line{'s' if problems['property'] != 1 else ''} without a property")
+    if problems["amount"]:
+        parts.append(f"{problems['amount']} without an amount")
+    if problems["date"]:
+        parts.append(f"{problems['date']} without a valid date")
+    return f"Nothing was added yet. Still needed before confirming: {', '.join(parts)}. Your edits are saved."
+
+
+def _finish(conn, doc_id, final_property_id, added, noun, excluded, corrected):
+    conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?", (final_property_id, doc_id))
+    conn.commit()
+    extra = " · ".join(x for x in (f"{excluded} excluded" if excluded else "", f"{corrected} manually corrected" if corrected else "") if x)
+    flash(f"\u2713 {added} {noun}{'s' if added != 1 else ''} added" + (f" ({extra})" if extra else ""))
 
 
 @bp.route("/documents/<int:doc_id>/confirm", methods=["POST"])
@@ -152,97 +215,90 @@ def confirm(doc_id):
 
     has_items = conn.execute("SELECT 1 FROM document_items WHERE document_id=? LIMIT 1", (doc_id,)).fetchone()
     included = set(request.form.getlist("include"))
-    added = 0
-    final_property_id = doc["property_id"]
 
     first_kind = conn.execute("SELECT item_kind FROM document_items WHERE document_id=? LIMIT 1", (doc_id,)).fetchone()
     if (first_kind and first_kind["item_kind"] == "reservation") or (not has_items and doc["doc_type"] == "booking_statement"):
         return _confirm_reservations(conn, doc, doc_id, bool(has_items), included)
-
     if has_items:
-        item_ids = request.form.getlist("item_id")
-        property_ids = request.form.getlist("property_id")
-        vendors = request.form.getlist("vendor")
-        descriptions = request.form.getlist("description")
-        amounts = request.form.getlist("amount")
-        categories = request.form.getlist("category")
-        years = request.form.getlist("year")
-        months = request.form.getlist("month")
-        for item_id, pid, vendor, desc, amount_s, category, year_s, month_s in zip(
-            item_ids, property_ids, vendors, descriptions, amounts, categories, years, months
-        ):
-            item = conn.execute("SELECT * FROM document_items WHERE id=? AND document_id=?", (item_id, doc_id)).fetchone()
-            if not item:
-                continue
-            include_row = item_id in included
-            try:
-                amount = abs(float(amount_s)) if amount_s else None
-            except ValueError:
-                amount = None
-            direction = "income" if category == "booking_income" else "expense"
-            final_value = {"property_id": pid, "vendor": vendor, "description": desc, "amount": amount,
-                            "category": category, "direction": direction, "include": include_row}
-            conn.execute(
-                """UPDATE document_items SET property_id=?, vendor=?, raw_description=?, amount=?, category=?,
-                     direction=?, include=?, reviewed=1, final_value=? WHERE id=?""",
-                (pid, vendor, desc, amount, category, direction, 1 if include_row else 0, json.dumps(final_value), item_id),
-            )
-            if not include_row or not amount or not pid:
-                continue
-            year, month = int(year_s), int(month_s)
-            vendor_id = get_or_create_vendor(conn, vendor)
-            cur = conn.execute(
-                """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source, document_id)
-                   VALUES (?,?,?,?,?,?,?,?,'upload',?)""",
-                (pid, f"{year}-{month:02d}-01", vendor, vendor_id, desc, amount, direction, category, doc_id),
-            )
-            conn.execute("UPDATE document_items SET duplicate_of=? WHERE id=? AND duplicate_of IS NULL",
-                         (cur.lastrowid, item_id))
-            added += 1
-            final_property_id = pid
-    else:
-        # Nothing was auto-extracted -- the manual 5-blank-row fallback,
-        # not backed by document_items.
-        property_ids = request.form.getlist("property_id")
-        vendors = request.form.getlist("vendor")
-        descriptions = request.form.getlist("description")
-        amounts = request.form.getlist("amount")
-        categories = request.form.getlist("category")
-        years = request.form.getlist("year")
-        months = request.form.getlist("month")
-        for i, (pid, vendor, desc, amount_s, category, year_s, month_s) in enumerate(
-            zip(property_ids, vendors, descriptions, amounts, categories, years, months)
-        ):
-            if str(i) not in included or not amount_s or not pid:
-                continue
-            try:
-                amount = abs(float(amount_s))
-            except ValueError:
-                continue
-            year, month = int(year_s), int(month_s)
-            direction = "income" if category == "booking_income" else "expense"
-            vendor_id = get_or_create_vendor(conn, vendor)
-            conn.execute(
-                """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source, document_id)
-                   VALUES (?,?,?,?,?,?,?,?,'upload',?)""",
-                (pid, f"{year}-{month:02d}-01", vendor, vendor_id, desc, amount, direction, category, doc_id),
-            )
-            added += 1
-            final_property_id = pid
+        return _confirm_transactions(conn, doc, doc_id, included)
 
-    conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?",
-                 (final_property_id, doc_id))
-    conn.commit()
-    flash(f"{added} transaction{'s' if added != 1 else ''} added.")
-    return redirect(url_for("properties.detail", property_id=final_property_id) if final_property_id else url_for("documents.index"))
+    # Nothing was auto-extracted -- the manual blank-row fallback, not backed by document_items.
+    f = request.form
+    added, final_property_id = 0, doc["property_id"]
+    for i, (pid, vendor, desc, amount_s, category, year_s, month_s) in enumerate(zip(
+            f.getlist("property_id"), f.getlist("vendor"), f.getlist("description"), f.getlist("amount"),
+            f.getlist("category"), f.getlist("year"), f.getlist("month"))):
+        amount = _num(amount_s)
+        if str(i) not in included or not amount or not pid:
+            continue
+        year, month = int(year_s), int(month_s)
+        direction = "income" if category == "booking_income" else "expense"
+        conn.execute(
+            """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source, document_id)
+               VALUES (?,?,?,?,?,?,?,?,'upload',?)""",
+            (pid, f"{year}-{month:02d}-01", vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, doc_id))
+        added += 1
+        final_property_id = pid
+    _finish(conn, doc_id, final_property_id, added, "transaction", 0, 0)
+    return redirect(url_for("documents.review", doc_id=doc_id))
 
 
+def _confirm_transactions(conn, doc, doc_id, included):
+    f = request.form
+    ids = f.getlist("item_id")
+    cols = {k: f.getlist(k) for k in ("property_id", "vendor", "description", "amount", "category", "type", "date")}
+    problems = {"duplicate": 0, "property": 0, "amount": 0, "date": 0}
+    ready, excluded, corrected = [], 0, 0
+    for idx, item_id in enumerate(ids):
+        item = conn.execute("SELECT * FROM document_items WHERE id=? AND document_id=?", (item_id, doc_id)).fetchone()
+        if not item:
+            continue
+        pid, vendor, desc = cols["property_id"][idx], cols["vendor"][idx], cols["description"][idx]
+        category, date = cols["category"][idx], cols["date"][idx]
+        amount = _num(cols["amount"][idx])
+        capex = 1 if cols["type"][idx] == "capex" else 0
+        decision = f.get(f"dup_{item_id}") or None
+        is_dup = bool(item["duplicate_of"] and conn.execute("SELECT 1 FROM transactions WHERE id=?", (item["duplicate_of"],)).fetchone())
+        include_row = item_id in included and not (is_dup and decision == "exclude")
+        if include_row:
+            if is_dup and decision != "keep":
+                problems["duplicate"] += 1
+            if not pid:
+                problems["property"] += 1
+            if not amount:
+                problems["amount"] += 1
+            if not _valid_date(date):
+                problems["date"] += 1
+        else:
+            excluded += 1
+        direction = "income" if category == "booking_income" else "expense"
+        conn.execute(
+            """UPDATE document_items SET property_id=?, vendor=?, raw_description=?, amount=?, category=?, capex=?, date=?,
+                 direction=?, include=?, dup_decision=?, reviewed=1, final_value=? WHERE id=?""",
+            (pid or None, vendor, desc, amount, category, capex, date, direction, 1 if include_row else 0, decision,
+             json.dumps({"property_id": pid, "vendor": vendor, "description": desc, "amount": amount, "category": category,
+                         "capex": capex, "date": date, "include": include_row}), item_id))
+        fresh = conn.execute("SELECT * FROM document_items WHERE id=?", (item_id,)).fetchone()
+        corrected += 1 if review_helpers.changed_fields(fresh) else 0
+        if include_row:
+            ready.append((item_id, pid, vendor, desc, amount, category, capex, date, direction))
 
-def _num(text):
-    try:
-        return abs(float(text))
-    except (TypeError, ValueError):
-        return None
+    if any(problems.values()):
+        conn.execute("UPDATE document_items SET reviewed=0 WHERE document_id=?", (doc_id,))
+        conn.commit()
+        flash(_problem_message(problems, "transaction"))
+        return redirect(url_for("documents.review", doc_id=doc_id))
+
+    final_property_id = doc["property_id"]
+    for item_id, pid, vendor, desc, amount, category, capex, date, direction in ready:
+        cur = conn.execute(
+            """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, capex, source, document_id)
+               VALUES (?,?,?,?,?,?,?,?,?,'upload',?)""",
+            (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, capex, doc_id))
+        conn.execute("UPDATE document_items SET duplicate_of=? WHERE id=? AND duplicate_of IS NULL", (cur.lastrowid, item_id))
+        final_property_id = pid
+    _finish(conn, doc_id, final_property_id, len(ready), "transaction", excluded, corrected)
+    return redirect(url_for("documents.review", doc_id=doc_id))
 
 
 def _confirm_reservations(conn, doc, doc_id, has_items, included):
@@ -252,8 +308,8 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
     f = request.form
     item_ids = f.getlist("item_id")
     n = len(f.getlist("check_in"))
-    added, skipped, final_property_id = 0, 0, doc["property_id"]
-    touched = {}  # (property_id, 'YYYY-MM') -> revenue before this upload
+    problems = {"duplicate": 0, "property": 0, "amount": 0, "date": 0}
+    ready, excluded, corrected = [], 0, 0
     for i in range(n):
         row_key = item_ids[i] if has_items else str(i)
         pid = f.getlist("property_id")[i]
@@ -263,16 +319,44 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
             net = max(gross - fees, 0)
         platform = f.getlist("platform")[i].strip() or None
         code = f.getlist("reservation_id")[i].strip() or None
+        decision = f.get(f"dup_{row_key}") or None
         include_row = row_key in included
+        is_dup = False
+        if has_items:
+            item = conn.execute("SELECT * FROM document_items WHERE id=?", (row_key,)).fetchone()
+            is_dup = bool(find_duplicate_reservation(conn, item["property_id"], {
+                "reservation_id": item["reservation_id"], "check_in": item["check_in"], "check_out": item["check_out"]}))
+            if is_dup and decision == "exclude":
+                include_row = False
+        if include_row:
+            if is_dup and decision != "keep":
+                problems["duplicate"] += 1
+            if not pid:
+                problems["property"] += 1
+            if net is None:
+                problems["amount"] += 1
+            if not (_valid_date(check_in) and _valid_date(check_out) and check_out > check_in):
+                problems["date"] += 1
+        else:
+            excluded += 1
         if has_items:
             conn.execute(
                 """UPDATE document_items SET property_id=?, platform=?, reservation_id=?, check_in=?, check_out=?,
-                     gross_revenue=?, platform_fees=?, net_revenue=?, amount=?, include=?, reviewed=1 WHERE id=?""",
-                (pid, platform, code, check_in, check_out, gross, fees, net, net, 1 if include_row else 0, row_key))
-        if not include_row or not pid or not check_in or not check_out or net is None or check_out <= check_in:
-            if include_row:
-                skipped += 1
-            continue
+                     gross_revenue=?, platform_fees=?, net_revenue=?, amount=?, include=?, dup_decision=?, reviewed=1 WHERE id=?""",
+                (pid or None, platform, code, check_in, check_out, gross, fees, net, net, 1 if include_row else 0, decision, row_key))
+            corrected += 1 if review_helpers.changed_fields(conn.execute("SELECT * FROM document_items WHERE id=?", (row_key,)).fetchone()) else 0
+        if include_row:
+            ready.append((pid, platform, code, check_in, check_out, gross, fees, net))
+
+    if any(problems.values()):
+        if has_items:
+            conn.execute("UPDATE document_items SET reviewed=0 WHERE document_id=?", (doc_id,))
+        conn.commit()
+        flash(_problem_message(problems, "reservation"))
+        return redirect(url_for("documents.review", doc_id=doc_id))
+
+    touched, final_property_id = {}, doc["property_id"]
+    for pid, platform, code, check_in, check_out, gross, fees, net in ready:
         key = (pid, check_in[:7])
         if key not in touched:
             y, m = map(int, key[1].split("-"))
@@ -282,12 +366,8 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
                    platform_fees, cleaning_fee, net_revenue, status, source, document_id)
                VALUES (?,?,?,?,?,?,?,0,?,'confirmed','upload',?)""",
             (pid, platform, code, check_in, check_out, gross if gross is not None else net, fees, net, doc_id))
-        added += 1
         final_property_id = pid
-    conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?", (final_property_id, doc_id))
-    conn.commit()
-    flash(f"{added} reservation{'s' if added != 1 else ''} added."
-          + (f" {skipped} skipped -- each needs a flat, valid dates and an amount." if skipped else ""))
+    _finish(conn, doc_id, final_property_id, len(ready), "reservation", excluded, corrected)
     names = {p["id"]: p["name"] for p in get_properties(conn)}
     for (pid, ym), before in touched.items():
         y, m = map(int, ym.split("-"))
@@ -295,7 +375,7 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
         flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y} is now based on the reservations on file: "
               f"£{before:,.0f} before, £{after:,.0f} now. If that looks low, the statement may not cover every "
               f"channel or reservation for the month -- upload the rest, or delete these to restore the Excel figure.")
-    return redirect(url_for("bookings.index"))
+    return redirect(url_for("documents.review", doc_id=doc_id))
 
 
 @bp.route("/documents/<int:doc_id>/undo", methods=["POST"])
@@ -309,7 +389,8 @@ def undo(doc_id):
         flash("Only a confirmed document can be undone.")
         return redirect(url_for("documents.index"))
     # confirm() points document_items.duplicate_of at the transaction each line became
-    conn.execute("UPDATE document_items SET duplicate_of=NULL, reviewed=0 WHERE document_id=?", (doc_id,))
+    conn.execute("UPDATE document_items SET duplicate_of=NULL WHERE document_id=? AND duplicate_of IN (SELECT id FROM transactions WHERE document_id=?)", (doc_id, doc_id))
+    conn.execute("UPDATE document_items SET reviewed=0 WHERE document_id=?", (doc_id,))
     n_tx = conn.execute("DELETE FROM transactions WHERE document_id=? AND source='upload'", (doc_id,)).rowcount
     n_bk = conn.execute("DELETE FROM bookings WHERE document_id=? AND source='upload'", (doc_id,)).rowcount
     conn.execute("UPDATE documents SET status='extracted', reviewed=0 WHERE id=?", (doc_id,))

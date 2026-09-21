@@ -23,6 +23,13 @@ def period_from_hint(hint):
     return None
 
 
+def _int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def find_duplicate(conn, property_id, item):
     """Returns the matching transaction's id, or None -- callers that just
     want a boolean can check truthiness."""
@@ -113,12 +120,13 @@ def save_upload(conn, file, doc_type, property_id, flash):
             conn.execute(
                 """INSERT INTO document_items (document_id, line_index, raw_description, date, vendor, amount,
                        direction, property_id, category, capex, confidence, include, original_extracted_value,
-                       item_kind, check_in, check_out, reservation_id, platform, gross_revenue, platform_fees, net_revenue)
-                   VALUES (?,?,?,?,?,?,'income',?,'booking_income',0,?,?,?,'reservation',?,?,?,?,?,?,?)""",
+                       item_kind, check_in, check_out, reservation_id, platform, gross_revenue, platform_fees, net_revenue,
+                       source_page, source_row)
+                   VALUES (?,?,?,?,?,?,'income',?,'booking_income',0,?,?,?,'reservation',?,?,?,?,?,?,?,?,?)""",
                 (doc_id, i, item.get("description"), item.get("check_in"), platform, item.get("net"),
                  item_property, item.get("confidence"), 0 if duplicate_of else 1, json.dumps(item),
                  item.get("check_in"), item.get("check_out"), item.get("reservation_id"), platform,
-                 item.get("gross"), item.get("fees"), item.get("net")),
+                 item.get("gross"), item.get("fees"), item.get("net"), _int(item.get("page")), _int(item.get("row"))),
             )
             continue
         item["possible_duplicate"] = None
@@ -128,10 +136,12 @@ def save_upload(conn, file, doc_type, property_id, flash):
         direction = "income" if category == "booking_income" else "expense"
         conn.execute(
             """INSERT INTO document_items (document_id, line_index, raw_description, date, vendor, amount,
-                   direction, property_id, category, capex, confidence, duplicate_of, original_extracted_value)
-               VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+                   direction, property_id, category, capex, confidence, duplicate_of, original_extracted_value,
+                   source_page, source_row)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (doc_id, i, item.get("description"), item.get("date"), item.get("vendor"), item.get("amount"),
-             direction, detected_property_id, category, item.get("confidence"), duplicate_of, json.dumps(item)),
+             direction, detected_property_id, category, 1 if category == "furniture" else 0, item.get("confidence"),
+             duplicate_of, json.dumps(item), _int(item.get("page")), _int(item.get("row"))),
         )
 
     conn.execute(
