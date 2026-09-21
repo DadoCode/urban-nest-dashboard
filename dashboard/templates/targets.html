@@ -1,135 +1,82 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head %}
+{% from "_components.html" import page_head, section, progress, empty_state %}
 {% block title %}Targets — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Targets", "Monthly targets per flat, starting from the average of your own recorded months. Change any number to test a what-if; nothing is saved until you press Save.") }}
+  {{ page_head("Targets", "Where you are, where you're aiming, and how big the gap is. Targets start as the average of your own recorded months and only ever appear on this page.") }}
 
-  <form method="get" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px">
+  <form method="get" class="filter-bar">
+    <label class="note">Month
+      <select name="month" onchange="this.form.submit()">
+        {% for m in month_options %}<option value="{{ m.ym }}" {{ 'selected' if m.ym == month }}>{{ m.label }}</option>{% endfor %}
+      </select>
+    </label>
     <label class="note">Average based on
       <select name="basis" onchange="this.form.submit()">
         {% for k, label in bases %}<option value="{{ k }}" {{ 'selected' if k == basis }}>{{ label }}</option>{% endfor %}
       </select>
     </label>
-    <label class="note">Compare against
-      <select name="month" onchange="this.form.submit()">
-        {% for m in month_options %}<option value="{{ m.ym }}" {{ 'selected' if m.ym == month }}>{{ m.label }}</option>{% endfor %}
-      </select>
-    </label>
   </form>
 
-  <form method="post" action="{{ url_for('targets.save') }}" id="targets-form">
-    <input type="hidden" name="basis" value="{{ basis }}">
-    <input type="hidden" name="month" value="{{ month }}">
+  {% call section("Portfolio — " ~ month_label) %}
+    <div class="tiles two">
+      {% for key, label in [('revenue', 'Revenue'), ('profit', 'Net profit')] %}
+        {% set t = totals[key] %}
+        <div class="tile target-tile">
+          <div class="label">{{ label }}</div>
+          {% if t.n %}
+            <div class="value">{{ t.actual|money }} <span class="of">/ {{ t.target|money }}</span></div>
+            <span class="pbar wide"><i class="{{ 'over' if t.pct >= 100 }}" style="width:{{ [t.pct, 100]|min }}%; opacity: {{ 1 if t.pct >= 100 else 0.7 }}"></i></span>
+            <div class="sub"><strong>{{ t.pct }}%</strong> of target · {% if t.remaining > 0 %}{{ t.remaining|money }} remaining{% else %}{{ (t.remaining|abs)|money }} over target{% endif %}</div>
+          {% else %}
+            <div class="value">—</div>
+            <div class="sub">No targets yet — none of the flats has enough history to average.</div>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+    <p class="note" style="margin-top:var(--s2)">Sum of the flats. Shared overhead costs aren't included in profit.</p>
+  {% endcall %}
 
-    {% for key, label, unit in metrics %}
-      <div class="section-head" style="margin-top:var(--s5)"><h2>{{ label }} target</h2><span class="note">per month</span></div>
-      <div class="card flush" data-metric="{{ key }}">
+  {% call section("By property", "Click a row to edit its targets") %}
+    <div class="card flush">
+      {% if rows %}
         <table>
           <thead>
             <tr>
               <th>Property</th>
-              <th class="num">Data average</th>
-              <th class="num">Target</th>
-              <th class="num">{{ month_label }}</th>
-              <th class="num">% of target</th>
-              <th class="num">Would have hit it</th>
+              <th class="num">Revenue</th><th class="num">Target</th><th>Progress</th>
+              <th class="num">Profit</th><th class="num">Target</th><th>Progress</th>
+              <th class="num">Occupancy</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {% for r in rows %}
-              {% set m = r.metrics[key] %}
-              <tr data-pid="{{ r.id }}">
+              {% set rv = r.metrics.revenue %}{% set pf = r.metrics.profit %}{% set oc = r.metrics.occupancy %}
+              <tr class="clickable" hx-get="{{ url_for('targets.edit', property_id=r.id, basis=basis, month=month) }}" hx-target="#drawer" hx-swap="innerHTML">
                 <td>{{ r.name }}</td>
-                <td class="num">
-                  {% if m.avg is not none %}
-                    <a href="#" class="use-avg" data-avg="{{ '%.0f'|format(m.avg) }}" title="Use the data average">{{ '£' if unit == '£' }}{{ '{:,.0f}'.format(m.avg) }}{{ '%' if unit == '%' }}</a>
-                  {% else %}<span class="note">no data</span>{% endif %}
-                </td>
-                <td class="num">
-                  <span style="display:inline-flex; align-items:center; gap:4px">
-                    {% if unit == '£' %}£{% endif %}
-                    <input type="number" step="{{ 1 if unit == '%' else 10 }}" min="0" {% if unit == '%' %}max="100"{% endif %}
-                           class="tgt" name="{{ key }}_{{ r.id }}" data-avg="{{ '%.0f'|format(m.avg) if m.avg is not none else '' }}"
-                           value="{{ '%.0f'|format(m.value) if m.value is not none else '' }}" style="width:96px; text-align:right">
-                    {% if unit == '%' %}%{% endif %}
-                  </span>
-                  <div class="note src" style="font-size:0.7rem">{{ 'saved' if m.saved else 'data average' }}</div>
-                </td>
-                <td class="num actual"></td>
-                <td class="num pct"></td>
-                <td class="num hit"></td>
+                <td class="num">{{ rv.actual|money if rv.actual is not none else '—' }}</td>
+                <td class="num">{% if rv.target %}{{ rv.target|money }}{% else %}<span class="muted">—</span>{% endif %}{% if rv.saved %} <span class="pill" title="You set this target">Set</span>{% endif %}</td>
+                <td>{% if rv.pct is not none %}<span class="cell-progress">{{ progress(rv.pct) }}<span class="pct {{ 'met' if rv.pct >= 100 }}">{{ rv.pct }}%</span></span>{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="num">{{ pf.actual|money if pf.actual is not none else '—' }}</td>
+                <td class="num">{% if pf.target %}{{ pf.target|money }}{% else %}<span class="muted">—</span>{% endif %}{% if pf.saved %} <span class="pill" title="You set this target">Set</span>{% endif %}</td>
+                <td>{% if pf.pct is not none %}<span class="cell-progress">{{ progress(pf.pct) }}<span class="pct {{ 'met' if pf.pct >= 100 }}">{{ pf.pct }}%</span></span>{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="num">{% if oc.actual is not none %}{{ '%.0f'|format(oc.actual) }}%{% if oc.target %} <span class="muted">/ {{ '%.0f'|format(oc.target) }}%</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td class="num"><span class="btn secondary" style="height:26px">Edit</span></td>
               </tr>
             {% endfor %}
-            {% if key != 'occupancy' %}
-              <tr class="total-row" style="font-weight:600">
-                <td>Portfolio total</td><td class="num"></td>
-                <td class="num tot-target"></td><td class="num tot-actual"></td><td class="num tot-pct"></td><td class="num"></td>
-              </tr>
-            {% endif %}
           </tbody>
         </table>
-      </div>
-    {% endfor %}
-
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-      <button type="submit">Save targets</button>
-      <button type="submit" class="secondary" formaction="{{ url_for('targets.reset') }}" formnovalidate onclick="return confirm('Discard every saved target and go back to the data averages?')">Reset all to data average</button>
-      <span class="note">Clear a box and save to fall back to that flat's data average.</span>
+      {% else %}
+        {{ empty_state("No properties to set targets for", "Add a property and record some months of revenue; its target starts as the average of that history.") }}
+      {% endif %}
     </div>
-  </form>
+  {% endcall %}
 
-  <script>
-    const HISTORY = {{ history_json|safe }};
-    const MONTH = {{ month|tojson }};
-    const fmt = (unit, v) => unit === '£' ? '£' + Math.round(v).toLocaleString('en-GB') : Math.round(v) + '%';
-
-    function last12(pid) {
-      return Object.keys(HISTORY[pid]).sort().slice(-12);
-    }
-
-    function recalc(card) {
-      const key = card.dataset.metric, unit = key === 'occupancy' ? '%' : '£';
-      let totTarget = 0, totActual = 0, haveTot = false;
-      card.querySelectorAll('tr[data-pid]').forEach(tr => {
-        const pid = tr.dataset.pid, input = tr.querySelector('.tgt');
-        const target = input.value === '' ? null : parseFloat(input.value);
-        const act = HISTORY[pid][MONTH] ? HISTORY[pid][MONTH][key] : null;
-        tr.querySelector('.actual').textContent = act === null ? '—' : fmt(unit, act);
-        const pctCell = tr.querySelector('.pct'), hitCell = tr.querySelector('.hit');
-        if (target !== null && target > 0 && act !== null) {
-          const p = act / target * 100;
-          pctCell.textContent = Math.round(p) + '%';
-          pctCell.style.color = p >= 100 ? 'var(--accent-ink)' : (p >= 80 ? 'var(--ink-soft)' : 'var(--red)');
-        } else pctCell.textContent = '—';
-        if (target !== null && target > 0) {
-          const ms = last12(pid);
-          const hits = ms.filter(m => HISTORY[pid][m][key] >= target).length;
-          hitCell.textContent = ms.length ? hits + ' of ' + ms.length + ' months' : '—';
-        } else hitCell.textContent = '—';
-        if (target !== null) { totTarget += target; haveTot = true; }
-        if (act !== null) totActual += act;
-      });
-      const tr = card.querySelector('.total-row');
-      if (tr) {
-        tr.querySelector('.tot-target').textContent = haveTot ? fmt(unit, totTarget) : '—';
-        tr.querySelector('.tot-actual').textContent = fmt(unit, totActual);
-        tr.querySelector('.tot-pct').textContent = haveTot && totTarget > 0 ? Math.round(totActual / totTarget * 100) + '%' : '—';
-      }
-    }
-
-    document.querySelectorAll('.card[data-metric]').forEach(card => {
-      card.querySelectorAll('.tgt').forEach(i => i.addEventListener('input', () => {
-        const src = i.parentElement.parentElement.querySelector('.src');
-        if (src) src.textContent = 'edited — not saved yet';
-        recalc(card);
-      }));
-      card.querySelectorAll('.use-avg').forEach(a => a.addEventListener('click', e => {
-        e.preventDefault();
-        const input = a.closest('tr').querySelector('.tgt');
-        input.value = a.dataset.avg;
-        input.dispatchEvent(new Event('input'));
-      }));
-      recalc(card);
-    });
-  </script>
+  {% if any_saved %}
+    <form method="post" action="{{ url_for('targets.reset') }}" style="margin-top:var(--s4)" onsubmit="return confirm('Discard every target you set and go back to the data averages?')">
+      <input type="hidden" name="basis" value="{{ basis }}"><input type="hidden" name="month" value="{{ month }}">
+      <button type="submit" class="secondary">Reset all to data average</button>
+    </form>
+  {% endif %}
 {% endblock %}

@@ -1,0 +1,74 @@
+<div class="drawer-head">
+  <div>
+    <div class="drawer-title">{{ p.name }}</div>
+    <div class="note">Monthly targets</div>
+  </div>
+  <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+
+<form method="post" action="{{ url_for('targets.save', property_id=p.id) }}" class="drawer-form" id="target-form">
+  <input type="hidden" name="basis" value="{{ basis }}">
+  <input type="hidden" name="month" value="{{ month }}">
+
+  {% for key, label, unit in [('revenue', 'Revenue target', '£'), ('profit', 'Profit target', '£'), ('occupancy', 'Occupancy target', '%')] %}
+    {% set m = p.metrics[key] %}
+    <div class="tfield" data-key="{{ key }}" data-unit="{{ unit }}">
+      <label for="t-{{ key }}">{{ label }}</label>
+      <div class="money-input">
+        {% if unit == '£' %}<span>£</span>{% endif %}
+        <input id="t-{{ key }}" type="number" name="{{ key }}" min="0" {% if unit == '%' %}max="100" step="1"{% else %}step="10"{% endif %}
+               value="{{ '%.0f'|format(m.target) if m.target is not none else '' }}" placeholder="No target">
+        {% if unit == '%' %}<span>%</span>{% endif %}
+      </div>
+      <div class="ctx">
+        {% if m.avg is not none %}<span>{{ avg_label }} <a href="#" class="fill" data-v="{{ '%.0f'|format(m.avg) }}">{{ ('£' ~ '{:,.0f}'.format(m.avg)) if unit == '£' else ('%.0f'|format(m.avg) ~ '%') }}</a></span>{% else %}<span>No history yet to average</span>{% endif %}
+        {% if m.last_year is not none %}<span>Same month last year ({{ ly_label }}) <a href="#" class="fill" data-v="{{ '%.0f'|format(m.last_year) }}">{{ ('£' ~ '{:,.0f}'.format(m.last_year)) if unit == '£' else ('%.0f'|format(m.last_year) ~ '%') }}</a></span>{% endif %}
+      </div>
+      <div class="hit">
+        <div class="hit-label">Historical hit rate</div>
+        <div class="hit-text"></div>
+        <div class="now note"></div>
+      </div>
+    </div>
+  {% endfor %}
+
+  <div class="drawer-actions">
+    <button type="submit">Save targets</button>
+    <button type="submit" class="secondary" formaction="{{ url_for('targets.reset_one', property_id=p.id) }}" formnovalidate>Use data average</button>
+  </div>
+  <p class="note" style="margin:0">Changing a number only tests it here. Nothing changes until you save.</p>
+</form>
+
+<script>
+  (function () {
+    const HIST = {{ history_json|safe }};
+    const MONTH = {{ month|tojson }};
+    const MONTH_LABEL = {{ month_label|tojson }};
+    const yms = Object.keys(HIST).sort().slice(-12);
+    const fmt = (unit, v) => unit === '£' ? moneyFull(v) : Math.round(v) + '%';
+
+    document.querySelectorAll('#target-form .tfield').forEach(f => {
+      const key = f.dataset.key, unit = f.dataset.unit, input = f.querySelector('input');
+      const hitText = f.querySelector('.hit-text'), now = f.querySelector('.now');
+      function update() {
+        const target = input.value === '' ? null : parseFloat(input.value);
+        if (target === null || !(target > 0)) {
+          hitText.textContent = 'Enter a target to see how often it would have been met.';
+          now.textContent = '';
+          return;
+        }
+        const hits = yms.filter(m => HIST[m][key] >= target).length;
+        hitText.innerHTML = yms.length
+          ? '<strong>' + hits + ' of the last ' + yms.length + ' months</strong> would have achieved this target'
+          : 'No months of history to test against yet.';
+        const actual = HIST[MONTH] ? HIST[MONTH][key] : null;
+        now.textContent = actual === null ? '' : MONTH_LABEL + ': ' + fmt(unit, actual) + ' (' + Math.round(actual / target * 100) + '% of this target)';
+      }
+      input.addEventListener('input', update);
+      f.querySelectorAll('.fill').forEach(a => a.addEventListener('click', e => {
+        e.preventDefault(); input.value = a.dataset.v; update();
+      }));
+      update();
+    });
+  })();
+</script>

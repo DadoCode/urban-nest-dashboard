@@ -410,3 +410,32 @@ button.drawer-close:hover { background: none; color: var(--ink); }
 .chart-box { position: relative; }
 .chart-legend { display: flex; gap: var(--s4); font-size: var(--fs-small); color: var(--muted); margin-bottom: var(--s2); }
 .chart-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; }
+
+/* ---------- targets ---------- */
+
+.pbar { display: inline-block; width: 84px; height: 6px; border-radius: 999px; background: var(--neutral-dim); overflow: hidden; vertical-align: middle; }
+.pbar i { display: block; height: 100%; background: var(--brand); border-radius: 999px; opacity: 0.55; }
+.pbar i.over { opacity: 1; }
+.pbar.wide { display: block; width: 100%; height: 8px; margin: var(--s3) 0 var(--s2); }
+.cell-progress { display: inline-flex; align-items: center; gap: var(--s2); }
+.cell-progress .pct { min-width: 38px; text-align: right; font-size: var(--fs-small); color: var(--ink-soft); }
+.cell-progress .pct.met { color: var(--pos); font-weight: 600; }
+.tiles.two { grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 700px) { .tiles.two { grid-template-columns: 1fr; } }
+.target-tile .of { font-size: var(--fs-section); color: var(--muted); font-weight: 400; }
+.target-tile .sub { font-size: var(--fs-small); color: var(--muted); }
+.target-tile .sub strong { color: var(--ink); font-weight: 600; }
+
+.drawer-title { font-size: var(--fs-section); font-weight: 600; }
+.tfield { padding-top: var(--s3); border-top: 1px solid var(--line); }
+.tfield:first-of-type { border-top: none; padding-top: 0; }
+.tfield > label { font-size: var(--fs-small); color: var(--ink-soft); font-weight: 500; }
+.money-input { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.money-input input { flex: 1; min-width: 0; width: 100%; font-size: var(--fs-section); font-weight: 600; height: 40px !important; }
+.tfield .ctx { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-small); color: var(--muted); }
+.tfield .ctx a { color: var(--brand-ink); font-weight: 500; text-decoration: none; }
+.tfield .ctx a:hover { text-decoration: underline; }
+.tfield .hit { margin-top: var(--s2); padding: var(--s2) var(--s3); background: var(--surface-2); border-radius: var(--radius-sm); font-size: var(--fs-small); }
+.tfield .hit .hit-label { color: var(--muted); text-transform: uppercase; font-size: var(--fs-label); letter-spacing: 0.05em; }
+.tfield .hit strong { font-weight: 600; }
+.drawer-actions { display: flex; gap: var(--s2); margin-top: var(--s2); }

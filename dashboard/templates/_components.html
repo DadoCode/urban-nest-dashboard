@@ -55,3 +55,10 @@
     {% endfor %}
   </nav>
 {%- endmacro %}
+
+{# Inline progress bar toward a target. pct may exceed 100 (bar caps, colour changes). #}
+{% macro progress(pct) -%}
+  {%- if pct is not none -%}
+    <span class="pbar"><i class="{{ 'over' if pct >= 100 }}" style="width:{{ [pct, 100]|min }}%"></i></span>
+  {%- endif -%}
+{%- endmacro %}
