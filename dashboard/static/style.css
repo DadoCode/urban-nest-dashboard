@@ -606,3 +606,16 @@ a.sort:hover, a.sort.on { color: var(--ink); }
 .tiles-secondary .tile.link .chev { top: 0; right: 4px; font-size: 15px; }
 .tiles-secondary .tile.link:hover { background: none; }
 .tiles-secondary .tile.link:hover .value { color: var(--brand-ink); }
+
+/* ---------- login + view-only ---------- */
+
+.login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: var(--s5); }
+.login-box { width: min(380px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--s6); }
+.login .brand-row { display: flex; align-items: center; gap: 10px; }
+.login .mark { width: 30px; height: 30px; border-radius: 8px; background: var(--brand); color: #04231a; font-weight: 600; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+.sidebar .signout { margin-top: auto; padding: 6px 10px; font-size: var(--fs-small); color: var(--sidebar-muted); text-decoration: none; }
+.sidebar .signout:hover { color: #fff; }
+.sidebar .signout + .add-btn { margin-top: var(--s2); }
+.viewer-note { background: var(--neutral-dim); color: var(--ink-soft); font-size: var(--fs-small); padding: 8px var(--s4); border-radius: var(--radius-sm); margin-bottom: var(--s3); }
+body.viewer .add-btn, body.viewer [onclick*="add-apartment-dialog"] { display: none; }
+form.view-only { opacity: 0.6; }

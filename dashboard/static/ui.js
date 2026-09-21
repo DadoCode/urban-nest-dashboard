@@ -1,5 +1,17 @@
 /* Shell behaviour: navigation progress line and the ⌘K quick-jump. */
 (function () {
+  /* ---------- view-only accounts: show everything, allow no changes ---------- */
+  function lockForms(root) {
+    if (!document.body.classList.contains('viewer')) return;
+    root.querySelectorAll('form[method="post"]').forEach(f => {
+      f.classList.add('view-only');
+      f.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; });
+      f.addEventListener('submit', e => e.preventDefault());
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => lockForms(document));
+  document.addEventListener('htmx:afterSwap', (e) => lockForms(e.target));
+
   /* ---------- navigation progress ---------- */
   const bar = document.getElementById('navbar');
   function start() { if (!bar) return; bar.style.opacity = 1; bar.style.width = '70%'; }

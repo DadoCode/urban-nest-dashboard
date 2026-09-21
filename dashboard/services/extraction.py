@@ -169,20 +169,9 @@ def _rows_to_reservations(header, rows):
 
 
 def _load_key():
-    """The Anthropic key from the environment, or from a .env file in the
-    project root (ANTHROPIC_API_KEY=...), so either setup works."""
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if key:
-        return key.strip()
-    env_file = Path(__file__).resolve().parent.parent.parent / ".env"
-    try:
-        for line in env_file.read_text().splitlines():
-            name, _, value = line.partition("=")
-            if name.strip() == "ANTHROPIC_API_KEY" and value.strip():
-                return value.strip().strip("\"'")
-    except OSError:
-        pass
-    return None
+    """The Anthropic key from the environment or the project's .env file."""
+    from services.env import get
+    return get("ANTHROPIC_API_KEY")
 
 
 def available():

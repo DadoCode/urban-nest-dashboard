@@ -28,9 +28,37 @@ RECENT_COOKIE = "recent_properties"
 RECENT_MAX = 5
 
 
+def _secret_key():
+    """A random key, created once and kept next to the database so logins
+    survive restarts. Falls back to a per-run key if the folder is read-only."""
+    import secrets
+    from services.env import get
+    if get("UN_SECRET_KEY"):
+        return get("UN_SECRET_KEY")
+    path = ROOT / "data" / ".secret_key"
+    try:
+        if path.exists():
+            return path.read_text().strip()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        key = secrets.token_hex(32)
+        path.write_text(key)
+        path.chmod(0o600)
+        return key
+    except OSError:
+        return secrets.token_hex(32)
+
+
 def create_app():
     flask_app = Flask(__name__)
-    flask_app.secret_key = "urban-nest-dashboard"  # local-only tool, no auth/session sensitivity
+    flask_app.secret_key = _secret_key()
+    flask_app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                            PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
+    # behind a tunnel (ngrok/Cloudflare) the real scheme/client arrive in X-Forwarded-* headers
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    flask_app.wsgi_app = ProxyFix(flask_app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    @flask_app.before_request
+    def _secure_cookie_over_https():
+        flask_app.config["SESSION_COOKIE_SECURE"] = request.is_secure
 
     db.ensure_schema()
     conn = db.get_conn()
@@ -38,6 +66,12 @@ def create_app():
         seed_defaults(conn, p["id"])
     conn.commit()
     conn.close()
+
+    @flask_app.context_processor
+    def _inject_auth():
+        from flask import g
+        from routes.auth import enabled
+        return {"auth_on": enabled(), "role": g.get("role", "owner")}
 
     @flask_app.context_processor
     def _asset_versions():

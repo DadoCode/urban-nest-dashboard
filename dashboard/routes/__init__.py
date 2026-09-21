@@ -1,5 +1,5 @@
 def register_blueprints(app):
-    from routes import overview, properties, bookings, expenses, documents, reports, targets
+    from routes import overview, properties, bookings, expenses, documents, reports, targets, auth
     app.register_blueprint(overview.bp)
     app.register_blueprint(properties.bp)
     app.register_blueprint(bookings.bp)
@@ -7,3 +7,4 @@ def register_blueprints(app):
     app.register_blueprint(documents.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(targets.bp)
+    app.register_blueprint(auth.bp)

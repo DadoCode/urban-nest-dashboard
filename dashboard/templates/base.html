@@ -11,7 +11,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
   <script defer src="{{ url_for('static', filename='ui.js', v=asset_v) }}"></script>
 </head>
-<body class="{% block body_class %}{% endblock %}">
+<body class="{% block body_class %}{% endblock %}{{ ' viewer' if role == 'viewer' }}">
   <div id="navbar"></div>
   <div class="app-shell">
     <aside class="sidebar">
@@ -41,11 +41,13 @@
         <a href="{{ url_for('targets.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'targets' else '' }}"><span class="dot"></span>Targets</a>
       </nav>
 
+      {% if auth_on %}<a href="{{ url_for('auth.logout') }}" class="signout">{{ 'View-only account' if role == 'viewer' else 'Signed in as owner' }} · Sign out</a>{% endif %}
       <button type="button" class="add-btn" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
     </aside>
 
     <div class="main-col">
       <main>
+        {% if role == 'viewer' %}<div class="viewer-note">You're viewing in read-only mode. Everything is live, but nothing can be changed from this account.</div>{% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% for category, m in messages %}<div class="flash {{ category if category in ('success', 'warning', 'error', 'info') else 'info' }}" role="status">{{ m }}</div>{% endfor %}
         {% endwith %}
