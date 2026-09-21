@@ -2,7 +2,7 @@
 
 A portfolio operating and analytics system for a UK short-term-rental business.
 
-The project is designed to replace a spreadsheet-heavy monthly reporting workflow with a structured system for bookings, expenses, documents, targets, portfolio analysis and reporting.
+Built to replace a spreadsheet-heavy monthly reporting workflow with one structured system for bookings, expenses, documents, targets, portfolio analysis and reporting.
 
 **Live demo:** https://urban-nest-dashboard-vercel.vercel.app
 
@@ -10,93 +10,30 @@ The project is designed to replace a spreadsheet-heavy monthly reporting workflo
 
 **Status:** Active development
 
----
-
 ## What it does
 
 Urban Nest Dashboard combines four jobs in one system:
 
 - **Monitor** — portfolio and property KPIs at a glance
-- **Analyse** — trends, comparisons, occupancy, ADR, RevPAR and expenses
-- **Record** — bookings, transactions, documents and historical data
+- **Analyse** — historical trends, comparisons, occupancy, ADR, RevPAR and expenses
+- **Record** — bookings, transactions, documents and historical information
 - **Act** — review uploaded documents, identify missing data and investigate unusual performance
 
-The goal is not simply to recreate an Excel tracker in a browser. The underlying data is stored as normalized records and the dashboard derives its metrics from those records.
+### Current features
 
----
-
-## Current features
-
-### Portfolio overview
-
-- Revenue
-- Net profit
-- Profit margin
-- Occupancy
-- ADR
-- RevPAR
-- Booked nights
-- Average stay
-- Previous-period and historical comparisons
-- Portfolio performance trends
-- Property performance ranking
-- Data-completeness tracking
-- Rule-based attention/insight indicators
-
-### Properties
-
-Each property has its own workspace with separate areas for:
-
-- Overview
-- Bookings
-- Expenses
-- Documents
-- Settings
-
-This keeps analytics separate from administrative actions and data entry.
-
-### Bookings
-
-- Portfolio booking overview
-- Reservation-level records
-- Portfolio calendar
-- Upcoming stays
-- Channel information
-- Occupancy analysis
-- Occupancy heatmap
-- Occupancy vs ADR comparison
-- Historical performance
-
-Booking statements can be imported from uploaded files and converted into reservation records.
-
-### Expenses
-
-- Portfolio cost analysis
-- Opex vs Capex
-- Expense categories
-- Vendor analysis
-- Shared overheads
-- Property-level expenses
+- Portfolio revenue, profit, occupancy, ADR and RevPAR analytics
+- Property-level workspaces
+- Reservation and booking-statement imports
+- Portfolio booking calendar and occupancy analysis
+- Opex / Capex and vendor/category expense analysis
 - Transaction ledger
-- Historical reconciliation records
+- Document Inbox with extraction, review and confirmation
+- Revenue and profit targets with historical context
+- Data-completeness monitoring
+- PDF, Excel and CSV reporting
+- Shared-overhead tracking
 
-### Document Inbox
-
-The Document Inbox turns source files into structured financial records.
-
-Supported inputs include:
-
-- booking-platform statements
-- invoices
-- receipts
-- bank statements
-- Amazon/Temu orders
-- CSV
-- XLSX
-- PDF
-- images
-
-Workflow:
+## Document workflow
 
 ```text
 Upload
@@ -111,4 +48,93 @@ Confirm
   ↓
 Bookings / transactions
   ↓
-KPIs update
+KPIs and reports update
+```
+
+PDFs and images can optionally use Claude for extraction. CSV and XLSX files are parsed directly.
+
+Nothing extracted from a document is silently added to the ledger without review.
+
+## Architecture
+
+**Stack:** Python, Flask, Jinja2, SQLite, Chart.js, HTMX, Alpine.js and optional Anthropic API integration.
+
+The application uses normalized bookings, transactions, documents and property records instead of relying on spreadsheet-style cached monthly totals.
+
+KPIs are calculated through one central metric layer, including:
+
+```python
+revenue()
+costs()
+net_profit()
+occupancy()
+adr()
+revpar()
+booked_nights()
+monthly_series()
+```
+
+Missing data is not treated as zero, and important financial records remain traceable to their underlying source.
+
+## Running locally
+
+```bash
+git clone https://github.com/DadoCode/urban-nest-dashboard.git
+cd urban-nest-dashboard
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+python3 dashboard/app.py
+```
+
+Then open:
+
+```text
+http://localhost:5050
+```
+
+For optional AI document extraction:
+
+```bash
+cp .env.example .env
+```
+
+Then add:
+
+```text
+ANTHROPIC_API_KEY=...
+```
+
+## Privacy
+
+The public repository excludes:
+
+- production databases
+- uploaded invoices and statements
+- client financial records
+- private documents
+- credentials
+- API keys
+
+The live demo uses synthetic data.
+
+## Development
+
+This project was built iteratively around a real operational workflow rather than from a generic dashboard template.
+
+I use AI coding tools, including Claude Code, to accelerate implementation while I define the product requirements, architecture, business rules, testing approach and UX direction.
+
+The commit history shows the progression from spreadsheet migration and normalized data modelling through document ingestion, booking analytics, reporting and the current UX redesign.
+
+### Current focus
+
+The current development pass is focused on:
+
+- improving visual hierarchy and reducing data overload
+- making charts easier to analyse
+- connecting high-level metrics to underlying records
+- improving target visualisation
+- redesigning document review
+- making filtering and navigation consistent throughout the product
