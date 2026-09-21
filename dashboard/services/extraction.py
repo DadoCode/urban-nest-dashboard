@@ -19,6 +19,7 @@ import json
 import mimetypes
 import os
 import re
+from pathlib import Path
 
 EXTRACTION_PROMPT = """You are looking at a document from a UK short-term-rental \
 business: it could be an Amazon/Temu order confirmation, a cleaner's invoice, \
@@ -168,7 +169,20 @@ def _rows_to_reservations(header, rows):
 
 
 def _load_key():
-    return os.environ.get("ANTHROPIC_API_KEY")
+    """The Anthropic key from the environment, or from a .env file in the
+    project root (ANTHROPIC_API_KEY=...), so either setup works."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key.strip()
+    env_file = Path(__file__).resolve().parent.parent.parent / ".env"
+    try:
+        for line in env_file.read_text().splitlines():
+            name, _, value = line.partition("=")
+            if name.strip() == "ANTHROPIC_API_KEY" and value.strip():
+                return value.strip().strip("\"'")
+    except OSError:
+        pass
+    return None
 
 
 def available():
