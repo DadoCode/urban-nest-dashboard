@@ -59,6 +59,27 @@ def create_app():
         )}
         return {"recently_viewed": [by_id[i] for i in ids if i in by_id]}
 
+    from services.completeness import DOC_TYPE_LABELS
+
+    def money(v, places=0):
+        if v is None:
+            return "—"
+        sign = "−" if v < 0 else ""
+        return f"{sign}£{abs(v):,.{places}f}"
+
+    def money_k(v):
+        if v is None:
+            return "—"
+        sign = "−" if v < 0 else ""
+        a = abs(v)
+        return f"{sign}£{a / 1000:.1f}k" if a >= 1000 else f"{sign}£{a:.0f}"
+
+    flask_app.jinja_env.filters["money"] = money
+    flask_app.jinja_env.filters["money2"] = lambda v: money(v, 2)
+    flask_app.jinja_env.filters["money_k"] = money_k
+    flask_app.jinja_env.filters["pct"] = lambda v, places=0: "—" if v is None else f"{v:.{places}f}%"
+    flask_app.jinja_env.filters["doc_label"] = lambda k: DOC_TYPE_LABELS.get(k, k)
+
     register_blueprints(flask_app)
     return flask_app
 

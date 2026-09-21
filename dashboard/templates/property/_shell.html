@@ -1,18 +1,11 @@
 {% extends "base.html" %}
+{% from "_components.html" import page_head, tabs %}
 {% block title %}{{ prop.name }} — Urban Nest Estates{% endblock %}
 {% block content %}
-  <h1>{{ prop.name }}</h1>
-  <p class="subtitle" style="margin-bottom:0">{{ prop.address }}</p>
-
-  <div class="tabs">
-    <a href="{{ url_for('properties.detail', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'overview' else '' }}">Overview</a>
-    {% if not is_overhead %}
-      <a href="{{ url_for('properties.bookings', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'bookings' else '' }}">Bookings</a>
-    {% endif %}
-    <a href="{{ url_for('properties.expenses_tab', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'expenses' else '' }}">Expenses</a>
-    <a href="{{ url_for('properties.documents_tab', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'documents' else '' }}">Documents</a>
-    <a href="{{ url_for('properties.settings_tab', property_id=prop.id) }}" class="tab {{ 'active' if active_tab == 'settings' else '' }}">Settings</a>
-  </div>
-
+  {{ page_head(prop.name, prop.address) }}
+  {% set items = [('overview', 'Overview', url_for('properties.detail', property_id=prop.id))] %}
+  {% if not is_overhead %}{% set items = items + [('bookings', 'Bookings', url_for('properties.bookings', property_id=prop.id))] %}{% endif %}
+  {% set items = items + [('expenses', 'Expenses', url_for('properties.expenses_tab', property_id=prop.id)), ('documents', 'Documents', url_for('properties.documents_tab', property_id=prop.id)), ('settings', 'Settings', url_for('properties.settings_tab', property_id=prop.id))] %}
+  {{ tabs(items, active_tab) }}
   {% block tab_content %}{% endblock %}
 {% endblock %}

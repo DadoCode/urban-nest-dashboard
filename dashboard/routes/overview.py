@@ -67,7 +67,7 @@ def _kpi_rows(conn, property_id, ctx):
         tile("ADR", "adr", lambda v: f"£{v:,.0f}"),
         tile("Booked nights", "booked_nights", lambda v: f"{v:,.0f}"),
         tile("Profit margin", "margin", lambda v: f"{v * 100:.0f}%"),
-        tile("Avg stay", "avg_stay", lambda v: f"{v:.1f} nights", cur_val=avg_stay, prev_val=prev_avg_stay),
+        tile("Avg stay", "avg_stay", lambda v: f"{v:.1f} nights" if v else "—", cur_val=avg_stay, prev_val=prev_avg_stay),
     ]
     return primary, secondary, cur
 

@@ -19,13 +19,22 @@ SHORTCUTS = ["this_month", "last_month", "ytd", "last12", "custom"]
 SHORTCUT_LABELS = {"this_month": "This month", "last_month": "Last month",
                     "ytd": "Year to date", "last12": "Last 12 months", "custom": "Custom"}
 COMPARE_CHOICES = ["previous_period", "previous_year", "none"]
-COMPARE_LABELS = {"previous_period": "vs previous period", "previous_year": "vs same period last year",
+COMPARE_LABELS = {"previous_period": "Previous period", "previous_year": "Same period last year",
                    "none": "No comparison"}
 
 
 def _iso_bounds(sy, sm, ey, em):
     start, end_exclusive = kpis.range_bounds(sy, sm, ey, em)
     return start, end_exclusive
+
+
+def _display(sy, sm, ey, em):
+    from services.common import MONTH_ABBR, MONTH_NAMES
+    if sy == ey and sm == 1 and em == 12:
+        return str(sy)
+    if sy == ey and sm == em:
+        return f"{MONTH_NAMES[sm]} {sy}"
+    return f"{MONTH_ABBR[sm]} {sy} – {MONTH_ABBR[em]} {ey}"
 
 
 def resolve_context(conn, args):
@@ -45,14 +54,7 @@ def resolve_context(conn, args):
     else:
         sy, sm, ey, em = cy, cm, cy, cm
 
-    if sy == ey and sm == 1 and em == 12:
-        display = str(sy)
-    elif sy == ey and sm == em:
-        from services.common import MONTH_NAMES
-        display = f"{MONTH_NAMES[sm]} {sy}"
-    else:
-        from services.common import MONTH_ABBR
-        display = f"{MONTH_ABBR[sm]} {sy} – {MONTH_ABBR[em]} {ey}"
+    display = _display(sy, sm, ey, em)
 
     property_id = args.get("property") or None
     if property_id == "all":
@@ -61,6 +63,13 @@ def resolve_context(conn, args):
     compare = args.get("compare", "previous_period")
     if compare not in COMPARE_CHOICES:
         compare = "previous_period"
+
+    if compare == "previous_period":
+        compare_display = _display(*kpis.prior_period(sy, sm, ey, em))
+    elif compare == "previous_year":
+        compare_display = _display(*kpis.same_period_last_year(sy, sm, ey, em))
+    else:
+        compare_display = None
 
     def shortcut_href(key):
         if key == "this_month":
@@ -81,7 +90,7 @@ def resolve_context(conn, args):
         "choice": choice, "start_year": sy, "start_month": sm, "end_year": ey, "end_month": em,
         "partial": partial, "display": display,
         "from_input": f"{sy}-{sm:02d}", "to_input": f"{ey}-{em:02d}",
-        "property_id": property_id, "compare": compare,
+        "property_id": property_id, "compare": compare, "compare_display": compare_display,
         "shortcuts": [{"key": k, "label": SHORTCUT_LABELS[k], "params": shortcut_href(k)} for k in SHORTCUTS],
         "compare_choices": [{"key": k, "label": COMPARE_LABELS[k]} for k in COMPARE_CHOICES],
     }

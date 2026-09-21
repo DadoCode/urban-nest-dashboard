@@ -1,6 +1,6 @@
 <div class="drawer-head">
   <div>
-    <div class="drawer-amount">£{{ '{:,.2f}'.format(tx.amount) }}</div>
+    <div class="drawer-amount">{{ tx.amount|money2 }}</div>
     <div class="note">{{ tx.vendor or '(no vendor)' }} · {{ tx.date }}</div>
   </div>
   <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
@@ -24,7 +24,7 @@
 
 {% if history %}
   <div class="drawer-section">
-    <h3 style="margin:0 0 8px; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted)">History</h3>
+    <div class="note" style="text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px">History</div>
     {% for h in history %}
       <div class="note" style="margin-bottom:4px">{{ h.timestamp }} — {{ h.action }}{% if h.field %} {{ h.field }}: "{{ h.old_value }}" → "{{ h.new_value }}"{% endif %}</div>
     {% endfor %}
@@ -51,6 +51,6 @@
   </form>
 
   <form method="post" action="{{ url_for('expenses.delete_transaction', tx_id=tx.id) }}" onsubmit="return confirm('Delete this transaction? This cannot be undone.')" style="margin-top:8px">
-    <button type="submit" style="color:var(--red); border-color:var(--red-dim)">Delete transaction</button>
+    <button type="submit" class="danger">Delete transaction</button>
   </form>
 {% endif %}

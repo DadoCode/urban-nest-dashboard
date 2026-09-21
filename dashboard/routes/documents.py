@@ -33,7 +33,18 @@ def index():
     conn = db.get_conn()
     f_property = request.args.get("d_property") or ""
     f_type = request.args.get("d_type") or ""
-    f_status = request.args.get("d_status") or ""
+    counts = conn.execute(
+        """SELECT
+             SUM(CASE WHEN status IN ('pending','extracted') THEN 1 ELSE 0 END) needs_review,
+             SUM(CASE WHEN status='confirmed' THEN 1 ELSE 0 END) complete,
+             SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,
+             COUNT(*) total
+           FROM documents"""
+    ).fetchone()
+    if "d_status" in request.args:
+        f_status = request.args.get("d_status") or ""
+    else:
+        f_status = "review" if counts["needs_review"] else ""
     f_q = (request.args.get("d_q") or "").strip()
 
     clauses, params = ["1=1"], []
@@ -41,7 +52,11 @@ def index():
         clauses.append("property_id=?"); params.append(f_property)
     if f_type:
         clauses.append("doc_type=?"); params.append(f_type)
-    if f_status:
+    if f_status == "review":
+        clauses.append("status IN ('pending','extracted')")
+    elif f_status == "complete":
+        clauses.append("status='confirmed'")
+    elif f_status:
         clauses.append("status=?"); params.append(f_status)
     if f_q:
         clauses.append("filename LIKE ?"); params.append(f"%{f_q}%")
@@ -58,15 +73,8 @@ def index():
         ).fetchone()
         rows.append({**dict(d), "property_name": property_names.get(d["property_id"], "Unassigned"),
                      "doc_type_label": DOC_TYPE_LABELS.get(d["doc_type"], d["doc_type"] or "—"),
-                     "item_count": item_stats["n"], "item_amount": item_stats["amt"]})
-
-    counts = conn.execute(
-        """SELECT
-             SUM(CASE WHEN status IN ('pending','extracted') THEN 1 ELSE 0 END) needs_review,
-             SUM(CASE WHEN status='confirmed' THEN 1 ELSE 0 END) complete,
-             SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed
-           FROM documents"""
-    ).fetchone()
+                     "item_count": item_stats["n"], "item_amount": item_stats["amt"],
+                     "period": f"{MONTH_NAMES[d['detected_month']][:3]} {d['detected_year']}" if d["detected_year"] and d["detected_month"] else "—"})
 
     return render_template(
         "documents.html", active="documents", all_properties=get_properties(conn), active_property=None,

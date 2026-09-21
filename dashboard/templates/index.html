@@ -1,137 +1,110 @@
 {% extends "base.html" %}
-{% block title %}Homepage — Urban Nest Estates{% endblock %}
+{% from "_components.html" import page_head, section, kpi_tile, delta, pill, empty_state %}
+{% block title %}Overview — Urban Nest Estates{% endblock %}
 {% block content %}
-  <div>
-    <h1>Portfolio{% if viewing %} — {{ viewing.name }}{% endif %}</h1>
-    <p class="subtitle" style="margin-bottom:0">{{ flats_count }} apartments · {{ ctx.display }}{% if ctx.partial %} (to date){% endif %}
-      {% if overhead_property %}· <a href="{{ url_for('properties.detail', property_id=overhead_property.id) }}">shared overhead costs</a>{% endif %}</p>
-  </div>
+  {% call page_head("Overview", flats_count ~ " apartments" ~ (" · " ~ viewing.name if viewing else "")) %}
+    {% if overhead_property %}<a class="btn secondary" href="{{ url_for('properties.detail', property_id=overhead_property.id) }}">Shared overheads</a>{% endif %}
+  {% endcall %}
 
-  <div class="tiles" style="margin-top:16px">
-    {% for t in primary_tiles %}
-      <div class="tile">
-        <div class="label">{{ t.label }}</div>
-        <div class="value">{{ t.value }}</div>
-        {% if t.delta is not none %}
-          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior period</div>
-        {% endif %}
-        {% if t.delta_ly is not none %}
-          <div class="note" style="margin-top:4px">{{ '%+.0f'|format(t.delta_ly) }}% vs same period last year</div>
-        {% endif %}
-        {% if t.note %}<div class="note" style="margin-top:4px">{{ t.note }}</div>{% endif %}
-      </div>
-    {% endfor %}
+  <div class="tiles">
+    {% for t in primary_tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
   </div>
-
   <div class="tiles tiles-secondary">
     {% for t in secondary_tiles %}
-      <div class="tile">
-        <div class="label">{{ t.label }}</div>
-        <div class="value">{{ t.value }}</div>
-      </div>
+      <div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>
     {% endfor %}
   </div>
 
-  <div style="margin-top:20px">
-    {% if completeness %}
+  {% call section("Portfolio performance", "Trailing 12 months") %}
+    <div class="card">
+      <div class="chart-box" style="height:300px"><canvas id="revenueChart"></canvas></div>
+    </div>
+  {% endcall %}
+
+  <div class="grid-2">
+    {% call section("Occupancy trend") %}
+      <div class="card"><div class="chart-box" style="height:190px"><canvas id="occChart"></canvas></div></div>
+    {% endcall %}
+
+    {% call section("Needs attention") %}
       <div class="card">
-        <h2 style="margin-top:0">Data completeness — this month</h2>
-        <p class="subtitle" style="margin-bottom:10px">{{ completeness.overall }}% complete across {{ completeness.rows|length }} propert{{ 'y' if completeness.rows|length == 1 else 'ies' }}</p>
-        {% if completeness.gaps %}
-          {% for g in completeness.gaps %}
-            <div class="completeness-row">
-              <span>{{ g.name }}</span>
-              <span class="note">missing {% for m in g.missing %}{{ doc_type_labels.get(m, m) }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        {% if insights %}
+          {% for i in insights %}
+            <div class="list-row">
+              <span><span style="color: {{ 'var(--warn)' if i.type == 'warning' else ('var(--pos)' if i.type == 'positive' else 'var(--muted)') }}">●</span>&nbsp; {{ i.text }}</span>
+              {% if 'missing' in i.text or 'uploaded' in i.text %}<a class="btn secondary" href="{{ url_for('documents.index') }}">Upload</a>
+              {% elif 'awaiting review' in i.text %}<a class="btn secondary" href="{{ url_for('documents.index') }}">Review</a>{% endif %}
             </div>
           {% endfor %}
         {% else %}
-          <p class="note">Every configured property has its expected documents in for this month.</p>
+          {{ empty_state("Nothing needs attention", "Every property has its expected documents and no figures moved unusually.") }}
         {% endif %}
       </div>
-    {% endif %}
+    {% endcall %}
   </div>
 
-  {% if insights %}
-    <div class="card">
-      <h2 style="margin-top:0">Attention <span class="status-pill">{{ insights|length }}</span></h2>
-      <ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px">
-        {% for i in insights %}
-          <li style="color: {{ 'var(--red)' if i.type == 'warning' else ('var(--accent-ink)' if i.type == 'positive' else 'var(--ink-soft)') }}; font-size:0.9rem">{{ i.text }}</li>
-        {% endfor %}
-      </ul>
+  {% call section("Property performance") %}
+    <div class="card flush">
+      <table>
+        <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Margin</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
+        <tbody>
+          {% for r in prop_rows %}
+            <tr>
+              <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+              <td class="num">{{ r.revenue|money }}</td>
+              <td class="num">{{ r.profit|money }}</td>
+              <td class="num">{{ '%.0f'|format(r.margin * 100) }}%</td>
+              <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+              <td class="num">{{ r.adr|money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-  {% endif %}
-
-  <div class="card">
-    <h2 style="margin-top:0">Portfolio performance</h2>
-    <p class="subtitle" style="margin-bottom:12px">Trailing 12 months · months with nothing recorded are simply absent, not drawn as zero</p>
-    <div style="height:280px"><canvas id="revenueChart"></canvas></div>
-  </div>
-
-  <div class="card">
-    <h2 style="margin-top:0">Occupancy trend</h2>
-    <div style="height:180px"><canvas id="occChart"></canvas></div>
-  </div>
-
-  <h2>Property performance — {{ ctx.display }}</h2>
-  <div class="card">
-    <table>
-      <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Margin</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
-      <tbody>
-        {% for r in prop_rows %}
-          <tr>
-            <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
-            <td class="num">£{{ '{:,.0f}'.format(r.revenue) }}</td>
-            <td class="num">£{{ '{:,.0f}'.format(r.profit) }}</td>
-            <td class="num">{{ '%.0f'|format(r.margin * 100) }}%</td>
-            <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
-            <td class="num">£{{ '{:,.0f}'.format(r.adr) }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {% endcall %}
 
   <div class="grid-2">
-    <div class="card">
-      <h2 style="margin-top:0">Expense breakdown — {{ ctx.display }}</h2>
-      {% if expense_rows %}
-        <table>
-          <thead><tr><th>Category</th><th class="num">Amount</th><th class="num">vs prior</th></tr></thead>
-          <tbody>
-            {% for e in expense_rows %}
-              <tr>
-                <td>{{ e.category }}</td>
-                <td class="num">£{{ '{:,.0f}'.format(e.amount) }}</td>
-                <td class="num" style="color: {{ 'var(--red)' if e.delta and e.delta > 0 else 'var(--accent-ink)' }}">{{ '%+.0f'|format(e.delta) + '%' if e.delta is not none else '—' }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="note">No costs recorded for this period yet.</p>
-      {% endif %}
-    </div>
-    <div class="card">
-      <h2 style="margin-top:0">Year on year</h2>
-      {% if yoy %}
-        <table>
-          <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Last year</th><th class="num">Change</th></tr></thead>
-          <tbody>
-            {% for row in yoy[-6:] %}
-              <tr>
-                <td>{{ row.label }}</td>
-                <td class="num">£{{ '{:,.0f}'.format(row.this_year) }}</td>
-                <td class="num">£{{ '{:,.0f}'.format(row.last_year) }}</td>
-                <td class="num" style="color: {{ '#056a4a' if row.delta_pct and row.delta_pct > 0 else ('#e0483f' if row.delta_pct and row.delta_pct < 0 else '#7c8d87') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="note">Not enough overlapping history yet.</p>
-      {% endif %}
-    </div>
+    {% call section("Expense breakdown") %}
+      <div class="card flush">
+        {% if expense_rows %}
+          <table>
+            <thead><tr><th>Category</th><th class="num">Amount</th><th class="num">Change</th></tr></thead>
+            <tbody>
+              {% for e in expense_rows %}
+                <tr>
+                  <td>{{ e.category }}</td>
+                  <td class="num">{{ e.amount|money }}</td>
+                  <td class="num">{% if e.delta is not none %}<span class="delta {{ 'down' if e.delta > 0 else 'up' }}" style="display:inline"><span class="arrow">{{ '↑' if e.delta > 0 else '↓' }}</span>{{ '%.0f'|format(e.delta|abs) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          {{ empty_state("No expenses in this period", "Costs appear once invoices or statements are confirmed.", "Upload documents", url_for('documents.index')) }}
+        {% endif %}
+      </div>
+    {% endcall %}
+    {% call section("Year on year") %}
+      <div class="card flush">
+        {% if yoy %}
+          <table>
+            <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Last year</th><th class="num">Change</th></tr></thead>
+            <tbody>
+              {% for row in yoy[-6:] %}
+                <tr>
+                  <td>{{ row.label }}</td>
+                  <td class="num">{{ row.this_year|money }}</td>
+                  <td class="num">{{ row.last_year|money }}</td>
+                  <td class="num">{% if row.delta_pct is not none %}<span class="delta {{ 'up' if row.delta_pct > 0 else 'down' }}" style="display:inline"><span class="arrow">{{ '↑' if row.delta_pct > 0 else '↓' }}</span>{{ '%.1f'|format(row.delta_pct|abs) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          {{ empty_state("Not enough history yet", "Year-on-year needs the same months in two consecutive years.") }}
+        {% endif %}
+      </div>
+    {% endcall %}
   </div>
 
   <script>
@@ -141,25 +114,20 @@
     const profit = {{ profit_json|safe }};
     const margin = {{ margin_json|safe }};
     const occupancy = {{ occupancy_json|safe }};
-    const teal = '#0ea472';
-    const red = '#e0483f';
-    const amber = '#e0932e';
-    const tealSoft = 'rgba(14,164,114,0.15)';
 
     new Chart(document.getElementById('revenueChart'), {
       data: {
         labels: months,
         datasets: [
-          { type: 'bar', label: 'Revenue', data: income, backgroundColor: teal },
-          { type: 'bar', label: 'Costs', data: costs, backgroundColor: red },
-          { type: 'line', label: 'Net profit', data: profit, borderColor: amber, tension: 0.3, pointHoverRadius: 5 },
+          { type: 'bar', label: 'Revenue', data: income, backgroundColor: UN.revenue, order: 2 },
+          { type: 'bar', label: 'Costs', data: costs, backgroundColor: UN.costs, order: 2 },
+          { type: 'line', label: 'Profit', data: profit, backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
         ],
       },
       options: {
         interaction: { mode: 'index', intersect: false },
         scales: quietScales(moneyShort),
         plugins: {
-          legend: { position: 'bottom' },
           tooltip: {
             callbacks: {
               label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}`,
@@ -172,10 +140,10 @@
 
     new Chart(document.getElementById('occChart'), {
       type: 'line',
-      data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.3, spanGaps: false }] },
+      data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false }] },
       options: {
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (item) => `Occupancy: ${pctShort(item.parsed.y)}` } } },
-        scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
+        scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 5 } } }),
       },
     });
   </script>

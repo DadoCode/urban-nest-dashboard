@@ -1,57 +1,49 @@
 {% extends "property/_shell.html" %}
+{% from "_components.html" import section, kpi_tile, delta, empty_state %}
 {% block tab_content %}
-  <div class="tiles">
-    {% for t in tiles %}
-      <div class="tile">
-        <div class="label">{{ t.label }}</div>
-        <div class="value">{{ t.value }}</div>
-        {% if t.delta is not none %}
-          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior month</div>
-        {% endif %}
-      </div>
-    {% endfor %}
-  </div>
-  {% if not tiles %}
-    <div class="card"><p class="note">No monthly figures for {{ month_name }} {{ year }} yet — {% if is_overhead %}add an expense on the Expenses tab to start tracking shared costs.{% else %}add an expense or upload a document to start building this flat's numbers.{% endif %}</p></div>
+  {% if tiles %}
+    <div class="tiles">
+      {% for t in tiles %}{{ kpi_tile(t, 'previous_period', 'prior month') }}{% endfor %}
+    </div>
+  {% else %}
+    <div class="card">{{ empty_state("No " ~ month_name ~ " " ~ year ~ " data", ("Add an expense on the Expenses tab to start tracking shared costs." if is_overhead else "Add an expense or upload a document to build this flat's numbers."), "Upload documents", url_for('documents.index')) }}</div>
   {% endif %}
 
   {% if is_overhead %}
-    <div class="card">
-      <h2 style="margin-top:0">Monthly cost trend</h2>
-      <div style="height:240px"><canvas id="revenueChart"></canvas></div>
-    </div>
+    {% call section("Monthly cost trend") %}
+      <div class="card"><div class="chart-box" style="height:240px"><canvas id="revenueChart"></canvas></div></div>
+    {% endcall %}
   {% else %}
     <div class="grid-2">
-      <div class="card">
-        <h2 style="margin-top:0">Revenue, costs &amp; profit</h2>
-        <div style="height:240px"><canvas id="revenueChart"></canvas></div>
-      </div>
-      <div class="card">
-        <h2 style="margin-top:0">Occupancy</h2>
-        <div style="height:240px"><canvas id="occChart"></canvas></div>
-      </div>
+      {% call section("Revenue, costs and profit") %}
+        <div class="card"><div class="chart-box" style="height:240px"><canvas id="revenueChart"></canvas></div></div>
+      {% endcall %}
+      {% call section("Occupancy") %}
+        <div class="card"><div class="chart-box" style="height:240px"><canvas id="occChart"></canvas></div></div>
+      {% endcall %}
     </div>
 
-    <div class="card">
-      <h2 style="margin-top:0">Year on year</h2>
-      {% if yoy %}
-        <table>
-          <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Same month last year</th><th class="num">Change</th></tr></thead>
-          <tbody>
-            {% for row in yoy %}
-              <tr>
-                <td>{{ row.label }}</td>
-                <td class="num">£{{ '{:,.0f}'.format(row.this_year) }}</td>
-                <td class="num">£{{ '{:,.0f}'.format(row.last_year) }}</td>
-                <td class="num" style="color: {{ '#056a4a' if row.delta_pct and row.delta_pct > 0 else ('#e0483f' if row.delta_pct and row.delta_pct < 0 else '#7c8d87') }}">{{ '%+.1f'|format(row.delta_pct) + '%' if row.delta_pct is not none else 'n/a' }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="note">Not enough history yet for a year-over-year comparison on this flat.</p>
-      {% endif %}
-    </div>
+    {% call section("Year on year") %}
+      <div class="card flush">
+        {% if yoy %}
+          <table>
+            <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Same month last year</th><th class="num">Change</th></tr></thead>
+            <tbody>
+              {% for row in yoy %}
+                <tr>
+                  <td>{{ row.label }}</td>
+                  <td class="num">{{ row.this_year|money }}</td>
+                  <td class="num">{{ row.last_year|money }}</td>
+                  <td class="num">{% if row.delta_pct is not none %}{{ delta(row.delta_pct, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          {{ empty_state("Not enough history yet", "Year-on-year needs the same months in two consecutive years.") }}
+        {% endif %}
+      </div>
+    {% endcall %}
   {% endif %}
 
   <script>
@@ -61,15 +53,11 @@
     const costs = {{ costs_json|safe }};
     const margin = {{ margin_json|safe }};
     const occupancy = {{ occupancy_json|safe }};
-    const teal = '#0ea472';
-    const amber = '#e0932e';
-    const red = '#e0483f';
-    const tealSoft = 'rgba(14,164,114,0.15)';
 
     {% if is_overhead %}
     new Chart(document.getElementById('revenueChart'), {
       type: 'bar',
-      data: { labels: months, datasets: [{ label: 'Costs', data: costs, backgroundColor: red }] },
+      data: { labels: months, datasets: [{ label: 'Costs', data: costs, backgroundColor: UN.costs }] },
       options: {
         scales: quietScales(moneyShort),
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Costs: ${moneyFull(i.parsed.y)}` } } },
@@ -80,16 +68,15 @@
       data: {
         labels: months,
         datasets: [
-          { type: 'bar', label: 'Revenue', data: income, backgroundColor: teal },
-          { type: 'bar', label: 'Costs', data: costs, backgroundColor: red },
-          { type: 'line', label: 'Net profit', data: profit, borderColor: amber, tension: 0.3, pointHoverRadius: 5 },
+          { type: 'bar', label: 'Revenue', data: income, backgroundColor: UN.revenue },
+          { type: 'bar', label: 'Costs', data: costs, backgroundColor: UN.costs },
+          { type: 'line', label: 'Profit', data: profit, backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 5 },
         ],
       },
       options: {
         interaction: { mode: 'index', intersect: false },
         scales: quietScales(moneyShort),
         plugins: {
-          legend: { position: 'bottom' },
           tooltip: {
             callbacks: {
               label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}`,
@@ -104,10 +91,10 @@
     if (document.getElementById('occChart')) {
       new Chart(document.getElementById('occChart'), {
         type: 'line',
-        data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.3, spanGaps: false }] },
+        data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false }] },
         options: {
           plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.y)}` } } },
-          scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
+          scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
         },
       });
     }

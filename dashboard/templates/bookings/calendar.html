@@ -1,12 +1,12 @@
 {% extends "bookings/_shell.html" %}
+{% from "_components.html" import section, empty_state %}
 {% block tab_content %}
   <div class="card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px">
-      <a href="?month={{ prev_month }}">&larr; Prev</a>
-      <h2 style="margin:0">{{ month_label }}</h2>
-      <a href="?month={{ next_month }}">Next &rarr;</a>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--s3)">
+      <a class="btn secondary" href="?month={{ prev_month }}">&larr; Prev</a>
+      <div style="text-align:center"><h2 style="margin:0">{{ month_label }}</h2><span class="note">Each day shows how many flats have a confirmed reservation that night.</span></div>
+      <a class="btn secondary" href="?month={{ next_month }}">Next &rarr;</a>
     </div>
-    <p class="note" style="margin-top:-6px">Each day shows how many of the portfolio's flats have a confirmed reservation that night.</p>
     <div class="cal-grid cal-grid-head">
       {% for w in weekday_labels %}<div class="cal-weekday">{{ w }}</div>{% endfor %}
     </div>
@@ -15,7 +15,7 @@
         {% if cell is none %}
           <div class="cal-cell cal-cell-empty"></div>
         {% else %}
-          <div class="cal-cell" style="background: rgba(14,164,114,{{ (cell.pct / 100)|round(2) }})">
+          <div class="cal-cell" style="background: rgba(14,159,110,{{ (cell.pct / 100)|round(2) }})">
             <div class="cal-day">{{ cell.day }}</div>
             <div class="cal-occ" style="color: {{ '#fff' if cell.pct > 55 else 'var(--ink)' }}">{{ cell.occupied }}/{{ cell.total }}</div>
           </div>
@@ -24,8 +24,8 @@
     </div>
   </div>
 
-  <h2>Upcoming reservations</h2>
-  <div class="card">
+  {% call section("Upcoming reservations") %}
+  <div class="card flush">
     {% if upcoming_rows %}
       <table>
         <thead><tr><th>Flat</th><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th></tr></thead>
@@ -37,23 +37,15 @@
               <td>{{ b.check_in }}</td>
               <td>{{ b.check_out }}</td>
               <td class="num">{{ b.nights }}</td>
-              <td class="num">£{{ '{:,.2f}'.format(b.net_revenue) }}</td>
+              <td class="num">{{ b.net_revenue|money }}</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="note">No upcoming reservations on file. Reservations come from booking statements you upload on the Documents page.</p>
+      {{ empty_state("No upcoming reservations", "Reservations come from booking statements. Upload one to see check-ins and check-outs here.", "Upload a statement", url_for('documents.index')) }}
     {% endif %}
   </div>
+  {% endcall %}
 
-  <style>
-    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-    .cal-grid-head { margin-bottom: 6px; }
-    .cal-weekday { font-size: 0.72rem; color: var(--muted); text-align: center; font-weight: 600; text-transform: uppercase; }
-    .cal-cell { aspect-ratio: 1; border-radius: 6px; border: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; justify-content: space-between; }
-    .cal-cell-empty { border: none; }
-    .cal-day { font-size: 0.72rem; color: var(--muted); }
-    .cal-occ { font-size: 0.78rem; font-weight: 700; text-align: right; }
-  </style>
 {% endblock %}

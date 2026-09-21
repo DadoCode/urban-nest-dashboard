@@ -1,22 +1,17 @@
 {% extends "base.html" %}
+{% from "_components.html" import page_head, section %}
 {% block title %}{{ report.title }} — Urban Nest Estates{% endblock %}
 {% block content %}
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px">
-    <div>
-      <p class="note" style="margin:0"><a href="{{ url_for('reports.index') }}">&larr; All reports</a></p>
-      <h1>{{ report.title }}</h1>
-      <p class="subtitle">{{ report.subtitle }}</p>
-    </div>
-    <div class="mini-form" style="margin-top:0">
-      <a href="{{ url_for('reports.export', format='pdf', **params) }}"><button type="button">Export PDF</button></a>
-      <a href="{{ url_for('reports.export', format='xlsx', **params) }}"><button type="button">Export Excel</button></a>
-      <a href="{{ url_for('reports.export', format='csv', **params) }}"><button type="button">Export CSV</button></a>
-    </div>
-  </div>
+  <p class="note" style="margin:0 0 var(--s2)"><a href="{{ url_for('reports.index') }}">&larr; All reports</a></p>
+  {% call page_head(report.title, report.subtitle) %}
+    <a class="btn secondary" href="{{ url_for('reports.export', format='pdf', **params) }}">Export PDF</a>
+    <a class="btn secondary" href="{{ url_for('reports.export', format='xlsx', **params) }}">Export Excel</a>
+    <a class="btn secondary" href="{{ url_for('reports.export', format='csv', **params) }}">Export CSV</a>
+  {% endcall %}
 
   {% for s in sections %}
-    <h2>{{ s.heading }}</h2>
-    <div class="card">
+    {% call section(s.heading) %}
+    <div class="card flush">
       {% if s.display_rows %}
         <table>
           <thead><tr>{% for c in s.columns %}<th class="{{ '' if c.fmt == 'text' else 'num' }}">{{ c.label }}</th>{% endfor %}</tr></thead>
@@ -28,8 +23,9 @@
         </table>
         {% if s.note %}<p class="note" style="margin-top:10px">{{ s.note }}</p>{% endif %}
       {% else %}
-        <p class="note">No data for this period.</p>
+        <div class="empty"><div class="empty-title">No data for this period</div><div class="empty-body">Nothing has been recorded for the dates chosen. Try a different period.</div></div>
       {% endif %}
     </div>
+    {% endcall %}
   {% endfor %}
 {% endblock %}

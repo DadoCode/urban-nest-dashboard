@@ -1,77 +1,70 @@
 {% extends "bookings/_shell.html" %}
+{% from "_components.html" import section, delta, empty_state %}
 {% block tab_content %}
-  <p class="subtitle" style="margin-top:-16px">Portfolio-wide, then by flat · current month: {{ current_month }}</p>
-
-  <div class="card">
-    <h2 style="margin-top:0">Portfolio occupancy trend</h2>
-    <div style="height:180px"><canvas id="portfolioChart"></canvas></div>
-    <p class="note">Gaps are months with nothing recorded yet, not 0%.</p>
-  </div>
+  {% call section("Portfolio occupancy", "Gaps are months with nothing recorded, not 0%") %}
+    <div class="card"><div class="chart-box" style="height:200px"><canvas id="portfolioChart"></canvas></div></div>
+  {% endcall %}
 
   <div class="grid-2">
-    <div class="card">
-      <h2 style="margin-top:0">By flat — {{ current_month }}</h2>
-      <div style="height:{{ rows|length * 34 + 20 }}px"><canvas id="rankedChart"></canvas></div>
-    </div>
-    <div class="card">
-      <h2 style="margin-top:0">Occupancy heatmap — last 12 months</h2>
-      <div style="overflow-x:auto">
-        <table style="font-size:0.8rem">
-          <thead><tr><th>Flat</th>{% for m in heatmap_months %}<th class="num">{{ m }}</th>{% endfor %}</tr></thead>
-          <tbody>
-            {% for r in heatmap_rows %}
-              <tr>
-                <td>{{ r.name }}</td>
-                {% for v in r.cells %}
-                  {% if v is none %}
-                    <td class="num" style="background:var(--bg)"></td>
-                  {% else %}
-                    <td class="num" style="background: rgba(14,164,114,{{ (v/100)|round(2) }}); color: {{ '#fff' if v > 55 else 'var(--ink)' }}">{{ v|round|int }}</td>
-                  {% endif %}
-                {% endfor %}
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+    {% call section("By flat", current_month) %}
+      <div class="card"><div class="chart-box" style="height:300px"><canvas id="rankedChart"></canvas></div></div>
+    {% endcall %}
+    {% call section("Occupancy vs ADR", current_month) %}
+      <div class="card">
+        <div class="chart-box" style="height:300px"><canvas id="scatterChart"></canvas></div>
       </div>
+    {% endcall %}
+  </div>
+  <p class="note" style="margin-top:var(--s2)">Each dot is one flat: high occupancy at a low rate can mean it is priced too cheaply; low occupancy at a high rate can mean it is priced too high.</p>
+
+  {% call section("Occupancy heatmap", "Last 12 months, % of nights booked") %}
+    <div class="card flush" style="overflow-x:auto">
+      <table style="font-size:var(--fs-small)">
+        <thead><tr><th>Flat</th>{% for m in heatmap_months %}<th class="num" style="padding:8px 6px">{{ m }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for r in heatmap_rows %}
+            <tr>
+              <td style="white-space:nowrap">{{ r.name }}</td>
+              {% for v in r.cells %}
+                {% if v is none %}
+                  <td class="num" style="background:var(--surface-2); padding:4px"></td>
+                {% else %}
+                  <td class="num" style="background: rgba(14,159,110,{{ (v/100)|round(2) }}); color: {{ '#fff' if v > 55 else 'var(--ink)' }}; padding:4px">{{ v|round|int }}</td>
+                {% endif %}
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-  </div>
+  {% endcall %}
 
-  <h2>By flat — table</h2>
-  <div class="card">
-    <table>
-      <thead><tr><th>Flat</th><th class="num">Occupancy</th><th class="num">Days booked</th><th class="num">vs prior month</th></tr></thead>
-      <tbody>
-        {% for r in rows %}
-          <tr>
-            <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
-            <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
-            <td class="num">{{ '%.0f'|format(r.days_booked) }}</td>
-            <td class="num" style="color: {{ '#056a4a' if r.delta and r.delta > 0 else ('#e0483f' if r.delta and r.delta < 0 else '#7c8d87') }}">
-              {{ '%+.1f'|format(r.delta) + '%' if r.delta is not none else 'n/a' }}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <div class="card">
-    <h2 style="margin-top:0">Occupancy vs ADR — {{ current_month }}</h2>
-    <p class="note" style="margin-top:-6px">Is a flat filling up because it's priced right, or sitting empty because it's priced too high? Each point is one flat.</p>
-    <div style="height:280px"><canvas id="scatterChart"></canvas></div>
-  </div>
+  {% call section("By flat", "Detail") %}
+    <div class="card flush">
+      <table>
+        <thead><tr><th>Flat</th><th class="num">Occupancy</th><th class="num">Days booked</th><th class="num">Change vs prior month</th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+              <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+              <td class="num">{{ '%.0f'|format(r.days_booked) }}</td>
+              <td class="num">{% if r.delta is not none %}{{ delta(r.delta, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endcall %}
 
   <script>
     const months = {{ months_json|safe }};
     const portfolio = {{ portfolio_json|safe }};
-    const teal = '#0ea472';
-    const tealSoft = 'rgba(14,164,114,0.15)';
-    const occScale = (extra) => quietScales(pctShort, Object.assign({ y: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }, extra || {}));
+    const occScale = (extra) => quietScales(pctShort, Object.assign({ y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }, extra || {}));
 
     new Chart(document.getElementById('portfolioChart'), {
       type: 'line',
-      data: { labels: months, datasets: [{ label: 'Occupancy', data: portfolio, borderColor: teal, backgroundColor: tealSoft, fill: true, tension: 0.3, spanGaps: false }] },
+      data: { labels: months, datasets: [{ label: 'Occupancy', data: portfolio, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false }] },
       options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.y)}` } } }, scales: occScale() },
     });
 
@@ -79,26 +72,26 @@
     const rankedValues = {{ rows|map(attribute='occupancy')|list|tojson }}.map(v => Math.round(v * 1000) / 10);
     new Chart(document.getElementById('rankedChart'), {
       type: 'bar',
-      data: { labels: rankedLabels, datasets: [{ label: 'Occupancy', data: rankedValues, backgroundColor: teal }] },
+      data: { labels: rankedLabels, datasets: [{ label: 'Occupancy', data: rankedValues, backgroundColor: UN.brand }] },
       options: {
         indexAxis: 'y',
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.x)}` } } },
-        scales: { x: { beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort } }, y: { grid: { display: false }, border: { display: false } } },
+        scales: { x: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort } }, y: { grid: { display: false }, border: { display: false } } },
       },
     });
 
     const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map(r => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name }));
     new Chart(document.getElementById('scatterChart'), {
       type: 'scatter',
-      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: teal, pointRadius: 6, pointHoverRadius: 8 }] },
+      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: UN.brand, pointRadius: 6, pointHoverRadius: 8 }] },
       options: {
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: (i) => [`${i.raw.name}`, `ADR: ${moneyFull(i.raw.x)}`, `Occupancy: ${pctShort(i.raw.y)}`] } },
         },
         scales: {
-          x: { title: { display: true, text: 'ADR' }, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: moneyShort } },
-          y: { title: { display: true, text: 'Occupancy' }, beginAtZero: true, max: 100, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: pctShort } },
+          x: { title: { display: true, text: 'ADR' }, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: moneyShort } },
+          y: { title: { display: true, text: 'Occupancy' }, beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort } },
         },
       },
     });

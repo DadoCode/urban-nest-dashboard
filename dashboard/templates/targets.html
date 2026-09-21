@@ -1,8 +1,8 @@
 {% extends "base.html" %}
+{% from "_components.html" import page_head %}
 {% block title %}Targets — Urban Nest Estates{% endblock %}
 {% block content %}
-  <h1>Targets</h1>
-  <p class="subtitle">Monthly targets per flat. They start as the average of your own recorded months, so they're realistic by construction. Change any number to test a what-if — nothing is saved until you press Save, and targets appear only on this page.</p>
+  {{ page_head("Targets", "Monthly targets per flat, starting from the average of your own recorded months. Change any number to test a what-if; nothing is saved until you press Save.") }}
 
   <form method="get" style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:16px">
     <label class="note">Average based on
@@ -22,8 +22,8 @@
     <input type="hidden" name="month" value="{{ month }}">
 
     {% for key, label, unit in metrics %}
-      <div class="card" data-metric="{{ key }}">
-        <h2 style="margin-top:0">{{ label }} target <span class="note" style="font-weight:400">per month</span></h2>
+      <div class="section-head" style="margin-top:var(--s5)"><h2>{{ label }} target</h2><span class="note">per month</span></div>
+      <div class="card flush" data-metric="{{ key }}">
         <table>
           <thead>
             <tr>
@@ -73,7 +73,7 @@
 
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
       <button type="submit">Save targets</button>
-      <button type="submit" formaction="{{ url_for('targets.reset') }}" formnovalidate style="background:none; color:var(--ink-soft); border:1px solid var(--line)" onclick="return confirm('Discard every saved target and go back to the data averages?')">Reset all to data average</button>
+      <button type="submit" class="secondary" formaction="{{ url_for('targets.reset') }}" formnovalidate onclick="return confirm('Discard every saved target and go back to the data averages?')">Reset all to data average</button>
       <span class="note">Clear a box and save to fall back to that flat's data average.</span>
     </div>
   </form>

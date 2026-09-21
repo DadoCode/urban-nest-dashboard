@@ -1,39 +1,35 @@
 {% extends "bookings/_shell.html" %}
+{% from "_components.html" import section, kpi_tile, empty_state %}
 {% block tab_content %}
   <div class="tiles">
-    {% for t in tiles %}
-      <div class="tile">
-        <div class="label">{{ t.label }}</div>
-        <div class="value">{{ t.value }}</div>
-        {% if t.delta is not none %}
-          <div class="delta {{ 'up' if t.delta > 0 else ('down' if t.delta < 0 else 'flat') }}">{{ '%+.1f'|format(t.delta) }}% vs prior month</div>
-        {% endif %}
-      </div>
-    {% endfor %}
+    {% for t in tiles %}{{ kpi_tile(t, 'previous_period', 'prior month') }}{% endfor %}
   </div>
 
-  <div class="card">
-    <h2 style="margin-top:0">Upcoming 30 days</h2>
-    {% if upcoming.reservations %}
-      <p class="subtitle" style="margin-bottom:0">{{ '%.0f'|format(upcoming.occupancy * 100) }}% booked · £{{ '{:,.0f}'.format(upcoming.revenue) }} confirmed revenue · {{ upcoming.reservations }} reservation{{ 's' if upcoming.reservations != 1 }}</p>
-    {% else %}
-      <p class="note">No reservations on file with a check-in in the next 30 days. Upload a booking statement on the Documents page to fill in real reservations.</p>
-    {% endif %}
-  </div>
+  {% call section("Upcoming 30 days") %}
+    <div class="card">
+      {% if upcoming.reservations %}
+        <span style="font-size:var(--fs-section); font-weight:600">{{ '%.0f'|format(upcoming.occupancy * 100) }}% booked</span>
+        <span class="muted"> · {{ upcoming.revenue|money }} confirmed revenue · {{ upcoming.reservations }} reservation{{ 's' if upcoming.reservations != 1 }}</span>
+      {% else %}
+        {{ empty_state("No bookings imported for the next 30 days", "Reservations come from booking statements. Upload an Airbnb or Booking.com statement to see what's coming up.", "Upload a statement", url_for('documents.index')) }}
+      {% endif %}
+    </div>
+  {% endcall %}
 
-  <h2>Channel mix — {{ current_month }}</h2>
-  <div class="card">
-    {% if channel_rows %}
-      <table>
-        <thead><tr><th>Platform</th><th class="num">Reservations</th><th class="num">Revenue</th></tr></thead>
-        <tbody>
-          {% for c in channel_rows %}
-            <tr><td>{{ c.platform }}</td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt or 0) }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="note">No reservations recorded for this month yet.</p>
-    {% endif %}
-  </div>
+  {% call section("Channel mix", current_month) %}
+    <div class="card flush">
+      {% if channel_rows %}
+        <table>
+          <thead><tr><th>Platform</th><th class="num">Reservations</th><th class="num">Revenue</th></tr></thead>
+          <tbody>
+            {% for c in channel_rows %}
+              <tr><td>{{ c.platform }}</td><td class="num">{{ c.n }}</td><td class="num">{{ (c.amt or 0)|money }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        {{ empty_state("No bookings imported for " ~ current_month, "Change the period, or import booking data to see which channels bring in revenue.", "Import booking data", url_for('documents.index')) }}
+      {% endif %}
+    </div>
+  {% endcall %}
 {% endblock %}

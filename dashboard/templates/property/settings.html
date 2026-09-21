@@ -1,7 +1,8 @@
 {% extends "property/_shell.html" %}
+{% from "_components.html" import section %}
 {% block tab_content %}
+  {% call section("Setup") %}
   <div class="card">
-    <h2 style="margin-top:0">Setup</h2>
     <ul style="margin:0; padding-left:20px; display:flex; flex-direction:column; gap:6px; font-size:0.9rem">
       <li style="color:var(--accent-ink)">✓ Property created</li>
       {% if not is_overhead %}
@@ -10,16 +11,18 @@
       <li style="color: {{ 'var(--accent-ink)' if checklist.has_documents else 'var(--ink-soft)' }}">{{ '✓' if checklist.has_documents else '○' }} Upload a document</li>
     </ul>
   </div>
+  {% endcall %}
 
   {% if not is_overhead %}
+  {% call section("Booking calendar", "Optional") %}
   <div class="card">
-    <h2 style="margin-top:0">Booking calendar (optional)</h2>
-    <p class="note" style="margin-top:-6px">Paste this flat's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>
+    <p class="note" style="margin-top:0">Paste this flat's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>
     <form class="goal-form" method="post" action="{{ url_for('properties.sync_calendar', property_id=prop.id) }}">
-      <input type="url" name="ical_url" placeholder="https://www.airbnb.com/calendar/ical/....ics" value="{{ prop.ical_url or '' }}" style="flex: 1 1 320px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;">
-      <button type="submit">Sync now</button>
+      <input type="url" name="ical_url" placeholder="https://www.airbnb.com/calendar/ical/....ics" value="{{ prop.ical_url or '' }}" style="flex: 1 1 320px">
+      <button type="submit" class="secondary">Sync now</button>
     </form>
     {% if prop.ical_synced_at %}<p class="note" style="margin-top:8px">Last synced {{ prop.ical_synced_at }}.</p>{% endif %}
   </div>
+  {% endcall %}
   {% endif %}
 {% endblock %}

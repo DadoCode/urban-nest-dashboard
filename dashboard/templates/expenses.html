@@ -1,96 +1,76 @@
 {% extends "base.html" %}
+{% from "_components.html" import page_head, section, empty_state %}
 {% block title %}Expenses — Urban Nest Estates{% endblock %}
 {% block content %}
-  <h1>Expenses</h1>
-  <p class="subtitle">Portfolio-wide operating and capital costs · current month: {{ current_month }}</p>
+  {{ page_head("Expenses", "Operating and capital costs across the portfolio · " ~ current_month) }}
 
   <div class="tiles">
     {% for t in tiles %}
-      <div class="tile">
-        <div class="label">{{ t.label }}</div>
-        <div class="value">{{ t.value }}</div>
-      </div>
+      <div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>
     {% endfor %}
   </div>
 
-  <div class="card" style="margin-top:20px">
-    <h2 style="margin-top:0">Monthly Opex vs Capex, whole portfolio</h2>
-    <div style="height:240px"><canvas id="costsChart"></canvas></div>
-  </div>
-
-  <h2>Costs by property — {{ current_month }}</h2>
-  <div class="card">
-    <div style="height:{{ rows|length * 32 + 20 }}px"><canvas id="byPropertyChart"></canvas></div>
-  </div>
-  <div class="card" style="margin-top:14px">
-    <table>
-      <thead><tr><th>Flat</th><th class="num">Opex</th><th class="num">Capex</th><th class="num">Total costs</th></tr></thead>
-      <tbody>
-        {% for r in rows %}
-          <tr>
-            <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
-            <td class="num">£{{ '{:,.0f}'.format(r.opex) }}</td>
-            <td class="num">£{{ '{:,.0f}'.format(r.capex) }}</td>
-            <td class="num">£{{ '{:,.0f}'.format(r.total_costs) }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  {% call section("Monthly costs", "Opex and capex, whole portfolio") %}
+    <div class="card"><div class="chart-box" style="height:260px"><canvas id="costsChart"></canvas></div></div>
+  {% endcall %}
 
   <div class="grid-2">
-    <div class="card">
-      <h2 style="margin-top:0">By category — {{ current_month }}</h2>
-      {% if this_month_categories %}
+    {% call section("By property", current_month) %}
+      <div class="card flush">
         <table>
-          <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+          <thead><tr><th>Flat</th><th class="num">Opex</th><th class="num">Capex</th><th class="num">Total</th></tr></thead>
           <tbody>
-            {% for c in this_month_categories %}
-              <tr><td><a href="{{ url_for('expenses.index') }}?t_category={{ c.category }}#ledger">{{ c.category }}</a></td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt) }}</td></tr>
+            {% for r in rows %}
+              <tr>
+                <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+                <td class="num">{{ r.opex|money }}</td>
+                <td class="num">{{ r.capex|money }}</td>
+                <td class="num" style="font-weight:600">{{ r.total_costs|money }}</td>
+              </tr>
             {% endfor %}
           </tbody>
         </table>
-      {% else %}
-        <p class="note">No itemized costs recorded for this month yet.</p>
-      {% endif %}
-    </div>
-    <div class="card">
-      <h2 style="margin-top:0">Top vendors — {{ current_month }}</h2>
+      </div>
+    {% endcall %}
+
+    {% call section("By category", current_month) %}
+      <div class="card flush">
+        {% if this_month_categories %}
+          <table>
+            <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+            <tbody>
+              {% for c in this_month_categories %}
+                <tr><td><a href="{{ url_for('expenses.index') }}?t_category={{ c.category }}#ledger">{{ c.category }}</a></td><td class="num">{{ c.n }}</td><td class="num">{{ c.amt|money }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          {{ empty_state("No expenses in " ~ current_month, "Costs appear here once invoices or statements are confirmed.", "Upload documents", url_for('documents.index')) }}
+        {% endif %}
+      </div>
+    {% endcall %}
+  </div>
+
+  {% call section("Top vendors", current_month) %}
+    <div class="card flush">
       {% if vendor_breakdown %}
         <table>
           <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
           <tbody>
             {% for v in vendor_breakdown %}
-              <tr><td><a href="{{ url_for('expenses.index') }}?t_vendor={{ v.id }}#ledger">{{ v.name }}</a></td><td class="num">{{ v.n }}</td><td class="num">£{{ '{:,.0f}'.format(v.amt) }}</td></tr>
+              <tr><td><a href="{{ url_for('expenses.index') }}?t_vendor={{ v.id }}#ledger">{{ v.name }}</a></td><td class="num">{{ v.n }}</td><td class="num">{{ v.amt|money }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
       {% else %}
-        <p class="note">No vendors recorded for this month yet.</p>
+        {{ empty_state("No vendors in " ~ current_month, "Vendors appear once expenses are recorded with a supplier name.") }}
       {% endif %}
     </div>
-  </div>
+  {% endcall %}
 
-  <div class="card">
-    <h2 style="margin-top:0">By category — all time</h2>
-    {% if all_time_categories %}
-      <table>
-        <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
-        <tbody>
-          {% for c in all_time_categories %}
-            <tr><td>{{ c.category }}</td><td class="num">{{ c.n }}</td><td class="num">£{{ '{:,.0f}'.format(c.amt) }}</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="note">No itemized costs recorded yet.</p>
-    {% endif %}
-  </div>
-
-  <h2 id="ledger">Transactions</h2>
-  <div class="card">
-    <form method="get" class="mini-form" style="margin-top:0">
-      <input type="text" name="t_q" value="{{ f_q }}" placeholder="Search vendor or description...">
+  {% call section("Transactions", None, "ledger") %}
+    <form method="get" class="filter-bar">
+      <input type="text" name="t_q" value="{{ f_q }}" placeholder="Search vendor or description…">
       <select name="t_property">
         <option value="">All properties</option>
         {% for p in all_flats %}<option value="{{ p.id }}" {{ 'selected' if f_property == p.id }}>{{ p.name }}</option>{% endfor %}
@@ -100,7 +80,7 @@
         {% for c in categories %}<option value="{{ c }}" {{ 'selected' if f_category == c }}>{{ c }}</option>{% endfor %}
       </select>
       <select name="t_type">
-        <option value="">Opex &amp; Capex</option>
+        <option value="">Opex and capex</option>
         <option value="opex" {{ 'selected' if f_type == 'opex' }}>Opex only</option>
         <option value="capex" {{ 'selected' if f_type == 'capex' }}>Capex only</option>
       </select>
@@ -108,37 +88,36 @@
         <option value="">All vendors</option>
         {% for v in all_vendors %}<option value="{{ v.id }}" {{ 'selected' if f_vendor == v.id|string }}>{{ v.name }}</option>{% endfor %}
       </select>
-      <input type="month" name="t_from" value="{{ f_from }}" style="width:auto">
-      <input type="month" name="t_to" value="{{ f_to }}" style="width:auto">
-      <button type="submit">Filter</button>
-      {% if f_q or f_property or f_category or f_type or f_vendor or f_from or f_to %}<a href="{{ url_for('expenses.index') }}#ledger">Clear</a>{% endif %}
+      <input type="month" name="t_from" value="{{ f_from }}" style="width:auto" title="From">
+      <input type="month" name="t_to" value="{{ f_to }}" style="width:auto" title="To">
+      <button type="submit" class="secondary">Filter</button>
+      {% if f_q or f_property or f_category or f_type or f_vendor or f_from or f_to %}<a class="clear-link" href="{{ url_for('expenses.index') }}#ledger">Clear filters</a>{% endif %}
     </form>
 
-    {% if ledger %}
-      <table style="margin-top:14px">
-        <thead><tr><th>Date</th><th>Vendor</th><th>Property</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
-        <tbody>
-          {% for t in ledger %}
-            <tr hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML" style="cursor:pointer">
-              <td>{{ t.date }}</td>
-              <td>{{ t.vendor or '—' }}</td>
-              <td>{{ t.property_name }}</td>
-              <td>{{ t.category }}{% if t.category == 'reconciliation' %} <span class="status-pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">historical adjustment</span>{% endif %}</td>
-              <td>{{ 'Capex' if t.capex else 'Opex' }}</td>
-              <td class="num">£{{ '{:,.2f}'.format(t.amount) }}</td>
-              <td class="note">{{ t.source }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      <p class="note" style="margin-top:10px">Showing up to 200 matching transactions, most recent first.</p>
-    {% else %}
-      <p class="note" style="margin-top:14px">No transactions match these filters.</p>
-    {% endif %}
-  </div>
-
-  <div id="drawer-backdrop" class="drawer-backdrop" onclick="closeDrawer()"></div>
-  <div id="drawer" class="drawer"></div>
+    <div class="card flush">
+      {% if ledger %}
+        <table>
+          <thead><tr><th>Date</th><th>Vendor</th><th>Property</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
+          <tbody>
+            {% for t in ledger %}
+              <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+                <td>{{ t.date }}</td>
+                <td class="truncate">{{ t.vendor or '—' }}</td>
+                <td>{{ t.property_name }}</td>
+                <td>{{ t.category }}{% if t.category == 'reconciliation' %} <span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% endif %}</td>
+                <td>{{ 'Capex' if t.capex else 'Opex' }}</td>
+                <td class="num">{{ t.amount|money2 }}</td>
+                <td class="note">{{ t.source }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        {{ empty_state("No transactions match these filters", "Widen the date range or clear a filter.", "Clear filters", url_for('expenses.index') ~ '#ledger') }}
+      {% endif %}
+    </div>
+    {% if ledger %}<p class="note" style="margin-top:var(--s2)">Showing up to 200 matching transactions, most recent first.</p>{% endif %}
+  {% endcall %}
 
   <script>
     const months = {{ months_json|safe }};
@@ -150,37 +129,15 @@
       data: {
         labels: months,
         datasets: [
-          { label: 'Opex', data: opex, backgroundColor: '#0ea472' },
-          { label: 'Capex', data: capex, backgroundColor: '#e0932e' },
+          { label: 'Opex', data: opex, backgroundColor: UN.costs },
+          { label: 'Capex', data: capex, backgroundColor: UN.capex },
         ],
       },
       options: {
-        scales: quietScales(moneyShort, { x: { stacked: true, grid: { display: false }, border: { display: false } }, y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: moneyShort, maxTicksLimit: 6 } } }),
-        plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
+        interaction: { mode: 'index', intersect: false },
+        scales: quietScales(moneyShort, { x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: monthTicks() }, y: { stacked: true, beginAtZero: true, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: moneyShort, maxTicksLimit: 6 } } }),
+        plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
       },
-    });
-
-    const propLabels = {{ rows|map(attribute='name')|list|tojson }};
-    const propTotals = {{ rows|map(attribute='total_costs')|list|tojson }};
-    new Chart(document.getElementById('byPropertyChart'), {
-      type: 'bar',
-      data: { labels: propLabels, datasets: [{ label: 'Total costs', data: propTotals, backgroundColor: '#0ea472' }] },
-      options: {
-        indexAxis: 'y',
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Total costs: ${moneyFull(i.parsed.x)}` } } },
-        scales: { x: { beginAtZero: true, grid: { color: 'rgba(15,26,23,0.06)' }, border: { display: false }, ticks: { callback: moneyShort } }, y: { grid: { display: false }, border: { display: false } } },
-      },
-    });
-
-    function closeDrawer() {
-      document.getElementById('drawer-backdrop').classList.remove('open');
-      document.getElementById('drawer').classList.remove('open');
-    }
-    document.body.addEventListener('htmx:afterSwap', function (e) {
-      if (e.target.id === 'drawer') {
-        document.getElementById('drawer-backdrop').classList.add('open');
-        document.getElementById('drawer').classList.add('open');
-      }
     });
   </script>
 {% endblock %}

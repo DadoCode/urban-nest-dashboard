@@ -1,0 +1,57 @@
+{# Shared presentation components. Import with:
+   {% from "_components.html" import page_head, section, kpi_tile, delta, pill, empty_state, tabs %} #}
+
+{% macro delta(d, label, invert=False) -%}
+  {%- if d is not none -%}
+    {%- set good = (d > 0) != invert -%}
+    <span class="delta {{ 'flat' if d == 0 else ('up' if good else 'down') }}"><span class="arrow">{{ '→' if d == 0 else ('↑' if d > 0 else '↓') }}</span>{{ '%.1f'|format(d|abs) }}% {{ label }}</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro kpi_tile(t, compare='previous_period', compare_label='prior period') -%}
+  <div class="tile">
+    <div class="label">{{ t.label }}</div>
+    <div class="value">{{ t.value }}</div>
+    {% if compare == 'previous_period' and t.delta is defined %}{{ delta(t.delta, 'vs ' ~ compare_label) }}
+    {% elif compare == 'previous_year' and t.delta_ly is defined %}{{ delta(t.delta_ly, 'vs ' ~ compare_label) }}{% endif %}
+    {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro page_head(title, subtitle=None) -%}
+  <div class="page-head">
+    <div>
+      <h1>{{ title }}</h1>
+      {% if subtitle %}<p class="subtitle">{{ subtitle }}</p>{% endif %}
+    </div>
+    {% if caller is defined %}<div class="page-actions">{{ caller() }}</div>{% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro section(title, note=None, id=None) -%}
+  <section class="section" {% if id %}id="{{ id }}"{% endif %}>
+    <div class="section-head"><h2>{{ title }}</h2>{% if note %}<span class="note">{{ note }}</span>{% endif %}</div>
+    {{ caller() }}
+  </section>
+{%- endmacro %}
+
+{% macro pill(text, kind='') -%}
+  <span class="pill {{ kind }}">{{ text }}</span>
+{%- endmacro %}
+
+{% macro empty_state(title, body, action=None, href=None) -%}
+  <div class="empty">
+    <div class="empty-title">{{ title }}</div>
+    <div class="empty-body">{{ body }}</div>
+    {% if action and href %}<a class="btn secondary" href="{{ href }}">{{ action }}</a>{% endif %}
+  </div>
+{%- endmacro %}
+
+{# items: list of (key, label, href) #}
+{% macro tabs(items, active) -%}
+  <nav class="tabs">
+    {% for key, label, href in items %}
+      <a href="{{ href }}" class="tab {{ 'active' if key == active else '' }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+{%- endmacro %}

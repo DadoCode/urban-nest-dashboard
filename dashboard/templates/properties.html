@@ -1,25 +1,23 @@
 {% extends "base.html" %}
+{% from "_components.html" import page_head, empty_state %}
 {% block title %}Properties — Urban Nest Estates{% endblock %}
 {% block content %}
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px">
-    <div>
-      <h1>Properties</h1>
-      <p class="subtitle" style="margin-bottom:0">{{ total_count }} {{ status }} propert{{ 'y' if total_count == 1 else 'ies' }} · {{ current_month }}</p>
-    </div>
+  {% call page_head("Properties", total_count ~ " " ~ status ~ " propert" ~ ("y" if total_count == 1 else "ies") ~ " · " ~ current_month) %}
     <button type="button" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
-  </div>
+  {% endcall %}
 
-  <form method="get" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:16px">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search properties...">
+  <form method="get" class="filter-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search properties…">
     <select name="status" onchange="this.form.submit()">
       <option value="active" {{ 'selected' if status == 'active' }}>Active</option>
       <option value="inactive" {{ 'selected' if status == 'inactive' }}>Inactive</option>
       <option value="all" {{ 'selected' if status == 'all' }}>All</option>
     </select>
-    <button type="submit">Search</button>
+    <button type="submit" class="secondary">Search</button>
+    {% if q %}<a class="clear-link" href="{{ url_for('properties.index') }}">Clear</a>{% endif %}
   </form>
 
-  <div class="card" style="margin-top:16px">
+  <div class="card flush">
     {% if rows %}
       <table>
         <thead>
@@ -30,27 +28,34 @@
             <th class="num">Occupancy</th>
             <th class="num">ADR</th>
             <th class="num">RevPAR</th>
-            <th>Data</th>
+            <th>Data health</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
             <tr>
               <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}</td>
-              <td class="num">£{{ '{:,.0f}'.format(r.revenue) }}</td>
-              <td class="num">£{{ '{:,.0f}'.format(r.profit) }}</td>
+              <td class="num">{{ r.revenue|money }}</td>
+              <td class="num">{{ r.profit|money }}</td>
               <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
-              <td class="num">£{{ '{:,.0f}'.format(r.adr) }}</td>
-              <td class="num">£{{ '{:,.0f}'.format(r.revpar) }}</td>
+              <td class="num">{{ r.adr|money }}</td>
+              <td class="num">{{ r.revpar|money }}</td>
               <td>
                 {% if r.completeness is none %}
-                  <span class="note">not configured</span>
+                  <span class="pill">Not set up</span>
                 {% elif r.completeness.pct == 100 %}
-                  <span class="status-pill confirmed">complete</span>
-                {% elif r.completeness.pct == 0 %}
-                  <span class="status-pill" style="background:var(--red-dim); color:var(--red)">none yet</span>
+                  <span class="pill pos">Complete</span>
                 {% else %}
-                  <span class="status-pill" style="background:var(--amber-dim); color:var(--amber)">{{ r.completeness.pct }}% · {{ r.completeness.missing|length }} missing</span>
+                  <span x-data="{ open: false }" style="position:relative; display:inline-block">
+                    <button type="button" class="pill {{ 'warn' if r.completeness.pct > 0 else 'neutral' }}" @click="open = !open" title="See what's missing">
+                      {% if r.completeness.pct > 0 %}Partial · {{ r.completeness.missing|length }} missing{% else %}No data{% endif %} ▾
+                    </button>
+                    <div class="context-pop" x-show="open" @click.outside="open = false" x-cloak style="min-width:230px; padding:10px 12px; gap:6px">
+                      <span class="note">Still needed this month</span>
+                      {% for m in r.completeness.missing %}<span>{{ m|doc_label }}</span>{% endfor %}
+                      <a class="btn secondary" href="{{ url_for('documents.index') }}" style="margin-top:4px">Upload documents</a>
+                    </div>
+                  </span>
                 {% endif %}
               </td>
             </tr>
@@ -58,7 +63,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="note">No properties match "{{ q }}".</p>
+      {{ empty_state('No properties match "' ~ q ~ '"', "Try a different name or address, or switch the status filter.") }}
     {% endif %}
   </div>
 {% endblock %}

@@ -1,8 +1,9 @@
 {% extends "property/_shell.html" %}
+{% from "_components.html" import section, empty_state %}
 {% block tab_content %}
+  {% call section("Add an expense") %}
   <div class="card">
-    <h2 style="margin-top:0">Add an expense</h2>
-    <form class="mini-form" method="post" action="{{ url_for('properties.add_expense', property_id=prop.id) }}">
+    <form class="mini-form" style="margin-top:0" method="post" action="{{ url_for('properties.add_expense', property_id=prop.id) }}">
       <input name="vendor" placeholder="Vendor">
       <input name="description" placeholder="Description">
       <input name="amount" type="number" step="0.01" placeholder="Amount £" required>
@@ -18,9 +19,10 @@
       <button type="submit">Add</button>
     </form>
   </div>
+  {% endcall %}
 
-  <h2>Ledger</h2>
-  <div class="card">
+  {% call section("Ledger") %}
+  <div class="card flush">
     {% if expenses %}
       <table>
         <thead><tr><th>Month</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount</th><th>Source</th></tr></thead>
@@ -31,14 +33,15 @@
               <td>{{ e.vendor or '' }}</td>
               <td>{{ e.description or '' }}</td>
               <td>{{ e.category }}{% if e.category == 'reconciliation' %} <span class="status-pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">historical adjustment</span>{% endif %}</td>
-              <td class="num">£{{ '{:,.2f}'.format(e.amount) }}</td>
+              <td class="num">{{ e.amount|money2 }}</td>
               <td class="note">{{ e.source }}</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="note" style="margin-top:10px">No itemized expenses recorded for this flat yet.</p>
+      {{ empty_state("No expenses recorded for " ~ prop.name, "Add one above, or upload an invoice or statement to bring costs in with a source document.", "Upload documents", url_for('properties.documents_tab', property_id=prop.id)) }}
     {% endif %}
   </div>
+  {% endcall %}
 {% endblock %}
