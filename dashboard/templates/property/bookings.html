@@ -16,7 +16,7 @@
           <thead><tr><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th><th>Source</th></tr></thead>
           <tbody>
             {% for b in bookings %}
-              <tr>
+              <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
                 <td>{{ b.platform or '—' }}</td>
                 <td>{{ b.check_in }}</td>
                 <td>{{ b.check_out }}</td>

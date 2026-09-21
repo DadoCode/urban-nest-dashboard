@@ -53,7 +53,7 @@
         <thead><tr><th>Document</th><th>Type</th><th>Property</th><th>Period</th><th class="num">Transactions</th><th>Status</th><th></th></tr></thead>
         <tbody>
           {% for d in docs %}
-            <tr>
+            <tr class="clickable" hx-get="{{ url_for('documents.drawer', doc_id=d.id) }}" hx-target="#drawer" hx-swap="innerHTML">
               <td class="truncate">{{ d.filename }}<div class="note">Uploaded {{ d.uploaded_at[:10] }}</div></td>
               <td>{{ d.doc_type_label }}</td>
               <td>{% if d.property_name == 'Unassigned' %}<span class="pill warn">Property needed</span>{% else %}{{ d.property_name }}{% endif %}</td>
@@ -64,7 +64,7 @@
                 {% elif d.status == 'failed' %}<span class="pill neg">Failed</span>
                 {% else %}<span class="pill warn">Needs review</span>{% endif %}
               </td>
-              <td class="num"><a class="btn {{ 'secondary' if d.status == 'confirmed' else '' }}" href="{{ url_for('documents.review', doc_id=d.id) }}" style="color:{{ 'var(--ink)' if d.status == 'confirmed' else '#fff' }}; font-weight:500">{{ 'View' if d.status == 'confirmed' else 'Review' }}</a></td>
+              <td class="num"><a class="btn {{ 'secondary' if d.status == 'confirmed' else '' }}" onclick="event.stopPropagation()" href="{{ url_for('documents.review', doc_id=d.id) }}" style="color:{{ 'var(--ink)' if d.status == 'confirmed' else '#fff' }}; font-weight:500">{{ 'View' if d.status == 'confirmed' else 'Review' }}</a></td>
             </tr>
           {% endfor %}
         </tbody>

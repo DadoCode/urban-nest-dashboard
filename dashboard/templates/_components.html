@@ -8,12 +8,12 @@
   {%- endif -%}
 {%- endmacro %}
 
-{% macro kpi_tile(t, compare='previous_period', compare_label='prior period') -%}
+{% macro kpi_tile(t, compare='previous_period', compare_label='prior period', invert=False) -%}
   <div class="tile">
     <div class="label">{{ t.label }}</div>
     <div class="value">{{ t.value }}</div>
-    {% if compare == 'previous_period' and t.delta is defined %}{{ delta(t.delta, 'vs ' ~ compare_label) }}
-    {% elif compare == 'previous_year' and t.delta_ly is defined %}{{ delta(t.delta_ly, 'vs ' ~ compare_label) }}{% endif %}
+    {% if compare == 'previous_period' and t.delta is defined %}{{ delta(t.delta, 'vs ' ~ compare_label, invert) }}
+    {% elif compare == 'previous_year' and t.delta_ly is defined %}{{ delta(t.delta_ly, 'vs ' ~ compare_label, invert) }}{% endif %}
     {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
   </div>
 {%- endmacro %}

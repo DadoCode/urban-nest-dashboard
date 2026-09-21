@@ -15,27 +15,56 @@
     {% endfor %}
   </div>
 
-  {% call section("Portfolio performance", "Trailing 12 months") %}
+  {% call section("Portfolio performance", "Click a month to view it · click a costs bar to see its transactions") %}
     <div class="card">
+      <div class="chart-tools">
+        <div class="seg" id="series-seg">
+          <button type="button" class="on" data-series="0"><span class="sw" style="background:var(--series-revenue)"></span>Revenue</button>
+          <button type="button" class="on" data-series="1"><span class="sw" style="background:var(--series-costs)"></span>Costs</button>
+          <button type="button" class="on" data-series="2"><span class="sw" style="background:var(--series-profit)"></span>Profit</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:var(--s2)">
+          <span id="custom-range" hidden style="display:none; align-items:center; gap:6px">
+            <input type="month" id="r-from"> <span class="muted">to</span> <input type="month" id="r-to">
+          </span>
+          <div class="seg" id="range-seg">
+            <button type="button" data-range="6">6M</button>
+            <button type="button" class="on" data-range="12">12M</button>
+            <button type="button" data-range="ytd">YTD</button>
+            <button type="button" data-range="custom">Custom</button>
+          </div>
+        </div>
+      </div>
       <div class="chart-box" style="height:300px"><canvas id="revenueChart"></canvas></div>
     </div>
   {% endcall %}
 
   <div class="grid-2">
-    {% call section("Occupancy trend") %}
-      <div class="card"><div class="chart-box" style="height:190px"><canvas id="occChart"></canvas></div></div>
+    {% call section("Occupancy trend", "Portfolio average") %}
+      <div class="card">
+        <div class="chart-tools" style="margin-bottom:var(--s2)">
+          <div id="occ-chips" class="chips" style="margin:0"></div>
+          <select id="occ-add"><option value="">Compare a property…</option>{% for p in prop_rows %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+        </div>
+        <div class="chart-box" style="height:190px"><canvas id="occChart"></canvas></div>
+      </div>
     {% endcall %}
 
     {% call section("Needs attention") %}
-      <div class="card">
-        {% if insights %}
-          {% for i in insights %}
-            <div class="list-row">
-              <span><span style="color: {{ 'var(--warn)' if i.type == 'warning' else ('var(--pos)' if i.type == 'positive' else 'var(--muted)') }}">●</span>&nbsp; {{ i.text }}</span>
-              {% if 'missing' in i.text or 'uploaded' in i.text %}<a class="btn secondary" href="{{ url_for('documents.index') }}">Upload</a>
-              {% elif 'awaiting review' in i.text %}<a class="btn secondary" href="{{ url_for('documents.index') }}">Review</a>{% endif %}
-            </div>
+      <div class="card" x-data="{ all: false }">
+        {% if attention_groups %}
+          {% for g in attention_groups %}
+            <div class="att-group" {% if not g.visible %}x-show="all" x-cloak{% endif %}>{{ g.name }}</div>
+            {% for i in g.entries %}
+              <div class="list-row" {% if not i.show %}x-show="all" x-cloak{% endif %}>
+                <span><span style="color: {{ 'var(--warn)' if i.type == 'warning' else ('var(--pos)' if i.type == 'positive' else 'var(--muted)') }}">●</span>&nbsp; {{ i.text }}</span>
+                <a class="btn secondary" style="height:26px" href="{{ url_for(i.action.endpoint, **i.action.params) }}{{ '#' ~ i.action.anchor if i.action.anchor }}">{{ i.action.label }}</a>
+              </div>
+            {% endfor %}
           {% endfor %}
+          {% if attention_total > 5 %}
+            <button type="button" class="quiet" style="margin-top:var(--s2)" @click="all = !all" x-text="all ? 'Show fewer' : 'View all ({{ attention_total }})'"></button>
+          {% endif %}
         {% else %}
           {{ empty_state("Nothing needs attention", "Every property has its expected documents and no figures moved unusually.") }}
         {% endif %}
@@ -71,8 +100,8 @@
             <thead><tr><th>Category</th><th class="num">Amount</th><th class="num">Change</th></tr></thead>
             <tbody>
               {% for e in expense_rows %}
-                <tr>
-                  <td>{{ e.category }}</td>
+                <tr class="clickable" onclick="location.href='{{ xurl(ctx_params, t_category=e.category) }}#ledger'" title="See these transactions">
+                  <td>{{ e.category|replace('_', ' ') }}</td>
                   <td class="num">{{ e.amount|money }}</td>
                   <td class="num">{% if e.delta is not none %}<span class="delta {{ 'down' if e.delta > 0 else 'up' }}" style="display:inline"><span class="arrow">{{ '↑' if e.delta > 0 else '↓' }}</span>{{ '%.0f'|format(e.delta|abs) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
                 </tr>
@@ -108,43 +137,106 @@
   </div>
 
   <script>
-    const months = {{ months_json|safe }};
-    const income = {{ income_json|safe }};
-    const costs = {{ costs_json|safe }};
-    const profit = {{ profit_json|safe }};
-    const margin = {{ margin_json|safe }};
-    const occupancy = {{ occupancy_json|safe }};
+    const S = {{ series_json|safe }};
+    const OCC = {{ occ_props_json|safe }};
+    const CTX = {{ ctx_params|tojson }};
+    const ANCHOR = {{ anchor_ym|tojson }};
+    const EXPENSES = {{ url_for('expenses.index')|tojson }};
+    const shown = [true, true, true];
+    let range = '12', occSel = [];
+    const occColors = ['#3f6489', '#58645f', '#b7791f', '#7d6aa8'];
 
-    new Chart(document.getElementById('revenueChart'), {
+    function indices() {
+      const n = S.months.length, all = S.months.map((_, i) => i);
+      if (range === '6') return all.slice(Math.max(0, n - 6));
+      if (range === '12') return all.slice(Math.max(0, n - 12));
+      if (range === 'ytd') return all.filter(i => S.months[i].slice(0, 4) === ANCHOR.slice(0, 4));
+      const f = document.getElementById('r-from').value, t = document.getElementById('r-to').value;
+      return all.filter(i => (!f || S.months[i] >= f) && (!t || S.months[i] <= t));
+    }
+
+    const main = new Chart(document.getElementById('revenueChart'), {
       data: {
-        labels: months,
+        labels: [],
         datasets: [
-          { type: 'bar', label: 'Revenue', data: income, backgroundColor: UN.revenue, order: 2 },
-          { type: 'bar', label: 'Costs', data: costs, backgroundColor: UN.costs, order: 2 },
-          { type: 'line', label: 'Profit', data: profit, backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
+          { type: 'bar', label: 'Revenue', data: [], backgroundColor: UN.revenue, order: 2 },
+          { type: 'bar', label: 'Costs', data: [], backgroundColor: UN.costs, order: 2 },
+          { type: 'line', label: 'Profit', data: [], backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
         ],
       },
       options: {
         interaction: { mode: 'index', intersect: false },
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        onClick: (e, els, chart) => {
+          const hit = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true)[0];
+          const idx = hit ? hit.index : (els[0] ? els[0].index : null);
+          if (idx === null || idx === undefined) return;
+          const ym = chart.data.labels[idx];
+          const params = new URLSearchParams(Object.assign({}, CTX, { from: ym + '-01', to: ym + '-01' }));
+          location.href = (hit && hit.datasetIndex === 1 ? EXPENSES : location.pathname) + '?' + params.toString();
+        },
         scales: quietScales(moneyShort),
         plugins: {
+          legend: { display: false },
           tooltip: {
             callbacks: {
               label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}`,
-              afterBody: (items) => [`Margin: ${margin[items[0].dataIndex]}%`],
+              afterBody: (items) => { const m = items[0].label; const i = S.months.indexOf(m); return i < 0 ? [] : [`Margin: ${S.margin[i]}%`]; },
             },
           },
         },
       },
     });
 
-    new Chart(document.getElementById('occChart'), {
+    const occ = new Chart(document.getElementById('occChart'), {
       type: 'line',
-      data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false }] },
+      data: { labels: [], datasets: [{ label: 'Portfolio', data: [], borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false }] },
       options: {
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (item) => `Occupancy: ${pctShort(item.parsed.y)}` } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${pctShort(item.parsed.y)}` } } },
         scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 5 } } }),
       },
     });
+
+    function apply() {
+      const ix = indices(), labels = ix.map(i => S.months[i]);
+      main.data.labels = labels;
+      main.data.datasets[0].data = ix.map(i => S.income[i]);
+      main.data.datasets[1].data = ix.map(i => S.costs[i]);
+      main.data.datasets[2].data = ix.map(i => S.profit[i]);
+      shown.forEach((on, k) => main.setDatasetVisibility(k, on));
+      main.update();
+      occ.data.labels = labels;
+      occ.data.datasets = [occ.data.datasets[0]].slice(0, 1);
+      occ.data.datasets[0].data = ix.map(i => S.occupancy[i]);
+      occSel.forEach((pid, k) => occ.data.datasets.push({
+        label: OCC[pid].name, data: labels.map(m => (OCC[pid].values[m] === undefined ? null : OCC[pid].values[m])),
+        borderColor: occColors[k % occColors.length], backgroundColor: 'transparent', fill: false, tension: 0.3, borderWidth: 1.5, spanGaps: false,
+      }));
+      occ.update();
+      const chips = document.getElementById('occ-chips');
+      chips.innerHTML = '<span class="note">Portfolio average</span>' + occSel.map((pid, k) =>
+        '<a href="#" class="chip" data-rm="' + pid + '"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + occColors[k % occColors.length] + '"></i> ' + OCC[pid].name + ' <span>×</span></a>').join('');
+      chips.querySelectorAll('[data-rm]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); occSel = occSel.filter(x => x !== a.dataset.rm); apply(); }));
+    }
+
+    document.querySelectorAll('#series-seg button').forEach(b => b.addEventListener('click', () => {
+      const k = +b.dataset.series; shown[k] = !shown[k];
+      b.classList.toggle('on', shown[k]); b.classList.toggle('off', !shown[k]); apply();
+    }));
+    document.querySelectorAll('#range-seg button').forEach(b => b.addEventListener('click', () => {
+      range = b.dataset.range;
+      document.querySelectorAll('#range-seg button').forEach(x => x.classList.toggle('on', x === b));
+      const cr = document.getElementById('custom-range'); cr.style.display = range === 'custom' ? 'inline-flex' : 'none';
+      if (range === 'custom' && !document.getElementById('r-from').value) {
+        document.getElementById('r-from').value = S.months[Math.max(0, S.months.length - 12)]; document.getElementById('r-to').value = ANCHOR;
+      }
+      apply();
+    }));
+    ['r-from', 'r-to'].forEach(id => document.getElementById(id).addEventListener('change', apply));
+    document.getElementById('occ-add').addEventListener('change', e => {
+      const v = e.target.value; e.target.value = '';
+      if (v && !occSel.includes(v) && occSel.length < 4) { occSel.push(v); apply(); }
+    });
+    apply();
   </script>
 {% endblock %}

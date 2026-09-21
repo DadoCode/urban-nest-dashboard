@@ -13,7 +13,12 @@ built once here and rendered in base.html, and later phases (3-5) wire
 Occupancy/Expenses/the property workspace into it as those pages get
 rebuilt, rather than every page inventing its own filter scheme in the
 meantime."""
+from urllib.parse import parse_qsl, urlencode
+
 import services.kpis as kpis
+
+COOKIE = "un_ctx"
+KEYS = ("from", "to", "property", "compare")
 
 SHORTCUTS = ["this_month", "last_month", "ytd", "last12", "custom"]
 SHORTCUT_LABELS = {"this_month": "This month", "last_month": "Last month",
@@ -94,3 +99,35 @@ def resolve_context(conn, args):
         "shortcuts": [{"key": k, "label": SHORTCUT_LABELS[k], "params": shortcut_href(k)} for k in SHORTCUTS],
         "compare_choices": [{"key": k, "label": COMPARE_LABELS[k]} for k in COMPARE_CHOICES],
     }
+
+
+def request_context(conn):
+    """The period / property / compare selection for this request: explicit
+    URL params win (and are remembered in a cookie), otherwise whatever the
+    user last picked on any analytical page -- so the selection follows them
+    between Overview, Properties, Bookings and Expenses."""
+    from flask import g, request
+    explicit = {k: request.args[k] for k in KEYS if request.args.get(k)}
+    if explicit:
+        g.ctx_save = urlencode(explicit)
+        return resolve_context(conn, explicit)
+    saved = {k: v for k, v in parse_qsl(request.cookies.get(COOKIE, "")) if k in KEYS}
+    return resolve_context(conn, saved)
+
+
+def range_params(ctx, **extra):
+    """Query params that reproduce this context on another page."""
+    p = {"from": ctx["from_input"] + "-01", "to": ctx["to_input"] + "-01",
+         "property": ctx["property_id"] or "all", "compare": ctx["compare"]}
+    p.update(extra)
+    return p
+
+
+def compare_bounds(ctx):
+    """(start, end) ISO bounds of the comparison period, or None."""
+    a = (ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+    if ctx["compare"] == "previous_period":
+        return kpis.range_bounds(*kpis.prior_period(*a))
+    if ctx["compare"] == "previous_year":
+        return kpis.range_bounds(*kpis.same_period_last_year(*a))
+    return None

@@ -22,16 +22,16 @@
       </div>
 
       <nav class="primary">
-        <a href="{{ url_for('overview.index') }}" class="nav-link {{ 'active' if active == 'overview' else '' }}"><span class="dot"></span>Overview</a>
-        <a href="{{ url_for('properties.index') }}" class="nav-link {{ 'active' if active == 'properties' else '' }}"><span class="dot"></span>Properties</a>
+        <a href="{{ url_for('overview.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'overview' else '' }}"><span class="dot"></span>Overview</a>
+        <a href="{{ url_for('properties.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'properties' else '' }}"><span class="dot"></span>Properties</a>
         {% if active == 'properties' and recently_viewed %}
           <div class="section-label" style="padding:6px 10px 2px 31px">Recently viewed</div>
           {% for p in recently_viewed %}
             <a href="{{ url_for('properties.detail', property_id=p.id) }}" class="nav-link recent {{ 'active' if active_property == p.id else '' }}">{{ p.name }}</a>
           {% endfor %}
         {% endif %}
-        <a href="{{ url_for('bookings.index') }}" class="nav-link {{ 'active' if active == 'bookings' else '' }}"><span class="dot"></span>Bookings</a>
-        <a href="{{ url_for('expenses.index') }}" class="nav-link {{ 'active' if active == 'expenses' else '' }}"><span class="dot"></span>Expenses</a>
+        <a href="{{ url_for('bookings.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'bookings' else '' }}"><span class="dot"></span>Bookings</a>
+        <a href="{{ url_for('expenses.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'expenses' else '' }}"><span class="dot"></span>Expenses</a>
         <a href="{{ url_for('documents.index') }}" class="nav-link {{ 'active' if active == 'documents' else '' }}"><span class="dot"></span>Documents</a>
         <a href="{{ url_for('reports.index') }}" class="nav-link {{ 'active' if active == 'reports' else '' }}"><span class="dot"></span>Reports</a>
         <a href="{{ url_for('targets.index') }}" class="nav-link {{ 'active' if active == 'targets' else '' }}"><span class="dot"></span>Targets</a>

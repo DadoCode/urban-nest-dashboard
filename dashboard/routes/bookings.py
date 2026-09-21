@@ -8,6 +8,7 @@ from flask import Blueprint, redirect, render_template, request, url_for
 import db
 import services.kpis as kpis
 from services.common import MONTH_ABBR, MONTH_NAMES, get_properties, pct_delta
+from services.context import compare_bounds, range_params, request_context
 
 bp = Blueprint("bookings", __name__)
 
@@ -20,50 +21,81 @@ def legacy_occupancy():
 @bp.route("/bookings")
 def index():
     conn = db.get_conn()
-    flats = get_properties(conn, include_overhead=False)
-    year, month = kpis.current_period(conn)
-    start, end = kpis.month_bounds(year, month)
-    py, pm = kpis.prior_month(year, month)
-    pstart, pend = kpis.month_bounds(py, pm)
+    ctx = request_context(conn)
+    pid = ctx["property_id"]
+    all_props = get_properties(conn)
+    viewing = next((p for p in all_props if p["id"] == pid), None) if pid else None
+    start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+    prev = compare_bounds(ctx)
+    label = ctx["compare_display"] or ""
 
-    reservations = kpis.reservation_count(conn, None, start, end)
-    prev_reservations = kpis.reservation_count(conn, None, pstart, pend)
-    nights = kpis.booked_nights(conn, None, start, end)
-    prev_nights = kpis.booked_nights(conn, None, pstart, pend)
-    revenue = kpis.accommodation_revenue(conn, None, start, end)
-    prev_revenue = kpis.accommodation_revenue(conn, None, pstart, pend)
+    def metric(fn, *a):
+        cur = fn(conn, pid, start, end)
+        return cur, (fn(conn, pid, *prev) if prev else None)
 
+    reservations, prev_res = metric(kpis.reservation_count)
+    nights, prev_nights = metric(kpis.booked_nights)
+    revenue, prev_rev = metric(kpis.accommodation_revenue)
     tiles = [
-        {"label": f"Reservations — {MONTH_NAMES[month]} {year}", "value": f"{reservations:,}",
-         "delta": pct_delta(reservations, prev_reservations, min_base=2)},
-        {"label": "Booked nights", "value": f"{nights:,}",
-         "delta": pct_delta(nights, prev_nights, min_base=5)},
-        {"label": "ADR", "value": f"£{kpis.adr(conn, None, start, end):,.0f}", "delta": None},
-        {"label": "Avg stay", "value": f"{kpis.avg_stay(conn, None, start, end):.1f} nights", "delta": None},
-        {"label": "Confirmed revenue", "value": f"£{revenue:,.0f}",
-         "delta": pct_delta(revenue, prev_revenue, min_base=100)},
+        {"label": "Reservations", "value": f"{reservations:,}", "delta": pct_delta(reservations, prev_res, min_base=2) if prev else None},
+        {"label": "Booked nights", "value": f"{nights:,}", "delta": pct_delta(nights, prev_nights, min_base=5) if prev else None},
+        {"label": "ADR", "value": f"£{kpis.adr(conn, pid, start, end):,.0f}", "delta": None},
+        {"label": "Avg stay", "value": (f"{kpis.avg_stay(conn, pid, start, end):.1f} nights" if kpis.avg_stay(conn, pid, start, end) else "—"), "delta": None},
+        {"label": "Confirmed revenue", "value": f"£{revenue:,.0f}", "delta": pct_delta(revenue, prev_rev, min_base=100) if prev else None},
     ]
 
     today = datetime.date.today()
     window_end = today + datetime.timedelta(days=30)
     upcoming = {
-        "occupancy": kpis.occupancy(conn, None, today.isoformat(), window_end.isoformat()),
-        "revenue": kpis.accommodation_revenue(conn, None, today.isoformat(), window_end.isoformat()),
-        "reservations": kpis.reservation_count(conn, None, today.isoformat(), window_end.isoformat()),
+        "occupancy": kpis.occupancy(conn, pid, today.isoformat(), window_end.isoformat()),
+        "revenue": kpis.accommodation_revenue(conn, pid, today.isoformat(), window_end.isoformat()),
+        "reservations": kpis.reservation_count(conn, pid, today.isoformat(), window_end.isoformat()),
     }
 
+    scope, sparams = ("AND property_id=?", (pid,)) if pid else ("", ())
     channel_rows = conn.execute(
-        """SELECT COALESCE(NULLIF(platform,''),'other') platform, COUNT(*) n, SUM(net_revenue) amt
+        f"""SELECT COALESCE(NULLIF(platform,''),'other') platform, COUNT(*) n, SUM(net_revenue) amt
            FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
-             AND check_in>=? AND check_in<? GROUP BY platform ORDER BY amt DESC""",
-        (start, end),
+             AND check_in>=? AND check_in<? {scope} GROUP BY platform ORDER BY amt DESC""",
+        (start, end, *sparams),
     ).fetchall()
 
     return render_template(
         "bookings/overview.html", active="bookings", active_bookings_tab="overview",
-        all_properties=get_properties(conn), active_property=None,
-        current_month=f"{MONTH_NAMES[month]} {year}", tiles=tiles, upcoming=upcoming, channel_rows=channel_rows,
+        all_properties=all_props, active_property=None, context_bar=True, ctx=ctx, viewing=viewing,
+        current_month=ctx["display"], compare_label=label, tiles=tiles, upcoming=upcoming, channel_rows=channel_rows,
     )
+
+
+@bp.route("/bookings/<int:booking_id>/drawer")
+def booking_drawer(booking_id):
+    conn = db.get_conn()
+    b = conn.execute(
+        """SELECT b.*, p.name AS property_name,
+                  CAST(julianday(b.check_out) - julianday(b.check_in) AS INTEGER) AS nights
+           FROM bookings b JOIN properties p ON p.id = b.property_id WHERE b.id=?""", (booking_id,)).fetchone()
+    if not b:
+        return "<p class='note'>Booking not found.</p>", 404
+    doc = conn.execute("SELECT id, filename FROM documents WHERE id=?", (b["document_id"],)).fetchone() if b["document_id"] else None
+    return render_template("partials/booking_drawer.html", b=b, doc=doc)
+
+
+@bp.route("/bookings/day/<day>")
+def day_drawer(day):
+    conn = db.get_conn()
+    try:
+        datetime.date.fromisoformat(day)
+    except ValueError:
+        return "<p class='note'>Unknown date.</p>", 404
+    rows = conn.execute(
+        """SELECT b.*, p.name AS property_name,
+                  CAST(julianday(b.check_out) - julianday(b.check_in) AS INTEGER) AS nights
+           FROM bookings b JOIN properties p ON p.id = b.property_id
+           WHERE b.status='confirmed' AND b.reservation_id != 'monthly-aggregate' AND b.check_in <= ? AND b.check_out > ?
+           ORDER BY p.name""", (day, day)).fetchall()
+    total = len(get_properties(conn, include_overhead=False))
+    d = datetime.date.fromisoformat(day)
+    return render_template("partials/day_drawer.html", rows=rows, total=total, label=f"{d.day} {MONTH_NAMES[d.month]} {d.year}")
 
 
 @bp.route("/bookings/calendar")
@@ -90,7 +122,7 @@ def calendar_tab(property_id=None):
     for d in range(1, days_in_month + 1):
         day = datetime.date(year, month, d)
         occupied = sum(1 for ci, co in spans if ci <= day < co)
-        day_cells.append({"day": d, "occupied": occupied, "total": total_flats,
+        day_cells.append({"day": d, "iso": day.isoformat(), "occupied": occupied, "total": total_flats,
                            "pct": round(occupied / total_flats * 100)})
 
     py, pm = kpis.prior_month(year, month)
@@ -118,10 +150,11 @@ def calendar_tab(property_id=None):
 @bp.route("/bookings/performance")
 def performance(property_id=None):
     conn = db.get_conn()
+    ctx = request_context(conn)
     flats = get_properties(conn, include_overhead=False)
-    year, month = kpis.current_period(conn)
+    year, month = ctx["end_year"], ctx["end_month"]
     py, pm = kpis.prior_month(year, month)
-    # Anchored at the current period and clipped to trailing 12 months --
+    # Anchored at the selected period and clipped to trailing 12 months --
     # otherwise a barely-started current month (or years of history) would
     # either fake a cliff at the end of the trend line or make it
     # unreadable. See the matching note in routes/overview.py.
@@ -165,11 +198,11 @@ def performance(property_id=None):
         portfolio_series.append(round(kpis.occupancy(conn, None, s, e) * 100, 1))
 
     heatmap_months = months[-12:]
-    heatmap_rows = [{"name": r["name"], "cells": series_by_property[r["name"]][-12:]} for r in rows]
+    heatmap_rows = [{"id": r["id"], "name": r["name"], "cells": series_by_property[r["name"]][-12:]} for r in rows]
 
     return render_template(
         "bookings/performance.html", active="bookings", active_bookings_tab="performance",
-        all_properties=get_properties(conn), active_property=None,
+        all_properties=get_properties(conn), active_property=None, context_bar=True, ctx=ctx, hide_property=True,
         current_month=f"{MONTH_NAMES[month]} {year}", rows=rows,
         heatmap_months=[MONTH_ABBR[int(ym.split('-')[1])] + " " + ym.split('-')[0][2:] for ym in heatmap_months],
         heatmap_rows=heatmap_rows,

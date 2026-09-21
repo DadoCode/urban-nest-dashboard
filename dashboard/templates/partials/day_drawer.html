@@ -1,0 +1,19 @@
+<div class="drawer-head">
+  <div>
+    <div class="drawer-title">{{ label }}</div>
+    <div class="note">{{ rows|length }} of {{ total }} flats booked</div>
+  </div>
+  <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+<div class="drawer-section" style="margin-top:var(--s3)">
+  {% if rows %}
+    {% for b in rows %}
+      <div class="list-row" style="cursor:pointer" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+        <span><strong>{{ b.property_name }}</strong><br><span class="note">{{ b.platform or 'Reservation' }} · {{ b.check_in }} → {{ b.check_out }} ({{ b.nights }} night{{ 's' if b.nights != 1 }})</span></span>
+        <span class="money">{{ b.net_revenue|money }}</span>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty"><div class="empty-title">No bookings this night</div><div class="empty-body">Nothing is booked for {{ label }}, or booking data hasn't been imported for it yet.</div></div>
+  {% endif %}
+</div>

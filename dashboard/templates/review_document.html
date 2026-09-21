@@ -22,11 +22,11 @@
       </span>
     </div>
     {% if is_pdf %}
-      <div id="viewer" class="rv-frame" data-type="pdf" data-src="{{ url_for('documents.file', doc_id=doc.id) }}"></div>
+      <div id="viewer" class="rv-frame" data-type="pdf" data-src="{{ url_for('documents.file', doc_id=doc.id) }}" data-focus-page="{{ focus.source_page if focus and focus.source_page else '' }}"></div>
     {% elif is_image %}
       <div id="viewer" class="rv-frame rv-scroll" data-type="image"><img src="{{ url_for('documents.file', doc_id=doc.id) }}" alt="{{ doc.filename }}" style="width:100%"></div>
     {% elif preview %}
-      <div id="preview-scroll" class="rv-frame rv-scroll">
+      <div id="preview-scroll" class="rv-frame rv-scroll" data-focus-row="{{ focus.source_row if focus and focus.source_row else '' }}">
         <table class="rv-preview">
           <tbody>
             {% for r in preview %}
@@ -104,13 +104,14 @@
         {% endif %}
         <div class="card flush">
           <table>
-            <thead><tr><th>Line</th><th>Details</th><th class="num">Amount</th><th>Status</th></tr></thead>
+            <thead><tr><th>Line</th><th>Details</th><th class="num">Amount</th><th>Source</th><th>Status</th></tr></thead>
             <tbody>
               {% for v in items %}{% set it = v.row %}{% set amt = it.net_revenue if it.item_kind == 'reservation' else it.amount %}
-                <tr class="{{ '' if it.include else 'muted' }}">
+                <tr id="item-{{ it.id }}" class="{{ '' if it.include else 'muted' }} {{ 'focus-row' if focus and focus.id == it.id }}">
                   <td class="truncate">{{ it.vendor or it.description or '—' }}</td>
                   <td class="note">{% if it.item_kind == 'reservation' %}{{ it.check_in }} → {{ it.check_out }}{% else %}{{ it.category }} · {{ it.date or '' }}{% endif %}</td>
                   <td class="num">{{ amt|money2 if amt is not none else '—' }}</td>
+                  <td class="note">{{ src_link(it) }}</td>
                   <td>{% if it.include %}{{ pill('Included', 'pos') }}{% else %}{{ pill('Excluded') }}{% endif %}</td>
                 </tr>
               {% endfor %}

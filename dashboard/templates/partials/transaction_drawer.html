@@ -15,7 +15,8 @@
   <div class="drawer-field"><span>Classification</span><strong>{{ 'Capex' if tx.capex else 'Opex' }}</strong></div>
   <div class="drawer-field"><span>Source</span><strong>{{ tx.source }}</strong></div>
   {% if doc %}
-    <div class="drawer-field"><span>Document</span><a href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank">{{ doc.filename }}</a></div>
+    <div class="drawer-field"><span>Document</span><span style="text-align:right"><a href="{{ url_for('documents.review', doc_id=doc.id, item=line.id if line else None) }}">{{ doc.filename }}</a>{% if line and line.source_page %}<br><span class="note">page {{ line.source_page }}</span>{% elif line and line.source_row %}<br><span class="note">row {{ line.source_row }}</span>{% endif %}</span></div>
+    <a class="btn secondary" style="margin-top:var(--s2); width:100%" href="{{ url_for('documents.review', doc_id=doc.id, item=line.id if line else None) }}">View source document</a>
   {% endif %}
   {% if tx.edited_at %}
     <div class="drawer-field"><span>Last edited</span><strong>{{ tx.edited_at }}</strong></div>

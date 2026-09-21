@@ -4,7 +4,7 @@
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--s3)">
       <a class="btn secondary" href="?month={{ prev_month }}">&larr; Prev</a>
-      <div style="text-align:center"><h2 style="margin:0">{{ month_label }}</h2><span class="note">Each day shows how many flats have a confirmed reservation that night.</span></div>
+      <div style="text-align:center"><h2 style="margin:0">{{ month_label }}</h2><span class="note">Each day shows how many flats are booked that night. Click a day or a reservation for details.</span></div>
       <a class="btn secondary" href="?month={{ next_month }}">Next &rarr;</a>
     </div>
     <div class="cal-grid cal-grid-head">
@@ -15,7 +15,7 @@
         {% if cell is none %}
           <div class="cal-cell cal-cell-empty"></div>
         {% else %}
-          <div class="cal-cell" style="background: rgba(14,159,110,{{ (cell.pct / 100)|round(2) }})">
+          <div class="cal-cell" style="background: rgba(14,159,110,{{ (cell.pct / 100)|round(2) }}); cursor:pointer" hx-get="{{ url_for('bookings.day_drawer', day=cell.iso) }}" hx-target="#drawer" hx-swap="innerHTML">
             <div class="cal-day">{{ cell.day }}</div>
             <div class="cal-occ" style="color: {{ '#fff' if cell.pct > 55 else 'var(--ink)' }}">{{ cell.occupied }}/{{ cell.total }}</div>
           </div>
@@ -31,8 +31,8 @@
         <thead><tr><th>Flat</th><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th></tr></thead>
         <tbody>
           {% for b in upcoming_rows %}
-            <tr>
-              <td><a href="{{ url_for('properties.detail', property_id=b.property_id) }}">{{ b.property_name }}</a></td>
+            <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+              <td>{{ b.property_name }}</td>
               <td>{{ b.platform or '—' }}</td>
               <td>{{ b.check_in }}</td>
               <td>{{ b.check_out }}</td>

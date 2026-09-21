@@ -1,128 +1,159 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, section, empty_state %}
+{% from "_components.html" import page_head, section, delta, empty_state %}
 {% block title %}Expenses — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Expenses", "Operating and capital costs across the portfolio · " ~ current_month) }}
+  {{ page_head("Expenses", "Operating and capital costs" ~ (" · " ~ viewing.name if viewing else " across the portfolio")) }}
 
   <div class="tiles">
     {% for t in tiles %}
-      <div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>
+      {% if t.href %}<a class="tile" href="{{ xurl(base_params, **t.href) }}#ledger" title="Show these transactions">
+      {% else %}<div class="tile">{% endif %}
+        <div class="label">{{ t.label }}</div>
+        <div class="value">{{ t.value }}</div>
+        {{ delta(t.delta, 'vs ' ~ compare_label, True) if t.delta is not none and compare_label }}
+      {% if t.href %}</a>{% else %}</div>{% endif %}
     {% endfor %}
   </div>
 
-  {% call section("Monthly costs", "Opex and capex, whole portfolio") %}
+  {% call section("Monthly costs", "Click a bar to see that month's transactions") %}
     <div class="card"><div class="chart-box" style="height:260px"><canvas id="costsChart"></canvas></div></div>
   {% endcall %}
 
   <div class="grid-2">
-    {% call section("By property", current_month) %}
-      <div class="card flush">
-        <table>
-          <thead><tr><th>Flat</th><th class="num">Opex</th><th class="num">Capex</th><th class="num">Total</th></tr></thead>
-          <tbody>
-            {% for r in rows %}
-              <tr>
-                <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
-                <td class="num">{{ r.opex|money }}</td>
-                <td class="num">{{ r.capex|money }}</td>
-                <td class="num" style="font-weight:600">{{ r.total_costs|money }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    {% endcall %}
+    {% if property_rows %}
+      {% call section("By property") %}
+        <div class="card flush">
+          <table>
+            <thead><tr><th>Property</th><th class="num">Opex</th><th class="num">Capex</th><th class="num">Total</th></tr></thead>
+            <tbody>
+              {% for r in property_rows %}
+                <tr class="clickable" onclick="location.href='{{ xurl(base_params, property=r.id) }}#ledger'">
+                  <td>{{ r.name }}</td>
+                  <td class="num">{{ r.opex|money }}</td>
+                  <td class="num">{{ r.capex|money }}</td>
+                  <td class="num" style="font-weight:600">{{ r.total|money }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endcall %}
+    {% endif %}
 
-    {% call section("By category", current_month) %}
+    {% call section("By category") %}
       <div class="card flush">
-        {% if this_month_categories %}
+        {% if categories_rows %}
           <table>
             <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
             <tbody>
-              {% for c in this_month_categories %}
-                <tr><td><a href="{{ url_for('expenses.index') }}?t_category={{ c.category }}#ledger">{{ c.category }}</a></td><td class="num">{{ c.n }}</td><td class="num">{{ c.amt|money }}</td></tr>
+              {% for c in categories_rows %}
+                <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_category=c.category) }}#ledger'">
+                  <td>{% if c.category == 'reconciliation' %}Historical adjustment{% else %}{{ c.category|replace('_', ' ') }}{% endif %}</td>
+                  <td class="num">{{ c.n }}</td><td class="num">{{ c.amt|money }}</td>
+                </tr>
               {% endfor %}
             </tbody>
           </table>
         {% else %}
-          {{ empty_state("No expenses in " ~ current_month, "Costs appear here once invoices or statements are confirmed.", "Upload documents", url_for('documents.index')) }}
+          {{ empty_state("No expenses in this period", "Costs appear once invoices or statements are confirmed. Try a different period.", "Upload documents", url_for('documents.index')) }}
         {% endif %}
       </div>
     {% endcall %}
+
+    {% if not property_rows %}
+      {% call section("Top vendors") %}
+        <div class="card flush">
+          {% if vendor_rows %}
+            <table>
+              <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+              <tbody>
+                {% for v in vendor_rows %}
+                  <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_vendor=v.id) }}#ledger'"><td>{{ v.name }}</td><td class="num">{{ v.n }}</td><td class="num">{{ v.amt|money }}</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            {{ empty_state("No vendors in this period", "Vendors appear once expenses carry a supplier name.") }}
+          {% endif %}
+        </div>
+      {% endcall %}
+    {% endif %}
   </div>
 
-  {% call section("Top vendors", current_month) %}
-    <div class="card flush">
-      {% if vendor_breakdown %}
+  {% if property_rows and vendor_rows %}
+    {% call section("Top vendors") %}
+      <div class="card flush">
         <table>
           <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
           <tbody>
-            {% for v in vendor_breakdown %}
-              <tr><td><a href="{{ url_for('expenses.index') }}?t_vendor={{ v.id }}#ledger">{{ v.name }}</a></td><td class="num">{{ v.n }}</td><td class="num">{{ v.amt|money }}</td></tr>
+            {% for v in vendor_rows %}
+              <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_vendor=v.id) }}#ledger'"><td>{{ v.name }}</td><td class="num">{{ v.n }}</td><td class="num">{{ v.amt|money }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
-      {% else %}
-        {{ empty_state("No vendors in " ~ current_month, "Vendors appear once expenses are recorded with a supplier name.") }}
-      {% endif %}
-    </div>
-  {% endcall %}
+      </div>
+    {% endcall %}
+  {% endif %}
 
-  {% call section("Transactions", None, "ledger") %}
+  {% call section("Transactions", (ledger_total.n ~ " · " ~ (ledger_total.amt|money)) if ledger_total.n else None, "ledger") %}
     <form method="get" class="filter-bar">
-      <input type="text" name="t_q" value="{{ f_q }}" placeholder="Search vendor or description…">
-      <select name="t_property">
-        <option value="">All properties</option>
-        {% for p in all_flats %}<option value="{{ p.id }}" {{ 'selected' if f_property == p.id }}>{{ p.name }}</option>{% endfor %}
-      </select>
-      <select name="t_category">
+      {% for k, v in base_params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      {% if f.t_month %}<input type="hidden" name="t_month" value="{{ f.t_month }}">{% endif %}
+      <input type="text" name="t_q" value="{{ f.t_q }}" placeholder="Search vendor or description…">
+      <select name="t_category" onchange="this.form.submit()">
         <option value="">All categories</option>
-        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if f_category == c }}>{{ c }}</option>{% endfor %}
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if f.t_category == c }}>{{ c|replace('_', ' ') }}</option>{% endfor %}
       </select>
-      <select name="t_type">
+      <select name="t_type" onchange="this.form.submit()">
         <option value="">Opex and capex</option>
-        <option value="opex" {{ 'selected' if f_type == 'opex' }}>Opex only</option>
-        <option value="capex" {{ 'selected' if f_type == 'capex' }}>Capex only</option>
+        <option value="opex" {{ 'selected' if f.t_type == 'opex' }}>Opex only</option>
+        <option value="capex" {{ 'selected' if f.t_type == 'capex' }}>Capex only</option>
       </select>
-      <select name="t_vendor">
+      <select name="t_vendor" onchange="this.form.submit()">
         <option value="">All vendors</option>
-        {% for v in all_vendors %}<option value="{{ v.id }}" {{ 'selected' if f_vendor == v.id|string }}>{{ v.name }}</option>{% endfor %}
+        {% for v in all_vendors %}<option value="{{ v.id }}" {{ 'selected' if f.t_vendor == v.id|string }}>{{ v.name }}</option>{% endfor %}
       </select>
-      <input type="month" name="t_from" value="{{ f_from }}" style="width:auto" title="From">
-      <input type="month" name="t_to" value="{{ f_to }}" style="width:auto" title="To">
-      <button type="submit" class="secondary">Filter</button>
-      {% if f_q or f_property or f_category or f_type or f_vendor or f_from or f_to %}<a class="clear-link" href="{{ url_for('expenses.index') }}#ledger">Clear filters</a>{% endif %}
+      <button type="submit" class="secondary">Search</button>
     </form>
+    {% if chips %}
+      <div class="chips">
+        <span class="note">Showing</span>
+        {% for c in chips %}<a class="chip" href="{{ c.href }}">{{ c.label }} <span>×</span></a>{% endfor %}
+        <a class="clear-link" href="{{ xurl(base_params) }}#ledger">Clear all</a>
+      </div>
+    {% endif %}
 
     <div class="card flush">
       {% if ledger %}
         <table>
-          <thead><tr><th>Date</th><th>Vendor</th><th>Property</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
+          <thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Property</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
           <tbody>
             {% for t in ledger %}
               <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML">
                 <td>{{ t.date }}</td>
                 <td class="truncate">{{ t.vendor or '—' }}</td>
+                <td class="truncate note">{{ t.description or '' }}</td>
                 <td>{{ t.property_name }}</td>
-                <td>{{ t.category }}{% if t.category == 'reconciliation' %} <span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% endif %}</td>
+                <td>{% if t.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% else %}{{ t.category|replace('_', ' ') }}{% endif %}</td>
                 <td>{{ 'Capex' if t.capex else 'Opex' }}</td>
                 <td class="num">{{ t.amount|money2 }}</td>
-                <td class="note">{{ t.source }}</td>
+                <td class="note">{{ t.source|replace('_', ' ') }}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No transactions match these filters", "Widen the date range or clear a filter.", "Clear filters", url_for('expenses.index') ~ '#ledger') }}
+        {{ empty_state("No transactions match", "Nothing in this period fits the filters above. Clear a filter or change the period.", "Clear filters", xurl(base_params) ~ '#ledger') }}
       {% endif %}
     </div>
-    {% if ledger %}<p class="note" style="margin-top:var(--s2)">Showing up to 200 matching transactions, most recent first.</p>{% endif %}
+    {% if ledger_total.n > ledger|length %}<p class="note" style="margin-top:var(--s2)">Showing the latest {{ ledger|length }} of {{ ledger_total.n }} matching transactions.</p>{% endif %}
   {% endcall %}
 
   <script>
     const months = {{ months_json|safe }};
     const opex = {{ opex_json|safe }};
     const capex = {{ capex_json|safe }};
+    const LEDGER_BASE = {{ ledger_base|tojson }};
 
     new Chart(document.getElementById('costsChart'), {
       type: 'bar',
@@ -135,6 +166,13 @@
       },
       options: {
         interaction: { mode: 'index', intersect: false },
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        onClick: (e, els, chart) => {
+          const hit = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true)[0] || els[0];
+          if (!hit) return;
+          const type = hit.datasetIndex === 0 ? 'opex' : 'capex';
+          location.href = '?' + LEDGER_BASE + '&t_month=' + months[hit.index] + '&t_type=' + type + '#ledger';
+        },
         scales: quietScales(moneyShort, { x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: monthTicks() }, y: { stacked: true, beginAtZero: true, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: moneyShort, maxTicksLimit: 6 } } }),
         plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
       },

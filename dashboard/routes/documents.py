@@ -21,6 +21,21 @@ DOC_TYPE_LABELS = {
 }
 
 
+@bp.route("/documents/<int:doc_id>/drawer")
+def drawer(doc_id):
+    conn = db.get_conn()
+    doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+    if not doc:
+        return "<p class='note'>Document not found.</p>", 404
+    prop = get_property(conn, doc["property_id"])
+    stats = conn.execute("SELECT COUNT(*) n, COALESCE(SUM(amount),0) amt, SUM(include) inc FROM document_items WHERE document_id=?", (doc_id,)).fetchone()
+    return render_template(
+        "partials/document_drawer.html", doc=doc, prop=prop, stats=stats,
+        type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
+        period=f"{MONTH_NAMES[doc['detected_month']]} {doc['detected_year']}" if doc["detected_year"] and doc["detected_month"] else None,
+    )
+
+
 @bp.route("/documents/<int:doc_id>/file")
 def file(doc_id):
     doc = db.get_conn().execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
@@ -153,6 +168,8 @@ def review(doc_id):
                    "corrected": sum(1 for v in views if v["changed"]),
                    "noun": "reservation" if res_mode else "transaction"}
 
+    focus_id = request.args.get("item", type=int)
+    focus = next((v["row"] for v in views if v["row"]["id"] == focus_id), None) if focus_id else None
     fname = (doc["filename"] or "").lower()
     is_pdf = fname.endswith(".pdf")
     is_image = fname.endswith((".png", ".jpg", ".jpeg", ".webp"))
@@ -162,7 +179,7 @@ def review(doc_id):
         active_property=doc["property_id"], prop=prop, doc=doc, items=views,
         flats=get_properties(conn, include_overhead=False), year=year, month=month,
         categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image, res_mode=res_mode, confirmed=confirmed,
-        summary=summary, preview=preview, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
+        summary=summary, preview=preview, focus=focus, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
         period_label=f"{MONTH_NAMES[doc['detected_month']]} {doc['detected_year']}" if doc["detected_year"] and doc["detected_month"] else None,
     )
 

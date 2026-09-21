@@ -1,0 +1,31 @@
+<div class="drawer-head">
+  <div>
+    <div class="drawer-amount">{{ b.net_revenue|money2 }}</div>
+    <div class="note">{{ b.platform or 'Reservation' }} · {{ b.property_name }}</div>
+  </div>
+  <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+
+<div class="drawer-section">
+  <div class="drawer-field"><span>Property</span><a href="{{ url_for('properties.bookings', property_id=b.property_id) }}">{{ b.property_name }}</a></div>
+  <div class="drawer-field"><span>Check-in</span><strong>{{ b.check_in }}</strong></div>
+  <div class="drawer-field"><span>Check-out</span><strong>{{ b.check_out }}</strong></div>
+  <div class="drawer-field"><span>Nights</span><strong>{{ b.nights }}</strong></div>
+  {% if b.reservation_id and b.reservation_id != 'monthly-aggregate' %}<div class="drawer-field"><span>Reservation ID</span><strong>{{ b.reservation_id }}</strong></div>{% endif %}
+</div>
+
+<div class="drawer-section">
+  <div class="drawer-field"><span>Guest total (gross)</span><strong>{{ b.gross_revenue|money2 if b.gross_revenue is not none else '—' }}</strong></div>
+  <div class="drawer-field"><span>Platform fees</span><strong>{{ b.platform_fees|money2 if b.platform_fees is not none else '—' }}</strong></div>
+  <div class="drawer-field"><span>You receive (net)</span><strong>{{ b.net_revenue|money2 }}</strong></div>
+  {% if b.nights %}<div class="drawer-field"><span>Per night</span><strong>{{ (b.net_revenue / b.nights)|money2 }}</strong></div>{% endif %}
+</div>
+
+<div class="drawer-section">
+  <div class="drawer-field"><span>Source</span><strong>{{ b.source|replace('_', ' ') }}</strong></div>
+  {% if doc %}
+    <div class="drawer-field"><span>Document</span><a href="{{ url_for('documents.review', doc_id=doc.id) }}">{{ doc.filename }}</a></div>
+  {% else %}
+    <p class="note" style="margin:var(--s2) 0 0">No source document is attached to this reservation.</p>
+  {% endif %}
+</div>

@@ -2,7 +2,7 @@
 {% from "_components.html" import section, kpi_tile, empty_state %}
 {% block tab_content %}
   <div class="tiles">
-    {% for t in tiles %}{{ kpi_tile(t, 'previous_period', 'prior month') }}{% endfor %}
+    {% for t in tiles %}{{ kpi_tile(t, 'previous_period', compare_label) }}{% endfor %}
   </div>
 
   {% call section("Upcoming 30 days") %}

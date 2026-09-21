@@ -6,7 +6,7 @@ import db
 import services.kpis as kpis
 from services.common import get_properties, pct_delta, yoy_pairs
 from services.completeness import completeness_for, DOC_TYPE_LABELS
-from services.context import resolve_context
+from services.context import request_context, range_params
 from services.insights import compute_insights
 
 bp = Blueprint("overview", __name__)
@@ -95,7 +95,7 @@ def index():
     conn = db.get_conn()
     nav_properties = get_properties(conn)
     flats = get_properties(conn, include_overhead=False)
-    ctx = resolve_context(conn, request.args)
+    ctx = request_context(conn)
     viewing = next((p for p in nav_properties if p["id"] == ctx["property_id"]), None) if ctx["property_id"] else None
     primary_tiles, secondary_tiles, cur = _kpi_rows(conn, ctx["property_id"], ctx)
 
@@ -138,7 +138,17 @@ def index():
     # one stray transaction would otherwise show up as a misleading cliff
     # down to near-zero at the end of the line.
     anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
-    portfolio_series = [s for s in kpis.monthly_series(conn, ctx["property_id"]) if s["ym"] <= anchor_ym][-12:]
+    portfolio_series = [s for s in kpis.monthly_series(conn, ctx["property_id"]) if s["ym"] <= anchor_ym]
+    occupancy_by_property = {
+        p["id"]: {"name": p["name"], "values": {s["ym"]: round(s["occupancy"] * 100, 1)
+                                                  for s in kpis.monthly_series(conn, p["id"]) if s["ym"] <= anchor_ym}}
+        for p in flats
+    }
+    groups = []
+    for gname in ("Data", "Performance", "Costs"):
+        items = [dict(i, show=idx < 5) for idx, i in enumerate(insights) if i["group"] == gname]
+        if items:
+            groups.append({"name": gname, "entries": items, "visible": any(i["show"] for i in items)})
     yoy = yoy_pairs(conn, ctx["property_id"], (ctx["end_year"], ctx["end_month"]))
     overhead_property = next((p for p in nav_properties if p["type"] == "overhead"), None)
 
@@ -148,10 +158,15 @@ def index():
         primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, ctx=ctx,
         context_bar=True, prop_rows=prop_rows, yoy=yoy, expense_rows=expense_rows,
         insights=insights, completeness=completeness, doc_type_labels=DOC_TYPE_LABELS,
-        months_json=json.dumps([s["ym"] for s in portfolio_series]),
-        income_json=json.dumps([s["revenue"] for s in portfolio_series]),
-        costs_json=json.dumps([s["costs"] for s in portfolio_series]),
-        profit_json=json.dumps([s["net_profit"] for s in portfolio_series]),
-        margin_json=json.dumps([round(s["margin"] * 100, 1) for s in portfolio_series]),
-        occupancy_json=json.dumps([round(s["occupancy"] * 100, 1) for s in portfolio_series]),
+        ctx_params=range_params(ctx), attention_groups=groups, attention_total=len(insights),
+        series_json=json.dumps({
+            "months": [s["ym"] for s in portfolio_series],
+            "income": [round(s["revenue"], 2) for s in portfolio_series],
+            "costs": [round(s["costs"], 2) for s in portfolio_series],
+            "profit": [round(s["net_profit"], 2) for s in portfolio_series],
+            "margin": [round(s["margin"] * 100, 1) for s in portfolio_series],
+            "occupancy": [round(s["occupancy"] * 100, 1) for s in portfolio_series],
+        }),
+        occ_props_json=json.dumps(occupancy_by_property),
+        anchor_ym=anchor_ym,
     )

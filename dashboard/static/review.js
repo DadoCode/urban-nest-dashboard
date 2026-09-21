@@ -39,7 +39,17 @@
     if (a === 'out') view.zoom = Math.max(50, view.zoom - 25);
     repaint();
   }));
+  const fp = viewer && parseInt(viewer.dataset.focusPage, 10);
+  if (fp) view.page = fp;
   repaint();
+  const pv = document.getElementById('preview-scroll');
+  if (pv && pv.dataset.focusRow) highlightRow(parseInt(pv.dataset.focusRow, 10));
+
+  document.querySelectorAll('.src-link').forEach(a => a.addEventListener('click', e => {
+    e.preventDefault();
+    if (a.dataset.page) gotoPage(parseInt(a.dataset.page, 10));
+    if (a.dataset.srcRow) highlightRow(parseInt(a.dataset.srcRow, 10));
+  }));
 
   if (!form) return;
 
@@ -155,12 +165,6 @@
       rows.forEach(x => x.classList.toggle('focus', x === r));
     });
   });
-  document.querySelectorAll('.src-link').forEach(a => a.addEventListener('click', e => {
-    e.preventDefault();
-    if (a.dataset.page) gotoPage(parseInt(a.dataset.page, 10));
-    if (a.dataset.srcRow) highlightRow(parseInt(a.dataset.srcRow, 10));
-  }));
-
   /* ---------- selection + bulk actions ---------- */
   document.getElementById('select-all').addEventListener('change', e => {
     rows.forEach(r => { if (r.offsetParent !== null) r.querySelector('.row-select').checked = e.target.checked; });

@@ -39,6 +39,20 @@ def create_app():
     conn.commit()
     conn.close()
 
+    @flask_app.after_request
+    def _remember_context(response):
+        from flask import g
+        saved = g.get("ctx_save")
+        if saved:
+            response.set_cookie("un_ctx", saved, max_age=60 * 60 * 24 * 90, samesite="Lax")
+        return response
+
+    @flask_app.context_processor
+    def _inject_nav_context():
+        from flask import g
+        qs = g.get("ctx_save") or request.cookies.get("un_ctx", "")
+        return {"nav_qs": ("?" + qs) if qs else ""}
+
     @flask_app.before_request
     def _setup():
         db.ensure_schema()
@@ -79,6 +93,13 @@ def create_app():
     flask_app.jinja_env.filters["money_k"] = money_k
     flask_app.jinja_env.filters["pct"] = lambda v, places=0: "—" if v is None else f"{v:.{places}f}%"
     flask_app.jinja_env.filters["doc_label"] = lambda k: DOC_TYPE_LABELS.get(k, k)
+
+    def xurl(base, endpoint="expenses.index", **extra):
+        """url_for(endpoint) carrying the shared period/property/compare params, plus extras."""
+        from flask import url_for
+        return url_for(endpoint, **{**base, **extra})
+
+    flask_app.jinja_env.globals["xurl"] = xurl
 
     register_blueprints(flask_app)
     return flask_app

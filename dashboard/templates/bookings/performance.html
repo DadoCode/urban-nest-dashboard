@@ -15,7 +15,7 @@
       </div>
     {% endcall %}
   </div>
-  <p class="note" style="margin-top:var(--s2)">Each dot is one flat: high occupancy at a low rate can mean it is priced too cheaply; low occupancy at a high rate can mean it is priced too high.</p>
+  <p class="note" style="margin-top:var(--s2)">Each dot is one flat; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
 
   {% call section("Occupancy heatmap", "Last 12 months, % of nights booked") %}
     <div class="card flush" style="overflow-x:auto">
@@ -24,7 +24,7 @@
         <tbody>
           {% for r in heatmap_rows %}
             <tr>
-              <td style="white-space:nowrap">{{ r.name }}</td>
+              <td style="white-space:nowrap"><a href="{{ url_for('properties.bookings', property_id=r.id) }}">{{ r.name }}</a></td>
               {% for v in r.cells %}
                 {% if v is none %}
                   <td class="num" style="background:var(--surface-2); padding:4px"></td>
@@ -80,14 +80,40 @@
       },
     });
 
-    const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map(r => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name }));
+    const PROPERTY_BOOKINGS = {{ url_for('properties.bookings', property_id='__ID__')|tojson }};
+    const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map(r => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name, id: r.id }));
+    const meanX = scatterPoints.reduce((a, p) => a + p.x, 0) / (scatterPoints.length || 1);
+    const meanY = scatterPoints.reduce((a, p) => a + p.y, 0) / (scatterPoints.length || 1);
+
+    // Quiet quadrant guides at the portfolio averages -- no extra labels beyond the four corners.
+    const quadrants = {
+      id: 'quadrants',
+      afterDraw(chart) {
+        if (scatterPoints.length < 2) return;
+        const { ctx, chartArea: a, scales: { x, y } } = chart;
+        const px = x.getPixelForValue(meanX), py = y.getPixelForValue(meanY);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(20,32,28,0.22)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
+        ctx.setLineDash([]); ctx.fillStyle = 'rgba(20,32,28,0.38)'; ctx.font = '11px Inter, sans-serif';
+        ctx.textAlign = 'left';  ctx.fillText('Busy · lower rate', a.left + 6, a.top + 14);
+        ctx.textAlign = 'right'; ctx.fillText('Busy · higher rate', a.right - 6, a.top + 14);
+        ctx.textAlign = 'left';  ctx.fillText('Quiet · lower rate', a.left + 6, a.bottom - 8);
+        ctx.textAlign = 'right'; ctx.fillText('Quiet · higher rate', a.right - 6, a.bottom - 8);
+        ctx.restore();
+      },
+    };
+
     new Chart(document.getElementById('scatterChart'), {
       type: 'scatter',
-      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: UN.brand, pointRadius: 6, pointHoverRadius: 8 }] },
+      plugins: [quadrants],
+      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: UN.brand, pointRadius: 6, pointHoverRadius: 9 }] },
       options: {
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        onClick: (e, els) => { if (els.length) location.href = PROPERTY_BOOKINGS.replace('__ID__', encodeURIComponent(scatterPoints[els[0].index].id)); },
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: (i) => [`${i.raw.name}`, `ADR: ${moneyFull(i.raw.x)}`, `Occupancy: ${pctShort(i.raw.y)}`] } },
+          tooltip: { callbacks: { label: (i) => [`${i.raw.name}`, `ADR: ${moneyFull(i.raw.x)}`, `Occupancy: ${pctShort(i.raw.y)}`, 'Click to open bookings'] } },
         },
         scales: {
           x: { title: { display: true, text: 'ADR' }, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: moneyShort } },

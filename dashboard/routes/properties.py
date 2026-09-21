@@ -9,6 +9,7 @@ import services.ical_sync as ical_sync
 import services.kpis as kpis
 from services.common import MONTH_NAMES, get_properties, get_property, pct_delta, tiles_for, yoy_pairs
 from services.completeness import completeness_for, seed_defaults
+from services.context import request_context
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("properties", __name__)
@@ -19,8 +20,8 @@ def index():
     conn = db.get_conn()
     q = (request.args.get("q") or "").strip().lower()
     status = request.args.get("status", "active")
-    year, month = kpis.current_period(conn)
-    start, end = kpis.month_bounds(year, month)
+    ctx = request_context(conn)
+    start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
 
     rows_q = "SELECT * FROM properties WHERE type != 'overhead'"
     if status == "active":
@@ -46,8 +47,8 @@ def index():
 
     return render_template(
         "properties.html", active="properties", all_properties=get_properties(conn), active_property=None,
-        rows=rows, q=q, status=status, current_month=f"{MONTH_NAMES[month]} {year}",
-        total_count=len(rows),
+        rows=rows, q=q, status=status, current_month=ctx["display"], total_count=len(rows),
+        context_bar=True, ctx=ctx, hide_property=True,
     )
 
 

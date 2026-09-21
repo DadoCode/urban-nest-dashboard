@@ -1,0 +1,23 @@
+<div class="drawer-head">
+  <div style="min-width:0">
+    <div class="drawer-title" style="word-break:break-word">{{ doc.filename }}</div>
+    <div class="note">{{ type_label }}</div>
+  </div>
+  <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+<div style="margin-top:var(--s3)">
+  {% if doc.status == 'confirmed' %}<span class="pill pos">Confirmed</span>
+  {% elif doc.status == 'failed' %}<span class="pill neg">Could not read automatically</span>
+  {% else %}<span class="pill warn">Needs review</span>{% endif %}
+</div>
+<div class="drawer-section">
+  <div class="drawer-field"><span>Property</span><strong>{{ prop.name if prop else 'Not assigned' }}</strong></div>
+  <div class="drawer-field"><span>Period</span><strong>{{ period or '—' }}</strong></div>
+  <div class="drawer-field"><span>Uploaded</span><strong>{{ doc.uploaded_at[:10] }}</strong></div>
+  <div class="drawer-field"><span>Lines read</span><strong>{{ stats.n }}</strong></div>
+  {% if stats.n %}<div class="drawer-field"><span>Included</span><strong>{{ stats.inc or 0 }} of {{ stats.n }}</strong></div>{% endif %}
+</div>
+<div class="drawer-actions" style="margin-top:var(--s4)">
+  <a class="btn" href="{{ url_for('documents.review', doc_id=doc.id) }}">{{ 'View' if doc.status == 'confirmed' else 'Review' }}</a>
+  <a class="btn secondary" href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank">Open original</a>
+</div>
