@@ -7,7 +7,7 @@ from flask import Blueprint, redirect, render_template, request, url_for
 
 import db
 import services.kpis as kpis
-from services.common import MONTH_ABBR, MONTH_NAMES, get_properties, pct_delta
+from services.common import MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta
 from services.context import compare_bounds, range_params, request_context
 
 bp = Blueprint("bookings", __name__)
@@ -110,19 +110,21 @@ def calendar_tab(property_id=None):
     total_flats = len(get_properties(conn, include_overhead=False)) or 1
 
     overlapping = conn.execute(
-        """SELECT check_in, check_out FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
+        """SELECT check_in, check_out, platform FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
              AND check_in<? AND check_out>?""",
         (end, start),
     ).fetchall()
-    spans = [(datetime.date.fromisoformat(r["check_in"]), datetime.date.fromisoformat(r["check_out"])) for r in overlapping]
+    spans = [(datetime.date.fromisoformat(r["check_in"]), datetime.date.fromisoformat(r["check_out"]), channel_key(r["platform"])) for r in overlapping]
 
     days_in_month = cal.monthrange(year, month)[1]
     first_weekday = datetime.date(year, month, 1).weekday()  # Monday=0
     day_cells = [None] * first_weekday
     for d in range(1, days_in_month + 1):
         day = datetime.date(year, month, d)
-        occupied = sum(1 for ci, co in spans if ci <= day < co)
-        day_cells.append({"day": d, "iso": day.isoformat(), "occupied": occupied, "total": total_flats,
+        on_day = [ch for ci, co, ch in spans if ci <= day < co]
+        occupied = len(on_day)
+        channels = [k for k in ("airbnb", "booking", "direct", "vrbo", "other") if k in on_day]
+        day_cells.append({"day": d, "iso": day.isoformat(), "occupied": occupied, "total": total_flats, "channels": channels,
                            "pct": round(occupied / total_flats * 100)})
 
     py, pm = kpis.prior_month(year, month)

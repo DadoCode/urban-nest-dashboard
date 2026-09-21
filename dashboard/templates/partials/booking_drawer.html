@@ -1,7 +1,8 @@
+{% from "_components.html" import channel %}
 <div class="drawer-head">
   <div>
     <div class="drawer-amount">{{ b.net_revenue|money2 }}</div>
-    <div class="note">{{ b.platform or 'Reservation' }} · {{ b.property_name }}</div>
+    <div class="note">{{ channel(b.platform) }} · {{ b.property_name }}</div>
   </div>
   <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
 </div>

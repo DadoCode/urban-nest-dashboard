@@ -39,6 +39,12 @@ def create_app():
     conn.commit()
     conn.close()
 
+    @flask_app.context_processor
+    def _asset_versions():
+        # file mtime in the URL so a browser never serves stale CSS/JS after an update
+        static = Path(__file__).resolve().parent / "static"
+        return {"asset_v": max((f.stat().st_mtime_ns for f in static.iterdir() if f.is_file()), default=0)}
+
     @flask_app.after_request
     def _remember_context(response):
         from flask import g
@@ -92,6 +98,9 @@ def create_app():
     flask_app.jinja_env.filters["money2"] = lambda v: money(v, 2)
     flask_app.jinja_env.filters["money_k"] = money_k
     flask_app.jinja_env.filters["pct"] = lambda v, places=0: "—" if v is None else f"{v:.{places}f}%"
+    from services.common import CHANNELS, channel_key
+    flask_app.jinja_env.filters["channel_key"] = channel_key
+    flask_app.jinja_env.globals["CHANNELS"] = CHANNELS
     flask_app.jinja_env.filters["doc_label"] = lambda k: DOC_TYPE_LABELS.get(k, k)
 
     def xurl(base, endpoint="expenses.index", **extra):

@@ -62,3 +62,9 @@
     <span class="pbar"><i class="{{ 'over' if pct >= 100 }}" style="width:{{ [pct, 100]|min }}%"></i></span>
   {%- endif -%}
 {%- endmacro %}
+
+{# Subtle channel marker: a small dot + name, colour from a restrained per-channel palette. #}
+{% macro channel(platform) -%}
+  {%- set k = platform|channel_key -%}
+  <span class="chan"><i class="chan-{{ k }}"></i>{{ CHANNELS[k] if k != 'other' or not platform else platform|replace('_', ' ')|title }}</span>
+{%- endmacro %}

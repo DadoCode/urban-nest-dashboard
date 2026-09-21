@@ -6,46 +6,46 @@
 
   <div class="grid-2">
     <div class="card">
-      <h2 style="margin-top:0">{{ report_types.portfolio_monthly }}</h2>
-      <p class="note" style="margin-top:0">Revenue, costs, profit, occupancy vs last month and last year, by property and by expense category.</p>
+      <h2>{{ report_types.portfolio_monthly }}</h2>
+      <p class="note">Revenue, costs, profit, occupancy vs last month and last year, by property and by expense category.</p>
       <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
         <input type="hidden" name="type" value="portfolio_monthly">
-        <input type="month" name="month" value="{{ default_month }}" style="width:auto">
+        <input type="month" name="month" value="{{ default_month }}">
         <button type="submit">Preview</button>
       </form>
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">{{ report_types.property_monthly }}</h2>
-      <p class="note" style="margin-top:0">One flat for one month, including its transactions — the kind of thing you'd send a landlord.</p>
+      <h2>{{ report_types.property_monthly }}</h2>
+      <p class="note">One flat for one month, including its transactions — the kind of thing you'd send a landlord.</p>
       <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
         <input type="hidden" name="type" value="property_monthly">
         <select name="property" required>
           <option value="">Choose a property…</option>
           {% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
         </select>
-        <input type="month" name="month" value="{{ default_month }}" style="width:auto">
+        <input type="month" name="month" value="{{ default_month }}">
         <button type="submit">Preview</button>
       </form>
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">{{ report_types.annual_portfolio }}</h2>
-      <p class="note" style="margin-top:0">A year at a glance: month by month, against last year, and by property.</p>
+      <h2>{{ report_types.annual_portfolio }}</h2>
+      <p class="note">A year at a glance: month by month, against last year, and by property.</p>
       <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
         <input type="hidden" name="type" value="annual_portfolio">
-        <input type="number" name="year" value="{{ default_year }}" min="2000" max="2100" style="width:100px">
+        <input type="number" name="year" value="{{ default_year }}" min="2000" max="2100" class="narrow">
         <button type="submit">Preview</button>
       </form>
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">{{ report_types.expense }}</h2>
-      <p class="note" style="margin-top:0">Where the money went over any range: totals, categories, top vendors and the full ledger.</p>
+      <h2>{{ report_types.expense }}</h2>
+      <p class="note">Where the money went over any range: totals, categories, top vendors and the full ledger.</p>
       <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
         <input type="hidden" name="type" value="expense">
-        <input type="month" name="from" value="{{ default_from }}" style="width:auto">
-        <input type="month" name="to" value="{{ default_month }}" style="width:auto">
+        <input type="month" name="from" value="{{ default_from }}">
+        <input type="month" name="to" value="{{ default_month }}">
         <select name="property">
           <option value="">All properties</option>
           {% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}

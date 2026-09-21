@@ -1,7 +1,7 @@
 {% extends "bookings/_shell.html" %}
 {% from "_components.html" import section, delta, empty_state %}
 {% block tab_content %}
-  {% call section("Portfolio occupancy", "Gaps are months with nothing recorded, not 0%") %}
+  {% call section("Portfolio occupancy", "Months with no bookings imported are left blank, not drawn as 0%") %}
     <div class="card"><div class="chart-box" style="height:200px"><canvas id="portfolioChart"></canvas></div></div>
   {% endcall %}
 

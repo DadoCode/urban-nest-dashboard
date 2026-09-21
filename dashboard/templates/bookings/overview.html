@@ -1,5 +1,5 @@
 {% extends "bookings/_shell.html" %}
-{% from "_components.html" import section, kpi_tile, empty_state %}
+{% from "_components.html" import section, kpi_tile, empty_state, channel %}
 {% block tab_content %}
   <div class="tiles">
     {% for t in tiles %}{{ kpi_tile(t, 'previous_period', compare_label) }}{% endfor %}
@@ -23,7 +23,7 @@
           <thead><tr><th>Platform</th><th class="num">Reservations</th><th class="num">Revenue</th></tr></thead>
           <tbody>
             {% for c in channel_rows %}
-              <tr><td>{{ c.platform }}</td><td class="num">{{ c.n }}</td><td class="num">{{ (c.amt or 0)|money }}</td></tr>
+              <tr><td>{{ channel(c.platform) }}</td><td class="num">{{ c.n }}</td><td class="num">{{ (c.amt or 0)|money }}</td></tr>
             {% endfor %}
           </tbody>
         </table>

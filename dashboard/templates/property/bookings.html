@@ -1,5 +1,5 @@
 {% extends "property/_shell.html" %}
-{% from "_components.html" import section, empty_state %}
+{% from "_components.html" import section, empty_state, channel %}
 {% block tab_content %}
   <div class="tiles">
     <div class="tile"><div class="label">Booked nights · {{ month_name }}</div><div class="value">{{ booked_nights }}</div></div>
@@ -17,7 +17,7 @@
           <tbody>
             {% for b in bookings %}
               <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
-                <td>{{ b.platform or '—' }}</td>
+                <td>{{ channel(b.platform) }}</td>
                 <td>{{ b.check_in }}</td>
                 <td>{{ b.check_out }}</td>
                 <td class="num">{{ b.nights }}</td>

@@ -76,3 +76,20 @@ def tiles_for(conn, property_id, year, month):
          "delta": pct_delta(cur["booked_nights"], prev["booked_nights"], min_base=2)},
     ]
     return tiles, cur, prev
+
+
+CHANNELS = {"airbnb": "Airbnb", "booking": "Booking.com", "direct": "Direct", "vrbo": "Vrbo", "other": "Other"}
+
+
+def channel_key(platform):
+    """Collapses the free-text platform on a booking to one of CHANNELS."""
+    p = (platform or "").lower().replace(".", "").replace("_", "").replace(" ", "")
+    if "airbnb" in p:
+        return "airbnb"
+    if "booking" in p:
+        return "booking"
+    if "direct" in p:
+        return "direct"
+    if "vrbo" in p or "homeaway" in p:
+        return "vrbo"
+    return "other"

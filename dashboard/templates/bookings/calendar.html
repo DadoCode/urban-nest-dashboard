@@ -1,5 +1,5 @@
 {% extends "bookings/_shell.html" %}
-{% from "_components.html" import section, empty_state %}
+{% from "_components.html" import section, empty_state, channel %}
 {% block tab_content %}
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--s3)">
@@ -16,11 +16,17 @@
           <div class="cal-cell cal-cell-empty"></div>
         {% else %}
           <div class="cal-cell" style="background: rgba(14,159,110,{{ (cell.pct / 100)|round(2) }}); cursor:pointer" hx-get="{{ url_for('bookings.day_drawer', day=cell.iso) }}" hx-target="#drawer" hx-swap="innerHTML">
-            <div class="cal-day">{{ cell.day }}</div>
+            <div style="display:flex; justify-content:space-between; align-items:center"><span class="cal-day">{{ cell.day }}</span><span class="cal-dots">{% for k in cell.channels %}<i class="chan-{{ k }}"></i>{% endfor %}</span></div>
             <div class="cal-occ" style="color: {{ '#fff' if cell.pct > 55 else 'var(--ink)' }}">{{ cell.occupied }}/{{ cell.total }}</div>
           </div>
         {% endif %}
       {% endfor %}
+    </div>
+    <div class="chan-legend">
+      <span class="chan"><i class="chan-airbnb"></i>Airbnb</span>
+      <span class="chan"><i class="chan-booking"></i>Booking.com</span>
+      <span class="chan"><i class="chan-direct"></i>Direct</span>
+      <span>Shading shows how many flats are booked; dots show which channels.</span>
     </div>
   </div>
 
@@ -33,7 +39,7 @@
           {% for b in upcoming_rows %}
             <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
               <td>{{ b.property_name }}</td>
-              <td>{{ b.platform or '—' }}</td>
+              <td>{{ channel(b.platform) }}</td>
               <td>{{ b.check_in }}</td>
               <td>{{ b.check_out }}</td>
               <td class="num">{{ b.nights }}</td>

@@ -1,3 +1,4 @@
+{% from "_components.html" import channel %}
 <div class="drawer-head">
   <div>
     <div class="drawer-title">{{ label }}</div>
@@ -9,7 +10,7 @@
   {% if rows %}
     {% for b in rows %}
       <div class="list-row" style="cursor:pointer" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
-        <span><strong>{{ b.property_name }}</strong><br><span class="note">{{ b.platform or 'Reservation' }} · {{ b.check_in }} → {{ b.check_out }} ({{ b.nights }} night{{ 's' if b.nights != 1 }})</span></span>
+        <span><strong>{{ b.property_name }}</strong><br><span class="note">{{ channel(b.platform) }} · {{ b.check_in }} → {{ b.check_out }} ({{ b.nights }} night{{ 's' if b.nights != 1 }})</span></span>
         <span class="money">{{ b.net_revenue|money }}</span>
       </div>
     {% endfor %}

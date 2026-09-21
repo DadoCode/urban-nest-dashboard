@@ -32,7 +32,7 @@
               <td>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][e.month] }} {{ e.year }}</td>
               <td>{{ e.vendor or '' }}</td>
               <td>{{ e.description or '' }}</td>
-              <td>{{ e.category }}{% if e.category == 'reconciliation' %} <span class="status-pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">historical adjustment</span>{% endif %}</td>
+              <td>{{ e.category }}{% if e.category == 'reconciliation' %} <span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% endif %}</td>
               <td class="num">{{ e.amount|money2 }}</td>
               <td class="note">{{ e.source }}</td>
             </tr>

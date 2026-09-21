@@ -4,13 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Urban Nest Estates — Dashboard{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=asset_v) }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="{{ url_for('static', filename='charts.js') }}"></script>
+  <script src="{{ url_for('static', filename='charts.js', v=asset_v) }}"></script>
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.3/dist/htmx.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+  <script defer src="{{ url_for('static', filename='ui.js', v=asset_v) }}"></script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
+  <div id="navbar"></div>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
@@ -20,6 +22,8 @@
           <div class="sub">Estates</div>
         </div>
       </div>
+
+      <button type="button" id="palette-open" class="jump-btn">Jump to… <kbd>⌘K</kbd></button>
 
       <nav class="primary">
         <a href="{{ url_for('overview.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'overview' else '' }}"><span class="dot"></span>Overview</a>
@@ -54,6 +58,26 @@
       </main>
     </div>
   </div>
+
+  <div id="palette" class="palette" hidden>
+    <div class="palette-box">
+      <input id="palette-input" type="text" placeholder="Jump to a page, property or report…" autocomplete="off">
+      <div id="palette-list"></div>
+    </div>
+  </div>
+  <script id="palette-data" type="application/json">[
+    {"label": "Overview", "hint": "Page", "url": {{ url_for('overview.index')|tojson }}},
+    {"label": "Properties", "hint": "Page", "url": {{ url_for('properties.index')|tojson }}},
+    {"label": "Bookings", "hint": "Page", "url": {{ url_for('bookings.index')|tojson }}},
+    {"label": "Booking calendar", "hint": "Bookings", "url": {{ url_for('bookings.calendar_tab')|tojson }}},
+    {"label": "Occupancy performance", "hint": "Bookings", "url": {{ url_for('bookings.performance')|tojson }}},
+    {"label": "Expenses", "hint": "Page", "url": {{ url_for('expenses.index')|tojson }}},
+    {"label": "Documents", "hint": "Page", "url": {{ url_for('documents.index')|tojson }}},
+    {"label": "Documents needing review", "hint": "Documents", "url": {{ url_for('documents.index', d_status='review')|tojson }}},
+    {"label": "Reports", "hint": "Page", "url": {{ url_for('reports.index')|tojson }}},
+    {"label": "Targets", "hint": "Page", "url": {{ url_for('targets.index')|tojson }}}{% for p in all_properties %},
+    {"label": {{ p.name|tojson }}, "hint": "Property", "url": {{ url_for('properties.detail', property_id=p.id)|tojson }}}{% endfor %}
+  ]</script>
 
   <div id="drawer-backdrop" class="drawer-backdrop" onclick="closeDrawer()"></div>
   <div id="drawer" class="drawer"></div>
