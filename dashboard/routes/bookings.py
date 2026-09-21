@@ -101,18 +101,22 @@ def day_drawer(day):
 @bp.route("/bookings/calendar")
 def calendar_tab(property_id=None):
     conn = db.get_conn()
-    month_param = request.args.get("month", "")
-    if re.match(r"^\d{4}-\d{2}$", month_param):
-        year, month = map(int, month_param.split("-"))
-    else:
-        year, month = kpis.current_period(conn)
+    legacy = request.args.get("month", "")
+    if re.match(r"^\d{4}-\d{2}$", legacy):  # older ?month=YYYY-MM links
+        return redirect(url_for("bookings.calendar_tab", **{"from": legacy + "-01", "to": legacy + "-01"}))
+    ctx = request_context(conn)
+    pid = ctx["property_id"]
+    all_props = get_properties(conn)
+    viewing = next((p for p in all_props if p["id"] == pid), None) if pid else None
+    year, month = ctx["end_year"], ctx["end_month"]
     start, end = kpis.month_bounds(year, month)
-    total_flats = len(get_properties(conn, include_overhead=False)) or 1
+    total_flats = 1 if pid else (len(get_properties(conn, include_overhead=False)) or 1)
+    scope, sparams = ("AND b.property_id=?", (pid,)) if pid else ("", ())
 
     overlapping = conn.execute(
-        """SELECT check_in, check_out, platform FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
-             AND check_in<? AND check_out>?""",
-        (end, start),
+        f"""SELECT b.check_in, b.check_out, b.platform FROM bookings b WHERE b.status='confirmed' AND b.reservation_id != 'monthly-aggregate'
+             AND b.check_in<? AND b.check_out>? {scope}""",
+        (end, start, *sparams),
     ).fetchall()
     spans = [(datetime.date.fromisoformat(r["check_in"]), datetime.date.fromisoformat(r["check_out"]), channel_key(r["platform"])) for r in overlapping]
 
@@ -127,23 +131,27 @@ def calendar_tab(property_id=None):
         day_cells.append({"day": d, "iso": day.isoformat(), "occupied": occupied, "total": total_flats, "channels": channels,
                            "pct": round(occupied / total_flats * 100)})
 
+    # month arrows move the shared context, so every other page follows
+    def month_href(y, m):
+        return url_for("bookings.calendar_tab", **range_params(ctx, **{"from": f"{y}-{m:02d}-01", "to": f"{y}-{m:02d}-01"}))
+
     py, pm = kpis.prior_month(year, month)
     ny, nm = kpis.add_months(year, month, 1)
 
     upcoming_rows = conn.execute(
-        """SELECT b.*, p.name AS property_name,
+        f"""SELECT b.*, p.name AS property_name,
                   CAST(julianday(b.check_out) - julianday(b.check_in) AS INTEGER) AS nights
            FROM bookings b JOIN properties p ON p.id = b.property_id
-           WHERE b.status='confirmed' AND b.reservation_id != 'monthly-aggregate' AND b.check_in >= ?
+           WHERE b.status='confirmed' AND b.reservation_id != 'monthly-aggregate' AND b.check_in >= ? {scope}
            ORDER BY b.check_in ASC LIMIT 30""",
-        (datetime.date.today().isoformat(),),
+        (datetime.date.today().isoformat(), *sparams),
     ).fetchall()
 
     return render_template(
         "bookings/calendar.html", active="bookings", active_bookings_tab="calendar",
-        all_properties=get_properties(conn), active_property=None,
+        all_properties=all_props, active_property=None, context_bar=True, ctx=ctx, viewing=viewing, hide_compare=True,
         month_label=f"{MONTH_NAMES[month]} {year}", day_cells=day_cells,
-        prev_month=f"{py}-{pm:02d}", next_month=f"{ny}-{nm:02d}",
+        prev_href=month_href(py, pm), next_href=month_href(ny, nm), unit="property" if pid else "properties",
         weekday_labels=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
         upcoming_rows=upcoming_rows,
     )

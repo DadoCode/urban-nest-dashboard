@@ -1,6 +1,14 @@
 {% extends "property/_shell.html" %}
 {% from "_components.html" import section, empty_state %}
 {% block tab_content %}
+  {% call section(health_title_text, "Documents this property should have for the period") %}
+    <div class="card">
+      {% set upload_mode = 'inline' %}
+      {% include "partials/health_panel.html" %}
+    </div>
+  {% endcall %}
+
+  <span id="upload"></span>
   {% call section("Upload a document") %}
   <div class="card">
     <p class="note" style="margin-top:0">Amazon/Temu orders, cleaning invoices, booking-platform statements, bank statements, receipts — PDF or photo. Upload whatever came in, review the extracted lines, confirm, and this flat's numbers update automatically.
@@ -8,12 +16,12 @@
     <form class="upload-form" method="post" action="{{ url_for('documents.upload_property', property_id=prop.id) }}" enctype="multipart/form-data">
       <input type="file" name="document" required>
       <select name="doc_type">
-        <option value="amazon_order">Amazon / Temu order</option>
-        <option value="cleaning_invoice">Cleaning invoice</option>
-        <option value="booking_statement">Booking / Airbnb statement</option>
-        <option value="bank_statement">Bank statement</option>
-        <option value="utility_bill">Utility bill</option>
-        <option value="other">Other</option>
+        <option value="amazon_order" {{ 'selected' if prefill_type == 'amazon_order' }}>Amazon / Temu order</option>
+        <option value="cleaning_invoice" {{ 'selected' if prefill_type == 'cleaning_invoice' }}>Cleaning invoice</option>
+        <option value="booking_statement" {{ 'selected' if prefill_type == 'booking_statement' }}>Booking / Airbnb statement</option>
+        <option value="bank_statement" {{ 'selected' if prefill_type == 'bank_statement' }}>Bank statement</option>
+        <option value="utility_bill" {{ 'selected' if prefill_type == 'utility_bill' }}>Utility bill</option>
+        <option value="other" {{ 'selected' if prefill_type == 'other' }}>Other</option>
       </select>
       <button type="submit">Upload</button>
     </form>

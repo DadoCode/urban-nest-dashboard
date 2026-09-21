@@ -2,12 +2,12 @@
 {% from "_components.html" import section, empty_state, channel %}
 {% block tab_content %}
   <div class="tiles">
-    <div class="tile"><div class="label">Booked nights · {{ month_name }}</div><div class="value">{{ booked_nights }}</div></div>
+    <div class="tile"><div class="label">Booked nights</div><div class="value">{{ booked_nights }}</div></div>
     <div class="tile"><div class="label">ADR</div><div class="value">{{ adr|money }}</div></div>
-    <div class="tile"><div class="label">Reservations on file</div><div class="value">{{ bookings|length }}</div></div>
+    <div class="tile"><div class="label">Reservations</div><div class="value">{{ bookings|length }}</div></div>
   </div>
 
-  <p class="note" style="margin-top:var(--s3)">Reservations come from the booking statements you upload. <a href="{{ url_for('properties.documents_tab', property_id=prop.id) }}">Upload a statement</a> and they replace the Excel-imported figures for those months.</p>
+  <p class="note" style="margin-top:var(--s3)">Reservations come from the booking statements you upload. <a href="{{ url_for('documents.index', property=prop.id, type='booking_statement') }}#upload">Upload a statement</a> and they replace the Excel-imported figures for those months.</p>
 
   {% call section("Reservations") %}
     <div class="card flush">
@@ -28,7 +28,7 @@
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No bookings imported for " ~ prop.name, "Upload an Airbnb or Booking.com statement to see individual reservations here.", "Upload a statement", url_for('properties.documents_tab', property_id=prop.id)) }}
+        {{ empty_state("No bookings imported for " ~ ctx.display, "There are no reservations for " ~ prop.name ~ " in this period. Upload a booking-platform statement or choose a different period.", "Upload a statement", url_for('documents.index', property=prop.id, type='booking_statement') ~ '#upload') }}
       {% endif %}
     </div>
   {% endcall %}

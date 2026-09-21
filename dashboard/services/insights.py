@@ -10,11 +10,11 @@ from services.common import pct_delta
 from services.completeness import completeness_for, DOC_TYPE_LABELS
 
 
-def _f(kind, text, group, label, endpoint, params=None, anchor=None):
+def _f(kind, text, group, label, endpoint, params=None, anchor=None, drawer=False):
     """A finding with the place to go next: group (Data / Performance / Costs)
     and one action, as an endpoint + params so the template can url_for it."""
     return {"type": kind, "text": text, "group": group,
-            "action": {"label": label, "endpoint": endpoint, "params": params or {}, "anchor": anchor}}
+            "action": {"label": label, "endpoint": endpoint, "params": params or {}, "anchor": anchor, "drawer": drawer}}
 
 
 def _ym_params(y, m, ey, em, pid):
@@ -114,7 +114,7 @@ def find_completeness_gaps(conn, flats, start, end, rng):
         if c and c["missing"] and 0 < c["pct"] < 100:
             labels = ", ".join(DOC_TYPE_LABELS.get(m, m) for m in c["missing"])
             findings.append(_f("info", f"{p['name']} is missing its {labels} for {rng['display']}", "Data",
-                               "Upload documents", "documents.index"))
+                               "See what's missing", "properties.health_drawer", {"property_id": p["id"]}, drawer=True))
     return findings
 
 

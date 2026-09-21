@@ -3,15 +3,26 @@
 {% block title %}Overview — Urban Nest Estates{% endblock %}
 {% block content %}
   {% call page_head("Overview", flats_count ~ " apartments" ~ (" · " ~ viewing.name if viewing else "")) %}
-    {% if overhead_property %}<a class="btn secondary" href="{{ url_for('properties.detail', property_id=overhead_property.id) }}">Shared overheads</a>{% endif %}
+    {% if overhead_property %}<a class="btn secondary" href="{{ cx('properties.detail', property_id=overhead_property.id) }}">Shared overheads</a>{% endif %}
   {% endcall %}
 
+  {# Only metrics whose destination genuinely explains them are links. #}
+  {% set drill = {
+    'revenue': [xurl(ctx_params, 'properties.index', sort='revenue'), 'See revenue by property'],
+    'net_profit': [xurl(ctx_params, 'properties.index', sort='profit'), 'See net profit by property'],
+    'occupancy': [xurl(ctx_params, 'bookings.performance'), 'See occupancy by property and month'],
+    'revpar': [xurl(ctx_params, 'bookings.performance'), 'See occupancy and rates by property'],
+    'adr': [xurl(ctx_params, 'bookings.performance'), 'See rates against occupancy'],
+    'booked_nights': [xurl(ctx_params, 'bookings.index'), 'See bookings and channels'],
+    'avg_stay': [xurl(ctx_params, 'bookings.index'), 'See bookings and channels'],
+  } %}
   <div class="tiles">
-    {% for t in primary_tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
+    {% for t in primary_tiles %}{% set d = drill.get(t.key) %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=d[0] if d else None, hint=d[1] if d else None) }}{% endfor %}
   </div>
   <div class="tiles tiles-secondary">
-    {% for t in secondary_tiles %}
-      <div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>
+    {% for t in secondary_tiles %}{% set d = drill.get(t.key) %}
+      {% if d %}<a class="tile link" href="{{ d[0] }}" title="{{ d[1] }}"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div><span class="chev">›</span></a>
+      {% else %}<div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endif %}
     {% endfor %}
   </div>
 
@@ -58,7 +69,8 @@
             {% for i in g.entries %}
               <div class="list-row" {% if not i.show %}x-show="all" x-cloak{% endif %}>
                 <span><span style="color: {{ 'var(--warn)' if i.type == 'warning' else ('var(--pos)' if i.type == 'positive' else 'var(--muted)') }}">●</span>&nbsp; {{ i.text }}</span>
-                <a class="btn secondary" style="height:26px" href="{{ url_for(i.action.endpoint, **i.action.params) }}{{ '#' ~ i.action.anchor if i.action.anchor }}">{{ i.action.label }}</a>
+                {% if i.action.drawer %}<a class="btn secondary" style="height:26px" href="#" hx-get="{{ cx(i.action.endpoint, **i.action.params) }}" hx-target="#drawer" hx-swap="innerHTML">{{ i.action.label }}</a>
+                {% else %}<a class="btn secondary" style="height:26px" href="{{ cx(i.action.endpoint, **i.action.params) }}{{ '#' ~ i.action.anchor if i.action.anchor }}">{{ i.action.label }}</a>{% endif %}
               </div>
             {% endfor %}
           {% endfor %}
@@ -79,7 +91,7 @@
         <tbody>
           {% for r in prop_rows %}
             <tr>
-              <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+              <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
               <td class="num">{{ r.revenue|money }}</td>
               <td class="num">{{ r.profit|money }}</td>
               <td class="num">{{ '%.0f'|format(r.margin * 100) }}%</td>

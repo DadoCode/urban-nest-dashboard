@@ -91,8 +91,8 @@ def save_upload(conn, file, doc_type, property_id, flash):
     if result is None:
         conn.execute("UPDATE documents SET status='failed' WHERE id=?", (doc_id,))
         conn.commit()
-        flash(f"Saved {file.filename}. We couldn't read this file automatically -- add its line items by hand below. "
-              f"(No extraction available for this file type, or no API key configured.)")
+        flash(f"We saved {file.filename} but couldn't read it automatically, so nothing has been added yet. Enter its lines by hand below, "
+              f"or upload the original statement or export instead of a screenshot. (PDFs and photos need an Anthropic key; spreadsheets and text files don't.)", "warning")
         return doc_id
 
     items = result["items"]
@@ -151,9 +151,9 @@ def save_upload(conn, file, doc_type, property_id, flash):
          period[1] if period else None, doc_id),
     )
     conn.commit()
-    noun = "reservation" if is_reservations else "line item"
-    msg = f"Extracted {len(items)} {noun}(s) from {file.filename} — review and confirm below."
+    noun = "reservation" if is_reservations else "line"
+    msg = f"\u2713 Read {len(items)} {noun}{'s' if len(items) != 1 else ''} from {file.filename} — check them below, then confirm."
     if dupes:
         msg += f" {dupes} look like they might already be on file" + (" (unticked so they aren't counted twice)." if is_reservations else ".")
-    flash(msg)
+    flash(msg, "warning" if dupes else "success")
     return doc_id

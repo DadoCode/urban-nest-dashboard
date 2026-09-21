@@ -21,7 +21,9 @@
       </form>
     </div>
   </div>
-  {% if not hide_property %}
+  {% if fixed_property %}
+  <div class="context-item"><span class="context-fixed" title="This workspace is fixed to this property">{{ fixed_property.name }}</span></div>
+  {% elif not hide_property %}
   <div class="context-item">
     <button type="button" class="context-trigger" @click="open = open === 'property' ? null : 'property'">
       {{ viewing.name if viewing else 'All properties' }}<span class="caret">▾</span>
@@ -36,6 +38,7 @@
     </div>
   </div>
   {% endif %}
+  {% if not hide_compare %}
   <div class="context-item">
     <button type="button" class="context-trigger" @click="open = open === 'compare' ? null : 'compare'">
       <span class="ctx-key">Compare:</span> {{ ctx.compare_display or 'None' }}<span class="caret">▾</span>
@@ -47,4 +50,6 @@
       {% endfor %}
     </div>
   </div>
+  {% endif %}
+  {% if not ctx.is_latest %}<a class="ctx-reset" href="?{{ ctx.latest_params|urlencode }}">Reset to latest month</a>{% endif %}
 </div>

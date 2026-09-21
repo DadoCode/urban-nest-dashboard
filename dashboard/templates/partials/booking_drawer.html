@@ -8,7 +8,7 @@
 </div>
 
 <div class="drawer-section">
-  <div class="drawer-field"><span>Property</span><a href="{{ url_for('properties.bookings', property_id=b.property_id) }}">{{ b.property_name }}</a></div>
+  <div class="drawer-field"><span>Property</span><a href="{{ cx('properties.bookings', property_id=b.property_id) }}">{{ b.property_name }}</a></div>
   <div class="drawer-field"><span>Check-in</span><strong>{{ b.check_in }}</strong></div>
   <div class="drawer-field"><span>Check-out</span><strong>{{ b.check_out }}</strong></div>
   <div class="drawer-field"><span>Nights</span><strong>{{ b.nights }}</strong></div>

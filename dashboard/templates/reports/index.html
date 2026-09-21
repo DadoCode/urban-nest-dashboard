@@ -2,7 +2,7 @@
 {% from "_components.html" import page_head %}
 {% block title %}Reports — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Reports", "Preview on screen, then export to PDF, Excel or CSV. Every format uses the same figures as the rest of the dashboard.") }}
+  {{ page_head("Reports", "Preview on screen, then export to PDF, Excel or CSV. Dates and property start from your current selection (" ~ period_display ~ ") and can be changed for any report.") }}
 
   <div class="grid-2">
     <div class="card">
@@ -22,7 +22,7 @@
         <input type="hidden" name="type" value="property_monthly">
         <select name="property" required>
           <option value="">Choose a property…</option>
-          {% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == default_property }}>{{ p.name }}</option>{% endfor %}
         </select>
         <input type="month" name="month" value="{{ default_month }}">
         <button type="submit">Preview</button>
@@ -45,10 +45,10 @@
       <form method="get" action="{{ url_for('reports.view') }}" class="mini-form">
         <input type="hidden" name="type" value="expense">
         <input type="month" name="from" value="{{ default_from }}">
-        <input type="month" name="to" value="{{ default_month }}">
+        <input type="month" name="to" value="{{ default_to }}">
         <select name="property">
           <option value="">All properties</option>
-          {% for p in flats %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == default_property }}>{{ p.name }}</option>{% endfor %}
         </select>
         <button type="submit">Preview</button>
       </form>

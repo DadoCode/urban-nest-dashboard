@@ -3,9 +3,9 @@
 {% block tab_content %}
   <div class="card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--s3)">
-      <a class="btn secondary" href="?month={{ prev_month }}">&larr; Prev</a>
+      <a class="btn secondary" href="{{ prev_href }}">&larr; Prev</a>
       <div style="text-align:center"><h2 style="margin:0">{{ month_label }}</h2><span class="note">Each day shows how many flats are booked that night. Click a day or a reservation for details.</span></div>
-      <a class="btn secondary" href="?month={{ next_month }}">Next &rarr;</a>
+      <a class="btn secondary" href="{{ next_href }}">Next &rarr;</a>
     </div>
     <div class="cal-grid cal-grid-head">
       {% for w in weekday_labels %}<div class="cal-weekday">{{ w }}</div>{% endfor %}
@@ -15,7 +15,7 @@
         {% if cell is none %}
           <div class="cal-cell cal-cell-empty"></div>
         {% else %}
-          <div class="cal-cell" style="background: rgba(14,159,110,{{ (cell.pct / 100)|round(2) }}); cursor:pointer" hx-get="{{ url_for('bookings.day_drawer', day=cell.iso) }}" hx-target="#drawer" hx-swap="innerHTML">
+          <div class="cal-cell" style="background: rgba(14,159,110,{{ (cell.pct / 100)|round(2) }}); cursor:pointer" hx-get="{{ url_for('bookings.day_drawer', day=cell.iso) }}" hx-target="#drawer" hx-swap="innerHTML" title="{{ cell.occupied }} of {{ cell.total }} {{ 'property' if cell.total == 1 else 'properties' }} occupied · click for the bookings">
             <div style="display:flex; justify-content:space-between; align-items:center"><span class="cal-day">{{ cell.day }}</span><span class="cal-dots">{% for k in cell.channels %}<i class="chan-{{ k }}"></i>{% endfor %}</span></div>
             <div class="cal-occ" style="color: {{ '#fff' if cell.pct > 55 else 'var(--ink)' }}">{{ cell.occupied }}/{{ cell.total }}</div>
           </div>

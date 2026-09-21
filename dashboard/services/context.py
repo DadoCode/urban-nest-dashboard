@@ -91,7 +91,11 @@ def resolve_context(conn, args):
             fsy, fsm, fey, fem = sy, sm, ey, em
         return {"from": f"{fsy}-{fsm:02d}-01", "to": f"{fey}-{fem:02d}-01"}
 
+    is_latest = (sy, sm, ey, em) == (cy, cm, cy, cm)
+    latest = {"from": f"{cy}-{cm:02d}-01", "to": f"{cy}-{cm:02d}-01",
+              "property": property_id or "all", "compare": compare}
     return {
+        "is_latest": is_latest, "latest_params": latest,
         "choice": choice, "start_year": sy, "start_month": sm, "end_year": ey, "end_month": em,
         "partial": partial, "display": display,
         "from_input": f"{sy}-{sm:02d}", "to_input": f"{ey}-{em:02d}",
@@ -101,18 +105,40 @@ def resolve_context(conn, args):
     }
 
 
-def request_context(conn):
-    """The period / property / compare selection for this request: explicit
-    URL params win (and are remembered in a cookie), otherwise whatever the
-    user last picked on any analytical page -- so the selection follows them
-    between Overview, Properties, Bookings and Expenses."""
-    from flask import g, request
-    explicit = {k: request.args[k] for k in KEYS if request.args.get(k)}
-    if explicit:
-        g.ctx_save = urlencode(explicit)
-        return resolve_context(conn, explicit)
+def merged_params():
+    """(merged, explicit, saved): what the user last chose (cookie) overlaid
+    with whatever this URL says. Merging -- rather than "URL replaces
+    cookie" -- means a link carrying only some params never silently drops
+    the rest of the user's selection."""
+    from flask import request
     saved = {k: v for k, v in parse_qsl(request.cookies.get(COOKIE, "")) if k in KEYS}
-    return resolve_context(conn, saved)
+    explicit = {k: request.args[k] for k in KEYS if request.args.get(k)}
+    return {**saved, **explicit}, explicit, saved
+
+
+def request_context(conn, fixed_property=None):
+    """The period / property / compare selection for this request, shared
+    by every analytical page. In a property workspace the property is fixed
+    to that flat: it is never editable there and never overwrites the
+    remembered portfolio-level property choice."""
+    from flask import g
+    merged, explicit, saved = merged_params()
+    if explicit:
+        keep = {k: v for k, v in explicit.items() if not (fixed_property and k == "property")}
+        g.ctx_save = urlencode({**saved, **keep})
+    ctx = resolve_context(conn, merged)
+    if fixed_property:
+        ctx["property_id"] = fixed_property
+        ctx["fixed_property"] = True
+    return ctx
+
+
+def link_params(keep_property=False, **override):
+    """Query params that carry the user's current context onto another page."""
+    merged, _, _ = merged_params()
+    p = {k: v for k, v in merged.items() if keep_property or k != "property"}
+    p.update(override)
+    return p
 
 
 def range_params(ctx, **extra):

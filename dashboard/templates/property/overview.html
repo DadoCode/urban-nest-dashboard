@@ -3,10 +3,10 @@
 {% block tab_content %}
   {% if tiles %}
     <div class="tiles">
-      {% for t in tiles %}{{ kpi_tile(t, 'previous_period', 'prior month') }}{% endfor %}
+      {% for t in tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
     </div>
   {% else %}
-    <div class="card">{{ empty_state("No " ~ month_name ~ " " ~ year ~ " data", ("Add an expense on the Expenses tab to start tracking shared costs." if is_overhead else "Add an expense or upload a document to build this flat's numbers."), "Upload documents", url_for('documents.index')) }}</div>
+    <div class="card">{{ empty_state("No " ~ ctx.display ~ " data for " ~ prop.name, ("Add an expense on the Expenses tab to start tracking shared costs." if is_overhead else "Upload a booking statement or an invoice, or choose a different period."), "Upload documents", url_for('documents.index', property=prop.id)) }}</div>
   {% endif %}
 
   {% if is_overhead %}

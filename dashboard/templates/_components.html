@@ -8,14 +8,14 @@
   {%- endif -%}
 {%- endmacro %}
 
-{% macro kpi_tile(t, compare='previous_period', compare_label='prior period', invert=False) -%}
-  <div class="tile">
+{% macro kpi_tile(t, compare='previous_period', compare_label='prior period', invert=False, href=None, hint=None) -%}
+  {% if href %}<a href="{{ href }}" title="{{ hint or 'See the detail behind this' }}" class="tile link">{% else %}<div class="tile">{% endif %}
     <div class="label">{{ t.label }}</div>
     <div class="value">{{ t.value }}</div>
     {% if compare == 'previous_period' and t.delta is defined %}{{ delta(t.delta, 'vs ' ~ compare_label, invert) }}
     {% elif compare == 'previous_year' and t.delta_ly is defined %}{{ delta(t.delta_ly, 'vs ' ~ compare_label, invert) }}{% endif %}
     {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
-  </div>
+    {% if href %}<span class="chev">›</span></a>{% else %}</div>{% endif %}
 {%- endmacro %}
 
 {% macro page_head(title, subtitle=None) -%}

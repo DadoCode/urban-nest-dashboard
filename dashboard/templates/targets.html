@@ -5,16 +5,12 @@
   {{ page_head("Targets", "Where you are, where you're aiming, and how big the gap is. Targets start as the average of your own recorded months and only ever appear on this page.") }}
 
   <form method="get" class="filter-bar">
-    <label class="note">Month
-      <select name="month" onchange="this.form.submit()">
-        {% for m in month_options %}<option value="{{ m.ym }}" {{ 'selected' if m.ym == month }}>{{ m.label }}</option>{% endfor %}
-      </select>
-    </label>
     <label class="note">Average based on
       <select name="basis" onchange="this.form.submit()">
         {% for k, label in bases %}<option value="{{ k }}" {{ 'selected' if k == basis }}>{{ label }}</option>{% endfor %}
       </select>
     </label>
+    {% if multi_month %}<span class="note">Targets are monthly, so this shows {{ month_label }}, the last month of your selected period.</span>{% endif %}
   </form>
 
   {% call section("Portfolio — " ~ month_label) %}

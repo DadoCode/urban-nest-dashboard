@@ -6,6 +6,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 
 import db
 import services.kpis as kpis
+from services.context import request_context
 from services.common import MONTH_NAMES, get_properties, get_property
 
 bp = Blueprint("targets", __name__)
@@ -72,7 +73,10 @@ def index():
     months = None if basis == "all" else int(basis)
     cy, cm = kpis.current_period(conn)
     cur = f"{cy}-{cm:02d}"
-    month = _month(request.args, cur)
+    ctx = request_context(conn)
+    month = f"{ctx['end_year']}-{ctx['end_month']:02d}"
+    if month > cur:
+        month = cur
 
     saved = {r["property_id"]: r for r in conn.execute("SELECT * FROM property_targets")}
     rows, month_set = [], set()
@@ -92,8 +96,8 @@ def index():
     return render_template(
         "targets.html", active="targets", all_properties=get_properties(conn), active_property=None,
         rows=rows, totals=totals, bases=BASES, basis=basis, month=month, month_label=_label(month),
-        month_options=[{"ym": m, "label": _label(m)} for m in sorted(month_set, reverse=True)[:24]],
-        any_saved=bool(saved),
+        any_saved=bool(saved), context_bar=True, ctx=ctx, hide_property=True, hide_compare=True,
+        multi_month=(ctx["start_year"], ctx["start_month"]) != (ctx["end_year"], ctx["end_month"]),
     )
 
 
@@ -139,8 +143,8 @@ def save(property_id):
             (property_id, *vals, datetime.datetime.now().isoformat(timespec="seconds")),
         )
     conn.commit()
-    flash(f"Targets saved for {p['name']}.")
-    return redirect(url_for("targets.index", basis=_basis(request.form), month=request.form.get("month", "")))
+    flash(f"\u2713 Targets saved for {p['name']}.", "success")
+    return redirect(url_for("targets.index", basis=_basis(request.form)))
 
 
 @bp.route("/targets/<property_id>/reset", methods=["POST"])
@@ -151,8 +155,8 @@ def reset_one(property_id):
         abort(404)
     conn.execute("DELETE FROM property_targets WHERE property_id=?", (property_id,))
     conn.commit()
-    flash(f"{p['name']} is back on its data average.")
-    return redirect(url_for("targets.index", basis=_basis(request.form), month=request.form.get("month", "")))
+    flash(f"\u2713 {p['name']} is back on its data average.", "success")
+    return redirect(url_for("targets.index", basis=_basis(request.form)))
 
 
 @bp.route("/targets/reset", methods=["POST"])
@@ -160,5 +164,5 @@ def reset():
     conn = db.get_conn()
     conn.execute("DELETE FROM property_targets")
     conn.commit()
-    flash("All targets are back on their data averages.")
-    return redirect(url_for("targets.index", basis=_basis(request.form), month=request.form.get("month", "")))
+    flash("\u2713 All targets are back on their data averages.", "success")
+    return redirect(url_for("targets.index", basis=_basis(request.form)))

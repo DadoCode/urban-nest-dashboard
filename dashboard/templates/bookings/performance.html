@@ -24,7 +24,7 @@
         <tbody>
           {% for r in heatmap_rows %}
             <tr>
-              <td style="white-space:nowrap"><a href="{{ url_for('properties.bookings', property_id=r.id) }}">{{ r.name }}</a></td>
+              <td style="white-space:nowrap"><a href="{{ cx('properties.bookings', property_id=r.id) }}">{{ r.name }}</a></td>
               {% for v in r.cells %}
                 {% if v is none %}
                   <td class="num" style="background:var(--surface-2); padding:4px"></td>
@@ -46,7 +46,7 @@
         <tbody>
           {% for r in rows %}
             <tr>
-              <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+              <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
               <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
               <td class="num">{{ '%.0f'|format(r.days_booked) }}</td>
               <td class="num">{% if r.delta is not none %}{{ delta(r.delta, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
@@ -80,7 +80,7 @@
       },
     });
 
-    const PROPERTY_BOOKINGS = {{ url_for('properties.bookings', property_id='__ID__')|tojson }};
+    const PROPERTY_BOOKINGS = {{ cx('properties.bookings', property_id='__ID__')|tojson }};
     const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map(r => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name, id: r.id }));
     const meanX = scatterPoints.reduce((a, p) => a + p.x, 0) / (scatterPoints.length || 1);
     const meanY = scatterPoints.reduce((a, p) => a + p.y, 0) / (scatterPoints.length || 1);

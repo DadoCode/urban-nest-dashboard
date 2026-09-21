@@ -53,3 +53,42 @@ def completeness_for(conn, property_id, start, end):
     missing = [t for t in required if t not in received_types]
     pct = round((len(required) - len(missing)) / len(required) * 100) if required else 100
     return {"required": required, "received": list(received_types), "missing": missing, "pct": pct}
+
+
+def health_for(conn, property_id, start, end):
+    """Every source this property is expected to produce, and whether each
+    one has arrived for [start, end) -- the itemised version of
+    completeness_for(), for the "what exactly is missing?" views. Uses the
+    same rule as completeness_for: a document of that type uploaded in the
+    period counts as received."""
+    reqs = conn.execute(
+        "SELECT source_type, required FROM property_data_requirements WHERE property_id=? ORDER BY required DESC, rowid",
+        (property_id,),
+    ).fetchall()
+    if not reqs:
+        return None
+    docs = conn.execute(
+        "SELECT id, filename, doc_type, status FROM documents WHERE property_id=? AND uploaded_at>=? AND uploaded_at<? ORDER BY uploaded_at",
+        (property_id, start, end),
+    ).fetchall()
+    rows = []
+    for r in reqs:
+        mine = [d for d in docs if d["doc_type"] == r["source_type"]]
+        rows.append({"source": r["source_type"], "label": DOC_TYPE_LABELS.get(r["source_type"], r["source_type"]),
+                     "required": bool(r["required"]), "received": bool(mine), "docs": mine})
+    required = [x for x in rows if x["required"]]
+    missing = [x for x in required if not x["received"]]
+    pct = round((len(required) - len(missing)) / len(required) * 100) if required else 100
+    return {"rows": rows, "missing": missing, "required_total": len(required), "pct": pct}
+
+
+def health_state(h, period_label):
+    """(pill kind, human wording) for a health summary -- no vague words."""
+    if h is None:
+        return "neutral", "Not set up"
+    if h["pct"] == 100:
+        return "pos", "Complete"
+    n = len(h["missing"])
+    if h["required_total"] and n == h["required_total"]:
+        return "neutral", f"No {period_label} data"
+    return "warn", f"Partial · {n} source{'s' if n != 1 else ''} missing"

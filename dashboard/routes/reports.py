@@ -5,6 +5,7 @@ from flask import Blueprint, Response, flash, redirect, render_template, request
 import db
 import services.kpis as kpis
 import services.reporting as reporting
+from services.context import request_context
 from services.common import get_properties, get_property
 
 bp = Blueprint("reports", __name__)
@@ -49,12 +50,15 @@ def _build(conn, args):
 
 @bp.route("/reports")
 def index():
+    """The report forms start from the user's current period and property,
+    but every field stays editable -- a report can cover any dates."""
     conn = db.get_conn()
-    cy, cm = kpis.current_period(conn)
+    ctx = request_context(conn)
     return render_template(
         "reports/index.html", active="reports", all_properties=get_properties(conn), active_property=None,
-        flats=get_properties(conn, include_overhead=False), default_month=f"{cy}-{cm:02d}",
-        default_year=cy, default_from=f"{cy}-01", report_types=reporting.REPORT_TYPES,
+        flats=get_properties(conn, include_overhead=False), report_types=reporting.REPORT_TYPES,
+        default_month=ctx["to_input"], default_year=ctx["end_year"], default_from=ctx["from_input"],
+        default_to=ctx["to_input"], default_property=ctx["property_id"] or "", period_display=ctx["display"],
     )
 
 
@@ -63,7 +67,7 @@ def view():
     conn = db.get_conn()
     report, error = _build(conn, request.args)
     if error:
-        flash(error)
+        flash(error, "error")
         return redirect(url_for("reports.index"))
     sections = [{**s, "display_rows": reporting.rows_for_display(s)} for s in report["sections"]]
     return render_template(
@@ -77,7 +81,7 @@ def export():
     conn = db.get_conn()
     report, error = _build(conn, request.args)
     if error:
-        flash(error)
+        flash(error, "error")
         return redirect(url_for("reports.index"))
     fmt = request.args.get("format", "csv")
     name = re.sub(r"[^a-z0-9]+", "-", f"{report['title']} {report['subtitle']}".lower()).strip("-")[:80]

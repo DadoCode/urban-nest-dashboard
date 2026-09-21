@@ -14,7 +14,7 @@
       <option value="all" {{ 'selected' if status == 'all' }}>All</option>
     </select>
     <button type="submit" class="secondary">Search</button>
-    {% if q %}<a class="clear-link" href="{{ url_for('properties.index') }}">Clear</a>{% endif %}
+    {% if q %}<a class="clear-link" href="{{ cx('properties.index') }}">Clear</a>{% endif %}
   </form>
 
   <div class="card flush">
@@ -22,41 +22,26 @@
       <table>
         <thead>
           <tr>
-            <th>Property</th>
-            <th class="num">Revenue</th>
-            <th class="num">Net profit</th>
-            <th class="num">Occupancy</th>
-            <th class="num">ADR</th>
-            <th class="num">RevPAR</th>
+            <th><a class="sort {{ 'on' if sort == 'name' }}" href="{{ cx('properties.index', sort='name', q=q or None, status=status) }}">Property</a></th>
+            {% for key, label in [('revenue', 'Revenue'), ('profit', 'Net profit'), ('occupancy', 'Occupancy'), ('adr', 'ADR')] %}
+              <th class="num"><a class="sort {{ 'on' if sort == key }}" href="{{ cx('properties.index', sort=key, q=q or None, status=status) }}">{{ label }}{% if sort == key %} ↓{% endif %}</a></th>
+            {% endfor %}
+            <th class="num" title="Revenue per available night">RevPAR</th>
             <th>Data health</th>
           </tr>
         </thead>
         <tbody>
           {% for r in rows %}
             <tr>
-              <td><a href="{{ url_for('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}</td>
+              <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}</td>
               <td class="num">{{ r.revenue|money }}</td>
               <td class="num">{{ r.profit|money }}</td>
               <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
               <td class="num">{{ r.adr|money }}</td>
               <td class="num">{{ r.revpar|money }}</td>
               <td>
-                {% if r.completeness is none %}
-                  <span class="pill">Not set up</span>
-                {% elif r.completeness.pct == 100 %}
-                  <span class="pill pos">Complete</span>
-                {% else %}
-                  <span x-data="{ open: false }" style="position:relative; display:inline-block">
-                    <button type="button" class="pill {{ 'warn' if r.completeness.pct > 0 else 'neutral' }}" @click="open = !open" title="See what's missing">
-                      {% if r.completeness.pct > 0 %}Partial · {{ r.completeness.missing|length }} missing{% else %}No data{% endif %} ▾
-                    </button>
-                    <div class="context-pop" x-show="open" @click.outside="open = false" x-cloak style="min-width:230px; padding:10px 12px; gap:6px">
-                      <span class="note">Still needed this month</span>
-                      {% for m in r.completeness.missing %}<span>{{ m|doc_label }}</span>{% endfor %}
-                      <a class="btn secondary" href="{{ url_for('documents.index') }}" style="margin-top:4px">Upload documents</a>
-                    </div>
-                  </span>
-                {% endif %}
+                <button type="button" class="pill {{ r.health_kind }}" title="See exactly what is missing"
+                        hx-get="{{ cx('properties.health_drawer', property_id=r.id) }}" hx-target="#drawer" hx-swap="innerHTML">{{ r.health_label }} ›</button>
               </td>
             </tr>
           {% endfor %}

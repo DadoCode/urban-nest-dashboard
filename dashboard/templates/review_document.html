@@ -63,7 +63,7 @@
         {% if v.dup.kind == 'transaction' %}
           <a href="#" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=v.dup.id) }}" hx-target="#drawer" hx-swap="innerHTML">View existing</a>
         {% else %}
-          <a href="{{ url_for('properties.bookings', property_id=v.dup.property_id) }}" target="_blank">View existing</a>
+          <a href="{{ cx('properties.bookings', property_id=v.dup.property_id) }}" target="_blank">View existing</a>
         {% endif %}
         <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="keep" {{ 'checked' if it.dup_decision == 'keep' }}> Keep both</label>
         <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="exclude" {{ 'checked' if it.dup_decision == 'exclude' }}> Exclude new</label>
@@ -93,9 +93,10 @@
             <div class="rv-success-title">✓ {{ summary.added }} {{ summary.noun }}{{ 's' if summary.added != 1 }} added</div>
             <div class="note">{% if summary.excluded %}{{ summary.excluded }} excluded{% endif %}{% if summary.excluded and summary.corrected %} · {% endif %}{% if summary.corrected %}{{ summary.corrected }} manually corrected{% endif %}{% if not summary.excluded and not summary.corrected %}Imported exactly as read.{% endif %}</div>
             <div class="rv-success-actions">
-              {% if summary.noun == 'reservation' %}<a class="btn secondary" href="{{ url_for('bookings.index') }}">View bookings</a>
-              {% else %}<a class="btn secondary" href="{{ url_for('expenses.index') }}#ledger">View in Expenses</a>{% endif %}
-              {% if prop %}<a class="btn secondary" href="{{ url_for('properties.detail', property_id=prop.id) }}">Open {{ prop.name }}</a>{% endif %}
+              {% set pm = {'from': summary.month ~ '-01', 'to': summary.month ~ '-01'} if summary.month else {} %}
+              {% if summary.noun == 'reservation' %}<a class="btn secondary" href="{{ cx('properties.bookings', property_id=prop.id, **pm) if prop else cx('bookings.index', **pm) }}">View {{ prop.name ~ ' ' if prop }}bookings</a>
+              {% else %}<a class="btn secondary" href="{{ cx('expenses.index', property=prop.id if prop else 'all', **pm) }}#ledger">View in Expenses</a>{% endif %}
+              {% if prop %}<a class="btn secondary" href="{{ cx('properties.detail', property_id=prop.id, **pm) }}">Open {{ prop.name }}</a>{% endif %}
               <form method="post" action="{{ url_for('documents.undo', doc_id=doc.id) }}" onsubmit="return confirm('Undo this import? The transactions/reservations it created will be removed and the document goes back to needs-review.')" style="display:inline">
                 <button type="submit" class="danger">Undo this import</button>
               </form>

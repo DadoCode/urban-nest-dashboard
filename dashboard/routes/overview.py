@@ -51,7 +51,7 @@ def _kpi_rows(conn, property_id, ctx):
         delta = pct_delta(cv, pv, min_base=min_base)
         delta_ly = pct_delta(cv, lv, min_base=min_base) if lv is not None else None
         return {
-            "label": label, "value": value_fmt(cv),
+            "key": key, "label": label, "value": value_fmt(cv),
             "delta": delta,
             "delta_ly": delta_ly,
             "note": extra_note,

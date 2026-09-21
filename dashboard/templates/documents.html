@@ -4,6 +4,12 @@
 {% block content %}
   {{ page_head("Documents", "Upload statements and invoices, review what was extracted, then confirm. Nothing reaches your figures until you do.") }}
 
+  <span id="upload"></span>
+  {% if prefill_property or prefill_type %}
+    <div class="flash info" style="margin-bottom:var(--s3)">
+      Uploading{% if prefill_type %} a <strong>{{ doc_types[prefill_type]|lower }}</strong>{% else %} a document{% endif %}{% if prefill_property_name %} for <strong>{{ prefill_property_name }}</strong>{% endif %} — choose the file below; the property and type are already set.
+    </div>
+  {% endif %}
   <div class="card">
     <form id="upload-form" class="upload-form" style="display:block" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
       <div id="dropzone" class="dropzone">
@@ -16,10 +22,10 @@
       <div class="filter-bar" style="margin:var(--s3) 0 0">
         <select name="property_id">
           <option value="">Detect property automatically</option>
-          {% for p in all_properties %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+          {% for p in all_properties %}<option value="{{ p.id }}" {{ 'selected' if p.id == prefill_property }}>{{ p.name }}</option>{% endfor %}
         </select>
         <select name="doc_type">
-          {% for key, label in doc_types.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+          {% for key, label in doc_types.items() %}<option value="{{ key }}" {{ 'selected' if key == prefill_type }}>{{ label }}</option>{% endfor %}
         </select>
         <button type="submit">Upload and extract</button>
       </div>

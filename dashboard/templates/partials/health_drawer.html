@@ -1,0 +1,13 @@
+<div class="drawer-head">
+  <div>
+    <div class="drawer-title">{{ health_title }}</div>
+    <div class="note"><a href="{{ cx('properties.detail', property_id=prop.id) }}">{{ prop.name }}</a></div>
+  </div>
+  <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+<div class="drawer-section" style="margin-top:var(--s3)">
+  {% set upload_mode = 'page' %}
+  {% include "partials/health_panel.html" %}
+</div>
+<p class="note" style="margin-top:var(--s3)">A source counts as received once a document of that type has been uploaded for the property in this period.
+  <a href="{{ cx('properties.documents_tab', property_id=prop.id) }}">Open {{ prop.name }} documents</a></p>

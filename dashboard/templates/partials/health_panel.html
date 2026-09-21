@@ -1,0 +1,21 @@
+{# Itemised data health for one property + period. Vars: health, prop, health_title; upload_mode = 'page' | 'inline' #}
+{% if health is none %}
+  <div class="empty"><div class="empty-title">No expected documents set up</div><div class="empty-body">This property has no list of documents it should receive, so completeness can't be measured yet.</div></div>
+{% else %}
+  {% for r in health.rows %}
+    <div class="health-row">
+      {% if r.received %}
+        <span class="hk ok">✓</span>
+        <span class="health-name">{{ r.label }}
+          <span class="note">{% for d in r.docs %}<a href="{{ url_for('documents.review', doc_id=d.id) }}">{{ d.filename }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>
+        </span>
+        <span></span>
+      {% else %}
+        <span class="hk {{ 'miss' if r.required else 'opt' }}">{{ 'Missing' if r.required else 'Optional' }}</span>
+        <span class="health-name">{{ r.label }}{% if not r.required %} <span class="note">not uploaded for this period</span>{% endif %}</span>
+        {% set up = url_for('properties.documents_tab', property_id=prop.id, type=r.source) ~ '#upload' if upload_mode == 'inline' else url_for('documents.index', property=prop.id, type=r.source) ~ '#upload' %}
+        <a class="btn {{ '' if r.required else 'secondary' }}" style="height:26px" href="{{ up }}">Upload</a>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% endif %}

@@ -21,27 +21,29 @@
   </div>
   {% endcall %}
 
-  {% call section("Ledger") %}
-  <div class="card flush">
-    {% if expenses %}
-      <table>
-        <thead><tr><th>Month</th><th>Vendor</th><th>Description</th><th>Category</th><th class="num">Amount</th><th>Source</th></tr></thead>
-        <tbody>
-          {% for e in expenses %}
-            <tr>
-              <td>{{ ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][e.month] }} {{ e.year }}</td>
-              <td>{{ e.vendor or '' }}</td>
-              <td>{{ e.description or '' }}</td>
-              <td>{{ e.category }}{% if e.category == 'reconciliation' %} <span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% endif %}</td>
-              <td class="num">{{ e.amount|money2 }}</td>
-              <td class="note">{{ e.source }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      {{ empty_state("No expenses recorded for " ~ prop.name, "Add one above, or upload an invoice or statement to bring costs in with a source document.", "Upload documents", url_for('properties.documents_tab', property_id=prop.id)) }}
-    {% endif %}
-  </div>
+  {% call section("Expenses", (ledger_total.n ~ " · " ~ (ledger_total.amt|money) ~ " · " ~ ctx.display) if ledger_total.n else ctx.display) %}
+    <p class="note" style="margin:calc(var(--s2) * -1) 0 var(--s3)"><a href="{{ cx('expenses.index', keep_property=True, property=prop.id) }}">Open in Expenses for the full breakdown and filters</a></p>
+    <div class="card flush">
+      {% if expenses %}
+        <table>
+          <thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
+          <tbody>
+            {% for e in expenses %}
+              <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=e.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+                <td>{{ e.date }}</td>
+                <td class="truncate">{{ e.vendor or '—' }}</td>
+                <td class="truncate note">{{ e.description or '' }}</td>
+                <td>{% if e.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% else %}{{ e.category|replace('_', ' ') }}{% endif %}</td>
+                <td>{{ 'Capex' if e.capex else 'Opex' }}</td>
+                <td class="num">{{ e.amount|money2 }}</td>
+                <td class="note">{{ e.source|replace('_', ' ') }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        {{ empty_state("No expenses in " ~ ctx.display, "Nothing has been recorded for " ~ prop.name ~ " in this period. Add one above, upload an invoice, or choose a different period.", "Upload documents", url_for('documents.index', property=prop.id)) }}
+      {% endif %}
+    </div>
   {% endcall %}
 {% endblock %}

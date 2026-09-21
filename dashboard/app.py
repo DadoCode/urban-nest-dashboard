@@ -108,7 +108,16 @@ def create_app():
         from flask import url_for
         return url_for(endpoint, **{**base, **extra})
 
+    def cx(endpoint, keep_property=False, **values):
+        """url_for(endpoint) that carries the user's current period/compare
+        (and the property too when keep_property) so drilling into another
+        page never lands on a different month than the one they chose."""
+        from flask import url_for
+        from services.context import link_params
+        return url_for(endpoint, **link_params(keep_property, **values))
+
     flask_app.jinja_env.globals["xurl"] = xurl
+    flask_app.jinja_env.globals["cx"] = cx
 
     register_blueprints(flask_app)
     return flask_app

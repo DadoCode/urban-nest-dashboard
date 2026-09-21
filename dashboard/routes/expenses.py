@@ -173,12 +173,12 @@ def edit_transaction(tx_id):
     if not tx:
         return "<div class='card'>Transaction not found.</div>", 404
     if tx["category"] == "reconciliation":
-        flash("Historical reconciliation adjustments can't be edited -- they preserve the original Excel totals.")
+        flash("Historical adjustments can't be edited: they keep the historical totals matching the original Excel accounts.", "warning")
         return redirect(url_for("expenses.index"))
 
     new_property_id = request.form.get("property_id", tx["property_id"])
     if not get_property(conn, new_property_id):
-        flash("That property doesn't exist -- nothing was changed.")
+        flash("That property doesn't exist, so nothing was changed. Choose one from the list.", "error")
         return redirect(url_for("expenses.index"))
 
     vendor_name = request.form.get("vendor", "").strip()
@@ -200,7 +200,7 @@ def edit_transaction(tx_id):
              new_values["amount"], new_values["category"], new_values["capex"], tx_id),
         )
         conn.commit()
-        flash("Transaction updated.")
+        flash("\u2713 Transaction updated.", "success")
     return redirect(url_for("expenses.index"))
 
 
@@ -211,11 +211,11 @@ def delete_transaction(tx_id):
     if not tx:
         return redirect(url_for("expenses.index"))
     if tx["category"] == "reconciliation":
-        flash("Historical reconciliation adjustments can't be deleted -- they preserve the original Excel totals.")
+        flash("Historical adjustments can't be deleted: they keep the historical totals matching the original Excel accounts.", "warning")
         return redirect(url_for("expenses.index"))
     record(conn, "transaction", tx_id, "delete", old_value=f"{tx['vendor']} £{tx['amount']}")
     conn.execute("UPDATE document_items SET duplicate_of=NULL WHERE duplicate_of=?", (tx_id,))
     conn.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
     conn.commit()
-    flash("Transaction deleted.")
+    flash("\u2713 Transaction deleted.", "success")
     return redirect(url_for("expenses.index"))

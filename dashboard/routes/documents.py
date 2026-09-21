@@ -47,7 +47,9 @@ def file(doc_id):
 @bp.route("/documents")
 def index():
     conn = db.get_conn()
-    f_property = request.args.get("d_property") or ""
+    prefill_property = request.args.get("property") or ""
+    prefill_type = request.args.get("type") if request.args.get("type") in DOC_TYPE_LABELS else ""
+    f_property = request.args.get("d_property") or prefill_property
     f_type = request.args.get("d_type") or ""
     counts = conn.execute(
         """SELECT
@@ -60,7 +62,8 @@ def index():
     if "d_status" in request.args:
         f_status = request.args.get("d_status") or ""
     else:
-        f_status = "review" if counts["needs_review"] else ""
+        # arriving scoped to a property (e.g. from a "missing source" upload) shows all of its documents
+        f_status = "review" if counts["needs_review"] and not prefill_property else ""
     f_q = (request.args.get("d_q") or "").strip()
 
     clauses, params = ["1=1"], []
@@ -95,6 +98,8 @@ def index():
     return render_template(
         "documents.html", active="documents", all_properties=get_properties(conn), active_property=None,
         docs=rows, counts=counts, doc_types=DOC_TYPE_LABELS,
+        prefill_property=prefill_property, prefill_type=prefill_type,
+        prefill_property_name=property_names.get(prefill_property) if prefill_property else None,
         f_property=f_property, f_type=f_type, f_status=f_status, f_q=f_q,
     )
 
@@ -105,7 +110,7 @@ def upload():
     files = request.files.getlist("document")
     files = [f for f in files if f and f.filename]
     if not files:
-        flash("Choose at least one file first.")
+        flash("Choose at least one file before uploading.", "warning")
         return redirect(url_for("documents.index"))
     doc_type = request.form.get("doc_type", "other")
     property_id = request.form.get("property_id") or None
@@ -122,7 +127,7 @@ def upload_property(property_id):
     conn = db.get_conn()
     file = request.files.get("document")
     if not file or not file.filename:
-        flash("Choose a file first.")
+        flash("Choose a file before uploading.", "warning")
         return redirect(url_for("properties.detail", property_id=property_id))
     doc_id = save_upload(conn, file, request.form.get("doc_type", "other"), property_id, flash)
     return redirect(url_for("documents.review", doc_id=doc_id))
@@ -133,7 +138,7 @@ def review(doc_id):
     conn = db.get_conn()
     doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if not doc:
-        flash("Unknown document.")
+        flash("We couldn't find that document. It may have been removed; check the Documents list.", "error")
         return redirect(url_for("overview.index"))
     prop = get_property(conn, doc["property_id"])
     items = conn.execute(
@@ -164,7 +169,9 @@ def review(doc_id):
     if confirmed:
         added = conn.execute("SELECT COUNT(*) FROM transactions WHERE document_id=?", (doc_id,)).fetchone()[0] \
             + conn.execute("SELECT COUNT(*) FROM bookings WHERE document_id=?", (doc_id,)).fetchone()[0]
-        summary = {"added": added, "excluded": sum(1 for v in views if not v["row"]["include"]),
+        month_src = [(v["row"]["check_in"] if v["row"]["item_kind"] == "reservation" else v["row"]["date"]) for v in views if v["row"]["include"]]
+        month_src = sorted(m[:7] for m in month_src if m and len(m) >= 7)
+        summary = {"month": month_src[0] if month_src else None, "added": added, "excluded": sum(1 for v in views if not v["row"]["include"]),
                    "corrected": sum(1 for v in views if v["changed"]),
                    "noun": "reservation" if res_mode else "transaction"}
 
@@ -216,7 +223,7 @@ def _finish(conn, doc_id, final_property_id, added, noun, excluded, corrected):
     conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?", (final_property_id, doc_id))
     conn.commit()
     extra = " · ".join(x for x in (f"{excluded} excluded" if excluded else "", f"{corrected} manually corrected" if corrected else "") if x)
-    flash(f"\u2713 {added} {noun}{'s' if added != 1 else ''} added" + (f" ({extra})" if extra else ""))
+    flash(f"\u2713 {added} {noun}{'s' if added != 1 else ''} added" + (f" ({extra})" if extra else ""), "success")
 
 
 @bp.route("/documents/<int:doc_id>/confirm", methods=["POST"])
@@ -224,10 +231,10 @@ def confirm(doc_id):
     conn = db.get_conn()
     doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if not doc:
-        flash("Unknown document.")
+        flash("We couldn't find that document. It may have been removed; check the Documents list.", "error")
         return redirect(url_for("overview.index"))
     if doc["status"] == "confirmed":
-        flash("This document was already confirmed -- its transactions are already on the ledger.")
+        flash("This document was already confirmed, so its lines are already in your records.", "info")
         return redirect(url_for("documents.review", doc_id=doc_id))
 
     has_items = conn.execute("SELECT 1 FROM document_items WHERE document_id=? LIMIT 1", (doc_id,)).fetchone()
@@ -303,7 +310,7 @@ def _confirm_transactions(conn, doc, doc_id, included):
     if any(problems.values()):
         conn.execute("UPDATE document_items SET reviewed=0 WHERE document_id=?", (doc_id,))
         conn.commit()
-        flash(_problem_message(problems, "transaction"))
+        flash(_problem_message(problems, "transaction"), "warning")
         return redirect(url_for("documents.review", doc_id=doc_id))
 
     final_property_id = doc["property_id"]
@@ -369,7 +376,7 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
         if has_items:
             conn.execute("UPDATE document_items SET reviewed=0 WHERE document_id=?", (doc_id,))
         conn.commit()
-        flash(_problem_message(problems, "reservation"))
+        flash(_problem_message(problems, "reservation"), "warning")
         return redirect(url_for("documents.review", doc_id=doc_id))
 
     touched, final_property_id = {}, doc["property_id"]
@@ -391,7 +398,7 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
         after = kpis.revenue(conn, pid, *kpis.month_bounds(y, m))
         flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y} is now based on the reservations on file: "
               f"£{before:,.0f} before, £{after:,.0f} now. If that looks low, the statement may not cover every "
-              f"channel or reservation for the month -- upload the rest, or delete these to restore the Excel figure.")
+              f"channel or reservation for the month -- upload the rest, or delete these to restore the Excel figure.", "info")
     return redirect(url_for("documents.review", doc_id=doc_id))
 
 
@@ -403,7 +410,7 @@ def undo(doc_id):
     conn = db.get_conn()
     doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if not doc or doc["status"] != "confirmed":
-        flash("Only a confirmed document can be undone.")
+        flash("Only a confirmed document can be undone. This one hasn't been confirmed yet.", "info")
         return redirect(url_for("documents.index"))
     # confirm() points document_items.duplicate_of at the transaction each line became
     conn.execute("UPDATE document_items SET duplicate_of=NULL WHERE document_id=? AND duplicate_of IN (SELECT id FROM transactions WHERE document_id=?)", (doc_id, doc_id))
@@ -413,6 +420,6 @@ def undo(doc_id):
     conn.execute("UPDATE documents SET status='extracted', reviewed=0 WHERE id=?", (doc_id,))
     record(conn, "document", doc_id, "delete", field="import", old_value=f"{n_tx} transactions, {n_bk} reservations")
     conn.commit()
-    flash(f"Import undone: removed {n_tx} transaction{'s' if n_tx != 1 else ''} and {n_bk} reservation{'s' if n_bk != 1 else ''}. "
-          f"Any month that was based on those reservations goes back to its earlier figures.")
+    flash(f"\u2713 Import undone: removed {n_tx} transaction{'s' if n_tx != 1 else ''} and {n_bk} reservation{'s' if n_bk != 1 else ''}. "
+          f"Any month that was based on those reservations goes back to its earlier figures.", "success")
     return redirect(url_for("documents.review", doc_id=doc_id))

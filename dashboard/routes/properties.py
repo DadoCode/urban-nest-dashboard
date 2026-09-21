@@ -8,8 +8,8 @@ import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
 from services.common import MONTH_NAMES, get_properties, get_property, pct_delta, tiles_for, yoy_pairs
-from services.completeness import completeness_for, seed_defaults
-from services.context import request_context
+from services.completeness import completeness_for, health_for, health_state, seed_defaults
+from services.context import compare_bounds, link_params, request_context
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("properties", __name__)
@@ -33,34 +33,82 @@ def index():
     if q:
         flats = [p for p in flats if q in p["name"].lower() or q in (p["address"] or "").lower()]
 
+    single = (ctx["start_year"], ctx["start_month"]) == (ctx["end_year"], ctx["end_month"])
+    period_word = MONTH_NAMES[ctx["end_month"]] if single else ctx["display"]
+    sort = request.args.get("sort", "revenue")
+    if sort not in ("revenue", "profit", "occupancy", "adr", "name"):
+        sort = "revenue"
     rows = []
     for p in flats:
         snap = kpis.kpi_snapshot(conn, p["id"], start, end)
-        completeness = completeness_for(conn, p["id"], start, end)
+        kind, label = health_state(health_for(conn, p["id"], start, end), period_word)
         rows.append({
             "id": p["id"], "name": p["name"], "active": p["active"],
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"], "adr": snap["adr"], "revpar": snap["revpar"],
-            "completeness": completeness,
+            "health_kind": kind, "health_label": label,
         })
-    rows.sort(key=lambda r: r["revenue"], reverse=True)
+    rows.sort(key=(lambda r: r["name"].lower()) if sort == "name" else (lambda r: r[sort]), reverse=(sort != "name"))
 
     return render_template(
         "properties.html", active="properties", all_properties=get_properties(conn), active_property=None,
-        rows=rows, q=q, status=status, current_month=ctx["display"], total_count=len(rows),
+        rows=rows, q=q, status=status, sort=sort, current_month=ctx["display"], total_count=len(rows),
         context_bar=True, ctx=ctx, hide_property=True,
     )
 
 
 def _load(conn, property_id):
     """Common lookups every tab needs: the property row, whether it's the
-    overhead cost-centre, and the "current" year/month those tabs report on."""
+    overhead cost-centre, and the shared period/compare context with the
+    property fixed to this one."""
     prop = get_property(conn, property_id)
     if not prop:
-        return None, None, None, None
-    is_overhead = prop["type"] == "overhead"
-    year, month = kpis.current_period(conn)
-    return prop, is_overhead, year, month
+        return None, None, None
+    ctx = request_context(conn, fixed_property=property_id)
+    return prop, prop["type"] == "overhead", ctx
+
+
+def _ws(ctx, prop, tab, **extra):
+    """Template variables every workspace tab shares."""
+    return {"active": "properties", "active_property": prop["id"], "active_tab": tab, "prop": prop,
+            "context_bar": True, "ctx": ctx, "fixed_property": prop, "hide_property": True,
+            "year": ctx["end_year"], "month": ctx["end_month"], "month_name": MONTH_NAMES[ctx["end_month"]], **extra}
+
+
+def cx_url(endpoint, **values):
+    return url_for(endpoint, **link_params(**values))
+
+
+def health_title(ctx):
+    single = (ctx["start_year"], ctx["start_month"]) == (ctx["end_year"], ctx["end_month"])
+    return f"{MONTH_NAMES[ctx['end_month']]} data" if single else f"{ctx['display']} data"
+
+
+def _range(ctx):
+    return kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+
+
+def _tiles(conn, property_id, ctx):
+    """Property KPIs for the selected period, with both comparison deltas
+    (the tile picks the one the Compare control selects)."""
+    start, end = _range(ctx)
+    cur = kpis.kpi_snapshot(conn, property_id, start, end)
+    cmp_b = compare_bounds(ctx)
+    prev = kpis.kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
+    ly = kpis.kpi_snapshot(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
+        ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])))
+    if not (cur["revenue"] or cur["costs"] or cur["booked_nights"]):
+        return []
+    def t(label, key, fmt, base):
+        cv = cur[key]
+        return {"label": label, "value": fmt(cv), "delta": pct_delta(cv, prev[key], min_base=base) if prev else None,
+                "delta_ly": pct_delta(cv, ly[key], min_base=base)}
+    return [
+        t("Revenue", "revenue", lambda v: f"£{v:,.0f}", 100),
+        t("Net profit", "net_profit", lambda v: f"£{v:,.0f}", 300),
+        t("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%", 0.05),
+        t("Booked nights", "booked_nights", lambda v: f"{v:,}", 2),
+    ]
 
 
 def _checklist(conn, property_id, is_overhead, year, month):
@@ -78,35 +126,34 @@ def _remember_visit(resp, property_id):
 @bp.route("/properties/<property_id>")
 def detail(property_id):
     conn = db.get_conn()
-    prop, is_overhead, year, month = _load(conn, property_id)
+    prop, is_overhead, ctx = _load(conn, property_id)
     if not prop:
-        flash(f"Unknown property '{property_id}'.")
-        return redirect(url_for("overview.index"))
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
 
+    start, end = _range(ctx)
     if is_overhead:
-        start, end = kpis.month_bounds(year, month)
-        pstart, pend = kpis.month_bounds(*kpis.prior_month(year, month))
         cur_cost = kpis.costs(conn, property_id, start, end)
-        prev_cost = kpis.costs(conn, property_id, pstart, pend)
-        tiles = [{"label": f"Total costs — {MONTH_NAMES[month]} {year}", "value": f"£{cur_cost:,.0f}",
-                  "delta": pct_delta(cur_cost, prev_cost)}] if cur_cost or prev_cost else []
+        cmp_b = compare_bounds(ctx)
+        prev_cost = kpis.costs(conn, property_id, *cmp_b) if cmp_b else None
+        ly_cost = kpis.costs(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
+            ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])))
+        tiles = [{"label": "Total costs", "value": f"£{cur_cost:,.0f}",
+                  "delta": pct_delta(cur_cost, prev_cost) if prev_cost is not None else None,
+                  "delta_ly": pct_delta(cur_cost, ly_cost)}] if cur_cost or prev_cost or ly_cost else []
     else:
-        tiles, cur, prev = tiles_for(conn, property_id, year, month)
-        if f"{year}-{month:02d}" not in kpis.months_with_data(conn, property_id):
-            tiles = []
+        tiles = _tiles(conn, property_id, ctx)
 
     # Anchored + clipped to trailing 12 months -- see the matching note in
     # routes/overview.py on why a barely-started current month or years of
     # unclipped history both make the trend chart misleading.
-    anchor_ym = f"{year}-{month:02d}"
+    anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
     series = [s for s in kpis.monthly_series(conn, property_id) if s["ym"] <= anchor_ym][-12:]
-    yoy = yoy_pairs(conn, property_id, (year, month))
+    yoy = yoy_pairs(conn, property_id, (ctx["end_year"], ctx["end_month"]))
 
     resp = make_response(render_template(
-        "property/overview.html", active="properties", all_properties=get_properties(conn),
-        active_property=property_id, active_tab="overview",
-        prop=prop, is_overhead=is_overhead, tiles=tiles,
-        year=year, month=month, month_name=MONTH_NAMES[month], yoy=yoy,
+        "property/overview.html", all_properties=get_properties(conn),
+        **_ws(ctx, prop, "overview", is_overhead=is_overhead, tiles=tiles, yoy=yoy),
         months_json=json.dumps([s["ym"] for s in series]),
         income_json=json.dumps([s["revenue"] for s in series]),
         profit_json=json.dumps([s["net_profit"] for s in series]),
@@ -122,28 +169,26 @@ def detail(property_id):
 @bp.route("/properties/<property_id>/bookings")
 def bookings(property_id):
     conn = db.get_conn()
-    prop, is_overhead, year, month = _load(conn, property_id)
+    prop, is_overhead, ctx = _load(conn, property_id)
     if not prop:
-        flash(f"Unknown property '{property_id}'.")
-        return redirect(url_for("overview.index"))
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
     if is_overhead:
-        return redirect(url_for("properties.detail", property_id=property_id))
+        return redirect(cx_url("properties.detail", property_id=property_id))
 
-    start, end = kpis.month_bounds(year, month)
+    start, end = _range(ctx)
     rows = conn.execute(
         """SELECT *, CAST(julianday(check_out) - julianday(check_in) AS INTEGER) AS nights
            FROM bookings WHERE property_id=? AND status='confirmed' AND reservation_id != 'monthly-aggregate'
-           ORDER BY check_in DESC LIMIT 100""",
-        (property_id,),
+             AND check_in < ? AND check_out > ? ORDER BY check_in DESC LIMIT 100""",
+        (property_id, end, start),
     ).fetchall()
 
     resp = make_response(render_template(
-        "property/bookings.html", active="properties", all_properties=get_properties(conn),
-        active_property=property_id, active_tab="bookings",
-        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
+        "property/bookings.html", all_properties=get_properties(conn),
+        **_ws(ctx, prop, "bookings", is_overhead=is_overhead),
         booked_nights=kpis.booked_nights(conn, property_id, start, end),
-        adr=kpis.adr(conn, property_id, start, end),
-        bookings=rows,
+        adr=kpis.adr(conn, property_id, start, end), bookings=rows,
     ))
     _remember_visit(resp, property_id)
     return resp
@@ -152,22 +197,25 @@ def bookings(property_id):
 @bp.route("/properties/<property_id>/expenses")
 def expenses_tab(property_id):
     conn = db.get_conn()
-    prop, is_overhead, year, month = _load(conn, property_id)
+    prop, is_overhead, ctx = _load(conn, property_id)
     if not prop:
-        flash(f"Unknown property '{property_id}'.")
-        return redirect(url_for("overview.index"))
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
 
+    start, end = _range(ctx)
     transactions = conn.execute(
-        """SELECT *, CAST(strftime('%Y', date) AS INTEGER) AS year, CAST(strftime('%m', date) AS INTEGER) AS month
-           FROM transactions WHERE property_id=? ORDER BY date DESC, id DESC LIMIT 60""",
-        (property_id,),
+        """SELECT * FROM transactions WHERE property_id=? AND direction='expense' AND date>=? AND date<?
+           ORDER BY date DESC, id DESC LIMIT 200""",
+        (property_id, start, end),
     ).fetchall()
+    total = conn.execute(
+        "SELECT COUNT(*) n, COALESCE(SUM(amount),0) amt FROM transactions WHERE property_id=? AND direction='expense' AND date>=? AND date<?",
+        (property_id, start, end)).fetchone()
 
     resp = make_response(render_template(
-        "property/expenses.html", active="properties", all_properties=get_properties(conn),
-        active_property=property_id, active_tab="expenses",
-        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
-        expenses=transactions,
+        "property/expenses.html", all_properties=get_properties(conn),
+        **_ws(ctx, prop, "expenses", is_overhead=is_overhead),
+        expenses=transactions, ledger_total=total,
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
@@ -177,39 +225,55 @@ def expenses_tab(property_id):
 @bp.route("/properties/<property_id>/documents")
 def documents_tab(property_id):
     conn = db.get_conn()
-    prop, is_overhead, year, month = _load(conn, property_id)
+    prop, is_overhead, ctx = _load(conn, property_id)
     if not prop:
-        flash(f"Unknown property '{property_id}'.")
-        return redirect(url_for("overview.index"))
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
 
     documents = conn.execute(
         "SELECT * FROM documents WHERE property_id=? ORDER BY uploaded_at DESC", (property_id,)
     ).fetchall()
+    start, end = _range(ctx)
+    health = None if is_overhead else health_for(conn, property_id, start, end)
 
     resp = make_response(render_template(
-        "property/documents.html", active="properties", all_properties=get_properties(conn),
-        active_property=property_id, active_tab="documents",
-        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
+        "property/documents.html", all_properties=get_properties(conn),
+        **_ws(ctx, prop, "documents", is_overhead=is_overhead),
         documents=documents, extraction_available=extraction.available(),
+        health=health, health_period=ctx["display"], health_title_text=health_title(ctx),
+        prefill_type=request.args.get("type", ""),
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
     return resp
 
 
+@bp.route("/properties/<property_id>/health")
+def health_drawer(property_id):
+    """The "what exactly is missing?" drawer: each expected source for the
+    selected period, received or missing, with an Upload beside each gap."""
+    conn = db.get_conn()
+    prop, is_overhead, ctx = _load(conn, property_id)
+    if not prop or is_overhead:
+        return "<p class='note'>No data requirements for this property.</p>", 404
+    start, end = _range(ctx)
+    health = health_for(conn, property_id, start, end)
+    return render_template("partials/health_drawer.html", prop=prop, health=health, health_period=ctx["display"],
+                           health_title=health_title(ctx))
+
+
 @bp.route("/properties/<property_id>/settings")
 def settings_tab(property_id):
     conn = db.get_conn()
-    prop, is_overhead, year, month = _load(conn, property_id)
+    prop, is_overhead, ctx = _load(conn, property_id)
     if not prop:
-        flash(f"Unknown property '{property_id}'.")
-        return redirect(url_for("overview.index"))
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
 
     resp = make_response(render_template(
-        "property/settings.html", active="properties", all_properties=get_properties(conn),
-        active_property=property_id, active_tab="settings",
-        prop=prop, is_overhead=is_overhead, year=year, month=month, month_name=MONTH_NAMES[month],
-        checklist=_checklist(conn, property_id, is_overhead, year, month),
+        "property/settings.html", all_properties=get_properties(conn),
+        **_ws(ctx, prop, "settings", is_overhead=is_overhead),
+        checklist=_checklist(conn, property_id, is_overhead, ctx["end_year"], ctx["end_month"]),
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
@@ -227,14 +291,14 @@ def add():
     name = (request.form.get("name") or "").strip()
     address = (request.form.get("address") or "").strip() or name
     if not name:
-        flash("Give the new apartment a name.")
+        flash("Enter a name for the new property so we can add it.", "error")
         return redirect(url_for("overview.index"))
     slug = db.unique_slug(conn, db.slugify(name))
     conn.execute("INSERT INTO properties (id, code, name, address, type) VALUES (?,?,?,?,'flat')",
                  (slug, slug.upper()[:10], name, address))
     seed_defaults(conn, slug)
     conn.commit()
-    flash(f"Added {name}. Upload its first document or add an entry to get it on the board.")
+    flash(f"\u2713 Added {name}. Upload its first document or add an expense to start building its figures.", "success")
     return redirect(url_for("properties.detail", property_id=slug))
 
 
@@ -243,19 +307,19 @@ def sync_calendar(property_id):
     conn = db.get_conn()
     prop = get_property(conn, property_id)
     if not prop:
-        flash(f"Unknown property '{property_id}'.")
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
         return redirect(url_for("overview.index"))
 
     url = (request.form.get("ical_url") or "").strip() or prop["ical_url"]
     if not url:
-        flash("Paste the calendar's export/sync URL first (Airbnb: listing → Availability → Export calendar).")
+        flash("Paste the calendar's export link first (Airbnb: listing → Availability → Export calendar), then sync.", "warning")
         return redirect(url_for("properties.settings_tab", property_id=property_id))
 
     try:
         ics_text = ical_sync.fetch(url)
         events = ical_sync.parse_events(ics_text)
     except ValueError as e:
-        flash(str(e))
+        flash(f"We couldn't read that calendar: {e} Check the link is the calendar's export URL and try again.", "error")
         return redirect(url_for("properties.settings_tab", property_id=property_id))
 
     conn.execute("UPDATE properties SET ical_url=?, ical_synced_at=datetime('now') WHERE id=?", (url, property_id))
@@ -276,7 +340,7 @@ def sync_calendar(property_id):
         )
         added += 1
     conn.commit()
-    flash(f"Synced calendar: {added} new reservation(s) added" + (f", {skipped} already on file." if skipped else "."))
+    flash(f"\u2713 Calendar synced: {added} new reservation{'s' if added != 1 else ''} added" + (f", {skipped} already on file." if skipped else "."), "success")
     return redirect(url_for("properties.settings_tab", property_id=property_id))
 
 
@@ -289,7 +353,7 @@ def add_expense(property_id):
         year = int(request.form.get("year") or today.year)
         month = int(request.form.get("month") or today.month)
     except (KeyError, ValueError):
-        flash("Enter a valid amount.")
+        flash("Enter the amount as a number, for example 42.50.", "error")
         return redirect(url_for("properties.expenses_tab", property_id=property_id))
     category = request.form.get("category", "purchase")
     direction = "income" if category == "booking_income" else "expense"
@@ -302,5 +366,5 @@ def add_expense(property_id):
          request.form.get("description", ""), amount, direction, category),
     )
     conn.commit()
-    flash("Expense added.")
+    flash("\u2713 Expense added.", "success")
     return redirect(url_for("properties.expenses_tab", property_id=property_id))
