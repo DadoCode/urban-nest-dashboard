@@ -183,7 +183,16 @@ def available():
 def extract(file_path, mime_type=None, doc_type=None):
     """doc_type == 'booking_statement' means "read reservations" (each
     item is a real booking with check-in/out); anything else reads plain
-    money-in/money-out transaction lines."""
+    money-in/money-out transaction lines. Never raises -- an upload that
+    can't be read automatically must fall through to "enter it by hand",
+    never a crash, no matter how malformed the file turns out to be."""
+    try:
+        return _extract(file_path, mime_type, doc_type)
+    except Exception:
+        return None
+
+
+def _extract(file_path, mime_type, doc_type):
     mime_type = mime_type or mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
     name = str(file_path).lower()
     reservations = doc_type == "booking_statement"
