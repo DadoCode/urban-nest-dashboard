@@ -7,3 +7,5 @@ venv/
 data/dashboard.db*
 data/uploads/
 data/.secret_key
+.vercel
+.env*
