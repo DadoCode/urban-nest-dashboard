@@ -37,8 +37,9 @@ address, a listing name) -- null if nothing like that appears",
 "description": "short string", "amount": number, ALWAYS POSITIVE -- a plain \
 magnitude, never negative, "category": one of "booking_income" (money the \
 business received from a guest/booking platform), "purchase", "cleaning", \
-"utilities", "rent", "management_fee" (a cut paid to whoever manages the flat), \
-"other" (anything else the business paid out), \
+"utilities", "rent", "council_tax", "management_fee" (a cut paid to whoever \
+manages the flat), "insurance", "software", "accounting", "marketing", \
+"salary", "furniture", "other" (anything else the business paid out), \
 "page": integer, the page of the document this line is printed on (1 if a single page), \
 "confidence": number from 0 to 1, how sure you are this line is read correctly}
   ]
