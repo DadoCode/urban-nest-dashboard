@@ -209,8 +209,13 @@ def revpar(conn, property_id, start, end):
 def business_income(conn, property_id, start, end):
     """What this business actually earns for the period -- not the same as
     net_profit(). Most flats are run under a management agreement: the
-    business only keeps a percentage of revenue (properties.management_fee_pct)
-    and the rest belongs to the flat's owner. For a fully-owned flat
+    business only keeps its management fee (a cut of revenue) and the rest
+    belongs to the flat's owner. That fee is itself a real, already-recorded
+    transaction (category='management_fee') for any month it's been entered
+    -- and the true rate has changed over time for some flats -- so the
+    recorded amount is used whenever one exists for the period; only a
+    month with no recorded fee yet falls back to the estimate from
+    properties.management_fee_pct (times revenue). For a fully-owned flat
     (no fee set), the business keeps the whole net profit. Portfolio-wide
     (property_id=None) sums this per flat rather than netting on the total,
     since owned and managed flats are computed differently."""
@@ -220,6 +225,13 @@ def business_income(conn, property_id, start, end):
             return 0.0
         fee = row["management_fee_pct"]
         if fee:
+            recorded = conn.execute(
+                """SELECT COALESCE(SUM(amount),0) FROM transactions
+                   WHERE property_id=? AND direction='expense' AND category='management_fee' AND date>=? AND date<?""",
+                (property_id, start, end),
+            ).fetchone()[0]
+            if recorded:
+                return recorded
             return revenue(conn, property_id, start, end) * fee / 100
         return net_profit(conn, property_id, start, end)
     total = 0.0
@@ -230,15 +242,16 @@ def business_income(conn, property_id, start, end):
 
 def adjusted_revenue(conn, property_id, start, end):
     """Top-line money this business is actually entitled to: full revenue
-    for an owned flat, only the management-fee share of revenue for a
-    managed one (properties.management_fee_pct). Portfolio-wide sums each
-    flat's own share rather than scaling one combined total, since owned
-    and managed flats aren't adjusted by the same factor."""
+    for an owned flat, only its management fee for a managed one -- the
+    same figure as business_income() (real recorded fee first, the stored
+    percentage as a fallback estimate), since a managed flat has no further
+    costs of its own to subtract. Portfolio-wide sums each flat's own share
+    rather than scaling one combined total, since owned and managed flats
+    aren't adjusted by the same factor."""
     if property_id:
         row = conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (property_id,)).fetchone()
-        rev = revenue(conn, property_id, start, end)
         fee = row["management_fee_pct"] if row else None
-        return rev * fee / 100 if fee else rev
+        return business_income(conn, property_id, start, end) if fee else revenue(conn, property_id, start, end)
     return sum(adjusted_revenue(conn, p["id"], start, end) for p in conn.execute("SELECT id FROM properties WHERE type='flat'"))
 
 

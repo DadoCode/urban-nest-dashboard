@@ -8,7 +8,7 @@ MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
                "July", "August", "September", "October", "November", "December"]
 MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-CATEGORIES = ["purchase", "cleaning", "utilities", "maintenance", "management_fee",
+CATEGORIES = ["purchase", "cleaning", "utilities", "rent", "maintenance", "management_fee",
               "insurance", "software", "accounting", "furniture", "booking_income", "other"]
 
 
