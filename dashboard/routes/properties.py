@@ -7,7 +7,7 @@ import db
 import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
-from services.common import MONTH_NAMES, get_properties, get_property, pct_delta, tiles_for, yoy_pairs
+from services.common import MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta
 from services.completeness import completeness_for, health_for, health_state, seed_defaults
 from services.context import compare_bounds, link_params, request_context
 from services.vendors import get_or_create_vendor
@@ -40,7 +40,11 @@ def index():
         sort = "revenue"
     rows = []
     for p in flats:
-        snap = kpis.kpi_snapshot(conn, p["id"], start, end)
+        # adjusted_kpi_snapshot(): Revenue/Net profit are what this business
+        # actually earns -- full figures for an owned flat, the fee share
+        # for a managed one. Occupancy/ADR/RevPAR describe the flat itself
+        # and are unaffected.
+        snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
         kind, label = health_state(health_for(conn, p["id"], start, end), period_word)
         fee = p["management_fee_pct"]
         rows.append({
@@ -48,15 +52,14 @@ def index():
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"], "adr": snap["adr"], "revpar": snap["revpar"],
             "health_kind": kind, "health_label": label,
-            "managed": bool(fee), "fee": fee, "your_income": kpis.business_income(conn, p["id"], start, end),
+            "managed": bool(fee), "fee": fee,
         })
     rows.sort(key=(lambda r: r["name"].lower()) if sort == "name" else (lambda r: r[sort]), reverse=(sort != "name"))
-    total_your_income = sum(r["your_income"] for r in rows)
 
     return render_template(
         "properties.html", active="properties", all_properties=get_properties(conn), active_property=None,
         rows=rows, q=q, status=status, sort=sort, current_month=ctx["display"], total_count=len(rows),
-        context_bar=True, ctx=ctx, hide_property=True, total_your_income=total_your_income,
+        context_bar=True, ctx=ctx, hide_property=True,
     )
 
 
@@ -95,10 +98,10 @@ def _tiles(conn, property_id, ctx):
     """Property KPIs for the selected period, with both comparison deltas
     (the tile picks the one the Compare control selects)."""
     start, end = _range(ctx)
-    cur = kpis.kpi_snapshot(conn, property_id, start, end)
+    cur = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
     cmp_b = compare_bounds(ctx)
-    prev = kpis.kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
-    ly = kpis.kpi_snapshot(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
+    prev = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
+    ly = kpis.adjusted_kpi_snapshot(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
         ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])))
     if not (cur["revenue"] or cur["costs"] or cur["booked_nights"]):
         return []
@@ -151,8 +154,8 @@ def detail(property_id):
     # routes/overview.py on why a barely-started current month or years of
     # unclipped history both make the trend chart misleading.
     anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
-    series = [s for s in kpis.monthly_series(conn, property_id) if s["ym"] <= anchor_ym][-12:]
-    yoy = yoy_pairs(conn, property_id, (ctx["end_year"], ctx["end_month"]))
+    series = [s for s in kpis.adjusted_monthly_series(conn, property_id) if s["ym"] <= anchor_ym][-12:]
+    yoy = adjusted_yoy_pairs(conn, property_id, (ctx["end_year"], ctx["end_month"]))
 
     resp = make_response(render_template(
         "property/overview.html", all_properties=get_properties(conn),

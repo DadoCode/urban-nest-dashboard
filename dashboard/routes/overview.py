@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request
 
 import db
 import services.kpis as kpis
-from services.common import get_properties, pct_delta, yoy_pairs
+from services.common import adjusted_yoy_pairs, get_properties, pct_delta
 from services.completeness import completeness_for, DOC_TYPE_LABELS
 from services.context import request_context, range_params
 from services.insights import compute_insights
@@ -13,35 +13,17 @@ bp = Blueprint("overview", __name__)
 
 
 def _range_snapshot(conn, property_id, ctx):
+    # adjusted_kpi_snapshot(): Revenue/Net profit/Margin reflect only what
+    # this business actually earns (full revenue for owned flats, the fee
+    # share for managed ones) -- Occupancy/Booked nights/ADR/RevPAR are
+    # unaffected, computed the same way as kpi_snapshot().
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
-    cur = kpis.kpi_snapshot(conn, property_id, start, end)
+    cur = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
     pstart, pend = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
-    prev = kpis.kpi_snapshot(conn, property_id, pstart, pend)
+    prev = kpis.adjusted_kpi_snapshot(conn, property_id, pstart, pend)
     lystart, lyend = kpis.range_bounds(*kpis.same_period_last_year(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
-    last_year = kpis.kpi_snapshot(conn, property_id, lystart, lyend)
+    last_year = kpis.adjusted_kpi_snapshot(conn, property_id, lystart, lyend)
     return cur, prev, last_year
-
-
-def _business_income(conn, property_id, ctx, flats):
-    """What this business actually keeps for the period: revenue x fee% for
-    managed flats, full net profit for owned ones -- see kpis.business_income.
-    Also returns a per-flat breakdown (when viewing the whole portfolio) and
-    the prior-period comparison, so this reads like the other KPI tiles."""
-    start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
-    pstart, pend = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
-    cur = kpis.business_income(conn, property_id, start, end)
-    prev = kpis.business_income(conn, property_id, pstart, pend)
-    rows = []
-    if not property_id:
-        for p in flats:
-            fee = p["management_fee_pct"]
-            rev = kpis.revenue(conn, p["id"], start, end)
-            income = kpis.business_income(conn, p["id"], start, end)
-            if rev or income:
-                rows.append({"name": p["name"], "id": p["id"], "managed": bool(fee), "fee": fee,
-                             "revenue": rev, "income": income})
-        rows.sort(key=lambda r: r["income"], reverse=True)
-    return {"current": cur, "delta": pct_delta(cur, prev, min_base=100), "rows": rows}
 
 
 def _kpi_rows(conn, property_id, ctx):
@@ -120,12 +102,11 @@ def index():
     ctx = request_context(conn)
     viewing = next((p for p in nav_properties if p["id"] == ctx["property_id"]), None) if ctx["property_id"] else None
     primary_tiles, secondary_tiles, cur = _kpi_rows(conn, ctx["property_id"], ctx)
-    business = _business_income(conn, ctx["property_id"], ctx, flats)
 
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     prop_rows = []
     for p in flats:
-        snap = kpis.kpi_snapshot(conn, p["id"], start, end)
+        snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
         prop_rows.append({
             "id": p["id"], "name": p["name"],
             "revenue": snap["revenue"], "profit": snap["net_profit"], "margin": snap["margin"],
@@ -161,7 +142,7 @@ def index():
     # one stray transaction would otherwise show up as a misleading cliff
     # down to near-zero at the end of the line.
     anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
-    portfolio_series = [s for s in kpis.monthly_series(conn, ctx["property_id"]) if s["ym"] <= anchor_ym]
+    portfolio_series = [s for s in kpis.adjusted_monthly_series(conn, ctx["property_id"]) if s["ym"] <= anchor_ym]
     occupancy_by_property = {
         p["id"]: {"name": p["name"], "values": {s["ym"]: round(s["occupancy"] * 100, 1)
                                                   for s in kpis.monthly_series(conn, p["id"]) if s["ym"] <= anchor_ym}}
@@ -172,7 +153,7 @@ def index():
         items = [dict(i, show=idx < 5) for idx, i in enumerate(insights) if i["group"] == gname]
         if items:
             groups.append({"name": gname, "entries": items, "visible": any(i["show"] for i in items)})
-    yoy = yoy_pairs(conn, ctx["property_id"], (ctx["end_year"], ctx["end_month"]))
+    yoy = adjusted_yoy_pairs(conn, ctx["property_id"], (ctx["end_year"], ctx["end_month"]))
     overhead_property = next((p for p in nav_properties if p["type"] == "overhead"), None)
 
     # "Year on year" for each flat, not just the portfolio month-by-month --
@@ -183,8 +164,8 @@ def index():
             ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
         yoy_by_property = []
         for p in flats:
-            cur_rev = kpis.revenue(conn, p["id"], start, end)
-            ly_rev = kpis.revenue(conn, p["id"], ly_start, ly_end)
+            cur_rev = kpis.adjusted_revenue(conn, p["id"], start, end)
+            ly_rev = kpis.adjusted_revenue(conn, p["id"], ly_start, ly_end)
             if cur_rev or ly_rev:
                 yoy_by_property.append({"name": p["name"], "id": p["id"], "this_year": cur_rev, "last_year": ly_rev,
                                         "delta_pct": pct_delta(cur_rev, ly_rev, min_base=100)})
@@ -196,7 +177,7 @@ def index():
         primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, ctx=ctx,
         context_bar=True, prop_rows=prop_rows, yoy=yoy, yoy_by_property=yoy_by_property, expense_rows=expense_rows,
         insights=insights, completeness=completeness, doc_type_labels=DOC_TYPE_LABELS,
-        ctx_params=range_params(ctx), attention_groups=groups, attention_total=len(insights), business=business,
+        ctx_params=range_params(ctx), attention_groups=groups, attention_total=len(insights),
         series_json=json.dumps({
             "months": [s["ym"] for s in portfolio_series],
             "income": [round(s["revenue"], 2) for s in portfolio_series],

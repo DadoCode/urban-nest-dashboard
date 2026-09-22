@@ -59,6 +59,26 @@ def yoy_pairs(conn, property_id, current_period):
     return pairs
 
 
+def adjusted_yoy_pairs(conn, property_id, current_period):
+    """yoy_pairs(), but built from adjusted_monthly_series() -- revenue here
+    means what this business actually earns, matching the adjusted Revenue
+    tile rather than the flat's full gross revenue."""
+    series = {(s["year"], s["month"]): s for s in kpis.adjusted_monthly_series(conn, property_id)}
+    pairs = []
+    for (year, month), row in sorted(series.items()):
+        if (year, month) > current_period:
+            continue
+        prev = series.get((year - 1, month))
+        if prev:
+            pairs.append({
+                "label": f"{MONTH_NAMES[month]} {year}",
+                "this_year": row["revenue"],
+                "last_year": prev["revenue"],
+                "delta_pct": pct_delta(row["revenue"], prev["revenue"], min_base=100),
+            })
+    return pairs
+
+
 def tiles_for(conn, property_id, year, month):
     py, pm = kpis.prior_month(year, month)
     start, end = kpis.month_bounds(year, month)

@@ -25,27 +25,7 @@
       {% else %}<div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endif %}
     {% endfor %}
   </div>
-
-  {% call section("Your business income", "What actually reaches you, after management fees on the flats you don't own outright") %}
-    <div class="card income-card">
-      <div class="income-main">
-        <div class="value">{{ business.current|money }}</div>
-        {{ delta(business.delta, 'vs prior period') }}
-      </div>
-      {% if business.rows %}
-        <div class="income-rows">
-          {% for r in business.rows[:6] %}
-            <a class="income-row" href="{{ cx('properties.detail', property_id=r.id) }}">
-              <span class="name">{{ r.name }}</span>
-              <span class="tag">{% if r.managed %}{{ '%g'|format(r.fee) }}% of {{ r.revenue|money }}{% else %}Owned{% endif %}</span>
-              <span class="amt">{{ r.income|money }}</span>
-            </a>
-          {% endfor %}
-        </div>
-        {% if business.rows|length > 6 %}<a class="note" href="{{ xurl(ctx_params, 'properties.index') }}">See all {{ business.rows|length }} properties →</a>{% endif %}
-      {% endif %}
-    </div>
-  {% endcall %}
+  <p class="note" style="margin:var(--s2) 0 0">Revenue and Net profit are what this business actually earns: full figures for a flat you own, only the management fee on one you run for an owner. ADR, RevPAR and Occupancy describe the flat itself and aren't affected.</p>
 
   {% call section("Portfolio performance", "Click a month to view it · click a costs bar to see its transactions") %}
     <div class="card">

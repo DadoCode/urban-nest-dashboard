@@ -228,6 +228,62 @@ def business_income(conn, property_id, start, end):
     return total
 
 
+def adjusted_revenue(conn, property_id, start, end):
+    """Top-line money this business is actually entitled to: full revenue
+    for an owned flat, only the management-fee share of revenue for a
+    managed one (properties.management_fee_pct). Portfolio-wide sums each
+    flat's own share rather than scaling one combined total, since owned
+    and managed flats aren't adjusted by the same factor."""
+    if property_id:
+        row = conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (property_id,)).fetchone()
+        rev = revenue(conn, property_id, start, end)
+        fee = row["management_fee_pct"] if row else None
+        return rev * fee / 100 if fee else rev
+    return sum(adjusted_revenue(conn, p["id"], start, end) for p in conn.execute("SELECT id FROM properties WHERE type='flat'"))
+
+
+def adjusted_kpi_snapshot(conn, property_id, start, end):
+    """Same shape as kpi_snapshot(), but revenue/costs/net_profit/margin
+    reflect only what this business actually earns (adjusted_revenue() and
+    business_income()) instead of every pound that moved through a managed
+    flat on its owner's behalf. occupancy/booked_nights/adr/revpar describe
+    the flat's own operating performance and are unaffected by who owns
+    it, so those stay exactly as kpi_snapshot() computes them. The shared
+    overhead cost centre isn't a revenue property at all -- the fee/
+    ownership model doesn't apply to it, so it passes through unchanged
+    (its real costs must stay visible, not be zeroed out by the "managed
+    flats bear their own costs" rule below)."""
+    if property_id:
+        row = conn.execute("SELECT type FROM properties WHERE id=?", (property_id,)).fetchone()
+        if row and row["type"] == "overhead":
+            return kpi_snapshot(conn, property_id, start, end)
+    rev = adjusted_revenue(conn, property_id, start, end)
+    net = business_income(conn, property_id, start, end)
+    return {
+        "revenue": rev, "costs": max(rev - net, 0.0), "net_profit": net,
+        "margin": net / rev if rev else 0.0,
+        "occupancy": occupancy(conn, property_id, start, end),
+        "booked_nights": booked_nights(conn, property_id, start, end),
+        "adr": adr(conn, property_id, start, end),
+        "revpar": revpar(conn, property_id, start, end),
+    }
+
+
+def adjusted_monthly_series(conn, property_id):
+    """The adjusted_kpi_snapshot() equivalent of monthly_series() -- powers
+    the Overview/property charts and year-on-year tables so they match the
+    adjusted Revenue/Net profit tiles above them, instead of one part of
+    the page showing your income and another showing everyone's."""
+    out = []
+    for ym in months_with_data(conn, property_id):
+        year, month = map(int, ym.split("-"))
+        start, end = month_bounds(year, month)
+        snap = adjusted_kpi_snapshot(conn, property_id, start, end)
+        snap["year"], snap["month"], snap["ym"] = year, month, ym
+        out.append(snap)
+    return out
+
+
 def kpi_snapshot(conn, property_id, start, end):
     rev = revenue(conn, property_id, start, end)
     cost = costs(conn, property_id, start, end)

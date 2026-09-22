@@ -619,15 +619,3 @@ a.sort:hover, a.sort.on { color: var(--ink); }
 .viewer-note { background: var(--neutral-dim); color: var(--ink-soft); font-size: var(--fs-small); padding: 8px var(--s4); border-radius: var(--radius-sm); margin-bottom: var(--s3); }
 body.viewer .add-btn, body.viewer [onclick*="add-apartment-dialog"] { display: none; }
 form.view-only { opacity: 0.6; }
-
-/* ---------- business income card ---------- */
-
-.income-card { display: flex; flex-wrap: wrap; gap: var(--s6); align-items: flex-start; }
-.income-main { min-width: 160px; }
-.income-main .value { font-size: var(--fs-kpi); font-weight: 600; letter-spacing: -0.02em; }
-.income-rows { flex: 1 1 320px; min-width: 260px; display: flex; flex-direction: column; }
-.income-row { display: grid; grid-template-columns: 1fr auto auto; gap: var(--s3); align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); text-decoration: none; color: var(--ink); font-size: var(--fs-table); }
-.income-row:last-child { border-bottom: none; }
-.income-row:hover .name { color: var(--brand-ink); text-decoration: underline; }
-.income-row .tag { color: var(--muted); font-size: var(--fs-small); white-space: nowrap; }
-.income-row .amt { font-weight: 600; text-align: right; min-width: 72px; }
