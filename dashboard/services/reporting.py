@@ -47,10 +47,16 @@ def _col(label, fmt="text"):
 
 # ------------------------------------------------------------------ sections
 
-def _kpi_section(conn, property_id, start, end, pstart, pend, lystart, lyend, heading="Key figures"):
-    cur = kpis.kpi_snapshot(conn, property_id, start, end)
-    prev = kpis.kpi_snapshot(conn, property_id, pstart, pend)
-    last = kpis.kpi_snapshot(conn, property_id, lystart, lyend)
+def _kpi_section(conn, property_id, start, end, pstart, pend, lystart, lyend, heading="Key figures", use_adjusted=False):
+    """use_adjusted=True reports Revenue/Net profit/Margin as what this
+    business actually earns (see kpis.adjusted_kpi_snapshot) rather than
+    the property's own full figures -- right for a portfolio-wide report
+    about the business, wrong for a report meant to go to a flat's owner
+    (property_monthly), which stays on the flat's real numbers."""
+    snap = kpis.adjusted_kpi_snapshot if use_adjusted else kpis.kpi_snapshot
+    cur = snap(conn, property_id, start, end)
+    prev = snap(conn, property_id, pstart, pend)
+    last = snap(conn, property_id, lystart, lyend)
     metrics = [
         ("Revenue", "revenue", "money", 100, 1),
         ("Costs", "costs", "money", 100, 1),
@@ -69,23 +75,32 @@ def _kpi_section(conn, property_id, start, end, pstart, pend, lystart, lyend, he
     # the value column has mixed formats per row, so the formatted string
     # is what's stored for display while the raw number stays in `raw`
     fmts = [m[2] for m in metrics]
+    note = "Percentage changes are omitted when the comparison period's figure is too small to compare meaningfully."
+    if use_adjusted:
+        note = ("Revenue and Net profit are what this business actually earns -- full figures for a flat you own, "
+                "only the management fee for one you run for an owner. ADR, RevPAR and Occupancy describe the "
+                "properties themselves and aren't affected. " + note)
     return {"heading": heading, "columns": [_col("Metric"), _col("Value", "mixed"),
                                              _col("vs prior period", "delta"), _col("vs same period last year", "delta")],
-            "rows": rows, "row_fmts": fmts,
-            "note": "Percentage changes are omitted when the comparison period's figure is too small to compare meaningfully."}
+            "rows": rows, "row_fmts": fmts, "note": note}
 
 
-def _property_table(conn, start, end, heading="By property"):
+def _property_table(conn, start, end, heading="By property", use_adjusted=False):
+    snap = kpis.adjusted_kpi_snapshot if use_adjusted else kpis.kpi_snapshot
     rows = []
     for p in get_properties(conn, include_overhead=False):
-        s = kpis.kpi_snapshot(conn, p["id"], start, end)
-        rows.append([p["name"], s["revenue"], s["costs"], s["net_profit"], s["margin"] * 100,
-                     s["occupancy"] * 100, s["adr"]])
+        s = snap(conn, p["id"], start, end)
+        row = [p["name"], s["revenue"], s["costs"], s["net_profit"], s["margin"] * 100, s["occupancy"] * 100, s["adr"]]
+        if use_adjusted:
+            fee = p["management_fee_pct"]
+            row.append(f"Managed · {fee:g}%" if fee else "Owned")
+        rows.append(row)
     rows.sort(key=lambda r: r[1], reverse=True)
-    return {"heading": heading,
-            "columns": [_col("Property"), _col("Revenue", "money"), _col("Costs", "money"), _col("Net profit", "money"),
-                        _col("Margin", "pct"), _col("Occupancy", "pct"), _col("ADR", "money")],
-            "rows": rows}
+    columns = [_col("Property"), _col("Revenue", "money"), _col("Costs", "money"), _col("Net profit", "money"),
+               _col("Margin", "pct"), _col("Occupancy", "pct"), _col("ADR", "money")]
+    if use_adjusted:
+        columns.append(_col("Ownership"))
+    return {"heading": heading, "columns": columns, "rows": rows}
 
 
 def _category_table(conn, start, end, property_id=None, heading="Expenses by category"):
@@ -122,6 +137,23 @@ def _ledger_table(conn, start, end, property_id=None, limit=1000, heading="Trans
             "note": f"Showing up to {limit} transactions." if len(rows) >= limit else None}
 
 
+def _your_income_section(conn, property_id, start, end, heading="This business's income"):
+    """A single supplementary fact for a report about one specific flat --
+    deliberately NOT changing that report's own Revenue/Net profit (this
+    report type is "the kind of thing you'd send a landlord", who needs
+    the flat's real figures, not this business's cut of them)."""
+    p = get_property(conn, property_id)
+    fee = p["management_fee_pct"]
+    income = kpis.business_income(conn, property_id, start, end)
+    if fee:
+        note = (f"This flat is managed for its owner: this business earns {fee:g}% of its revenue. "
+                "The rest of the revenue and costs above belong to the owner, not this business.")
+    else:
+        note = "This flat is fully owned: the net profit above is this business's income in full."
+    return {"heading": heading, "columns": [_col("Measure"), _col("Amount", "money")],
+            "rows": [["This business's income this period", income]], "note": note}
+
+
 def _vendor_table(conn, start, end, property_id=None, heading="Top vendors"):
     clause, params = ("AND t.property_id=?", (property_id,)) if property_id else ("", ())
     data = conn.execute(
@@ -146,8 +178,8 @@ def _month_ranges(year, month):
 def build_portfolio_monthly(conn, year, month):
     s, e, ps, pe, ls, le = _month_ranges(year, month)
     return {"title": "Portfolio monthly report", "subtitle": f"{MONTH_NAMES[month]} {year} · all properties",
-            "sections": [_kpi_section(conn, None, s, e, ps, pe, ls, le),
-                         _property_table(conn, s, e),
+            "sections": [_kpi_section(conn, None, s, e, ps, pe, ls, le, use_adjusted=True),
+                         _property_table(conn, s, e, use_adjusted=True),
                          _category_table(conn, s, e)]}
 
 
@@ -155,6 +187,7 @@ def build_property_monthly(conn, property_id, year, month):
     prop = get_property(conn, property_id)
     s, e, ps, pe, ls, le = _month_ranges(year, month)
     sections = [_kpi_section(conn, property_id, s, e, ps, pe, ls, le),
+                _your_income_section(conn, property_id, s, e),
                 _category_table(conn, s, e, property_id),
                 _vendor_table(conn, s, e, property_id),
                 _ledger_table(conn, s, e, property_id, heading="Transactions this month")]
@@ -169,13 +202,13 @@ def build_annual_portfolio(conn, year):
         ms, me = kpis.month_bounds(year, m)
         if f"{year}-{m:02d}" not in kpis.months_with_data(conn, None):
             continue
-        snap = kpis.kpi_snapshot(conn, None, ms, me)
+        snap = kpis.adjusted_kpi_snapshot(conn, None, ms, me)
         monthly.append([MONTH_NAMES[m], snap["revenue"], snap["costs"], snap["net_profit"],
                         snap["margin"] * 100, snap["occupancy"] * 100])
-    total = kpis.kpi_snapshot(conn, None, s, e)
+    total = kpis.adjusted_kpi_snapshot(conn, None, s, e)
     monthly.append(["Total / year average", total["revenue"], total["costs"], total["net_profit"],
                     total["margin"] * 100, total["occupancy"] * 100])
-    last = kpis.kpi_snapshot(conn, None, ls, le)
+    last = kpis.adjusted_kpi_snapshot(conn, None, ls, le)
     summary = {"heading": "Year summary",
                "columns": [_col("Metric"), _col("This year", "mixed"), _col("Last year", "mixed"), _col("Change", "delta")],
                "row_fmts": ["money", "money", "money", "pct", "pct"],
@@ -183,13 +216,15 @@ def build_annual_portfolio(conn, year):
                         ["Costs", total["costs"], last["costs"], pct_delta(total["costs"], last["costs"], min_base=100)],
                         ["Net profit", total["net_profit"], last["net_profit"], pct_delta(total["net_profit"], last["net_profit"], min_base=1000)],
                         ["Margin", total["margin"] * 100, last["margin"] * 100, None],
-                        ["Occupancy", total["occupancy"] * 100, last["occupancy"] * 100, None]]}
+                        ["Occupancy", total["occupancy"] * 100, last["occupancy"] * 100, None]],
+               "note": "Revenue, Costs and Net profit are what this business actually earns -- full figures for a flat "
+                       "you own, only the management fee for one you run for an owner."}
     return {"title": "Annual portfolio report", "subtitle": f"{year} · all properties",
             "sections": [summary,
                          {"heading": "Month by month",
                           "columns": [_col("Month"), _col("Revenue", "money"), _col("Costs", "money"), _col("Net profit", "money"),
                                       _col("Margin", "pct"), _col("Occupancy", "pct")], "rows": monthly},
-                         _property_table(conn, s, e, heading=f"By property — {year}"),
+                         _property_table(conn, s, e, heading=f"By property — {year}", use_adjusted=True),
                          _category_table(conn, s, e)]}
 
 
