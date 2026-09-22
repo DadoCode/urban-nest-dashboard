@@ -1,0 +1,51 @@
+{% extends "property/_shell.html" %}
+{% from "_components.html" import section, kpi_tile, empty_state %}
+{% block tab_content %}
+  {% if tiles %}
+    <div class="tiles">
+      {% for t in tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
+    </div>
+  {% else %}
+    <div class="card">{{ empty_state("No " ~ ctx.display ~ " booking data for " ~ prop.name, "Upload a booking statement or choose a different period.", "Upload documents", url_for('documents.index', property=prop.id)) }}</div>
+  {% endif %}
+
+  <div class="grid-2">
+    {% call section("Occupancy trend", "This flat vs the portfolio average") %}
+      <div class="card"><div class="chart-box" style="height:240px"><canvas id="occChart"></canvas></div></div>
+    {% endcall %}
+    {% call section("ADR trend") %}
+      <div class="card"><div class="chart-box" style="height:240px"><canvas id="adrChart"></canvas></div></div>
+    {% endcall %}
+  </div>
+
+  <script>
+    const months = {{ months_json|safe }};
+    const occ = {{ occ_json|safe }};
+    const occPortfolio = {{ occ_portfolio_json|safe }};
+    const adrSeries = {{ adr_json|safe }};
+
+    new Chart(document.getElementById('occChart'), {
+      type: 'line',
+      data: {
+        labels: months,
+        datasets: [
+          { label: 'This flat', data: occ, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false },
+          { label: 'Portfolio avg', data: occPortfolio, borderColor: UN.costs, borderDash: [4, 4], fill: false, tension: 0.3, spanGaps: false, pointRadius: 0 },
+        ],
+      },
+      options: {
+        plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${pctShort(i.parsed.y)}` } } },
+        scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
+      },
+    });
+
+    new Chart(document.getElementById('adrChart'), {
+      type: 'line',
+      data: { labels: months, datasets: [{ label: 'ADR', data: adrSeries, borderColor: UN.profit, backgroundColor: 'rgba(63,100,137,0.10)', fill: true, tension: 0.3, spanGaps: false }] },
+      options: {
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `ADR: ${moneyFull(i.parsed.y)}` } } },
+        scales: quietScales(moneyShort),
+      },
+    });
+  </script>
+{% endblock %}

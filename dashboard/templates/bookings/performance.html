@@ -97,7 +97,23 @@
         indexAxis: 'y',
         layout: { padding: { right: 34 } },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.x)}` } } },
-        scales: { x: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort } }, y: { grid: { display: false }, border: { display: false } } },
+        scales: {
+          x: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort } },
+          y: {
+            grid: { display: false }, border: { display: false },
+            // Chart.js under-measures long property names for a
+            // horizontal bar's category axis -- reserve real width for
+            // the longest label so it never gets clipped.
+            afterFit(scale) {
+              const ctx = scale.chart.ctx;
+              ctx.save();
+              ctx.font = "500 " + Chart.defaults.font.size + "px " + Chart.defaults.font.family;
+              const widest = Math.max(0, ...rankedLabels.map((l) => ctx.measureText(l).width));
+              ctx.restore();
+              scale.width = Math.ceil(widest) + 16;
+            },
+          },
+        },
       },
     });
 
@@ -127,10 +143,10 @@
         ctx.strokeStyle = 'rgba(20,32,28,0.22)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, a.bottom); ctx.moveTo(a.left, py); ctx.lineTo(a.right, py); ctx.stroke();
         ctx.setLineDash([]); ctx.fillStyle = 'rgba(20,32,28,0.38)'; ctx.font = '11px Inter, sans-serif';
-        ctx.textAlign = 'left';  ctx.fillText('Busy · lower rate', a.left + 6, a.top + 14);
-        ctx.textAlign = 'right'; ctx.fillText('Busy · higher rate', a.right - 6, a.top + 14);
-        ctx.textAlign = 'left';  ctx.fillText('Quiet · lower rate', a.left + 6, a.bottom - 8);
-        ctx.textAlign = 'right'; ctx.fillText('Quiet · higher rate', a.right - 6, a.bottom - 8);
+        ctx.textAlign = 'left';  ctx.fillText('Busy · lower rate', a.left + 6, a.top + 18);
+        ctx.textAlign = 'right'; ctx.fillText('Busy · higher rate', a.right - 6, a.top + 18);
+        ctx.textAlign = 'left';  ctx.fillText('Quiet · lower rate', a.left + 6, a.bottom - 10);
+        ctx.textAlign = 'right'; ctx.fillText('Quiet · higher rate', a.right - 6, a.bottom - 10);
         ctx.restore();
       },
     };
@@ -138,9 +154,16 @@
     new Chart(document.getElementById('scatterChart'), {
       type: 'scatter',
       plugins: [quadrants],
-      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: (c) => c.raw ? c.raw.color : UN.brand, pointRadius: 6, pointHoverRadius: 9 }] },
+      data: {
+        datasets: [{
+          label: 'Flats', data: scatterPoints,
+          backgroundColor: (c) => c.raw ? c.raw.color : UN.brand,
+          pointRadius: 6, pointHoverRadius: 9,
+          pointHoverBorderWidth: 3, pointHoverBorderColor: 'rgba(20,32,28,0.25)',
+        }],
+      },
       options: {
-        layout: { padding: { top: 18, right: 14, bottom: 4, left: 4 } },
+        layout: { padding: { top: 28, right: 14, bottom: 4, left: 4 } },
         onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
         onClick: (e, els) => { if (els.length) location.href = PROPERTY_BOOKINGS.replace('__ID__', encodeURIComponent(scatterPoints[els[0].index].id)); },
         plugins: {

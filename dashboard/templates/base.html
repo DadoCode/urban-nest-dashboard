@@ -37,8 +37,13 @@
         <a href="{{ url_for('bookings.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'bookings' else '' }}"><span class="dot"></span>Bookings</a>
         <a href="{{ url_for('expenses.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'expenses' else '' }}"><span class="dot"></span>Expenses</a>
         <a href="{{ url_for('documents.index') }}" class="nav-link {{ 'active' if active == 'documents' else '' }}"><span class="dot"></span>Documents</a>
-        <a href="{{ url_for('reports.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'reports' else '' }}"><span class="dot"></span>Reports</a>
-        <a href="{{ url_for('targets.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'targets' else '' }}"><span class="dot"></span>Targets</a>
+        {# Inside a property workspace, Reports/Targets should default to
+           that property rather than losing it -- nav_qs deliberately never
+           carries "property" here (see services/context.py), so these two
+           links carry it explicitly instead. Every other link keeps
+           today's behaviour. #}
+        <a href="{{ cx('reports.index', property=fixed_property.id) if fixed_property else (url_for('reports.index') ~ nav_qs) }}" class="nav-link {{ 'active' if active == 'reports' else '' }}"><span class="dot"></span>Reports</a>
+        <a href="{{ cx('targets.index', property=fixed_property.id) if fixed_property else (url_for('targets.index') ~ nav_qs) }}" class="nav-link {{ 'active' if active == 'targets' else '' }}"><span class="dot"></span>Targets</a>
       </nav>
 
       {% if auth_on %}<a href="{{ url_for('auth.logout') }}" class="signout">{{ 'View-only account' if role == 'viewer' else 'Signed in as owner' }} · Sign out</a>{% endif %}

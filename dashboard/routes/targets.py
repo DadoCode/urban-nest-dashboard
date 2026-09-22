@@ -74,9 +74,21 @@ def index():
     cy, cm = kpis.current_period(conn)
     cur = f"{cy}-{cm:02d}"
     ctx = request_context(conn)
+    # This page has no property selector (hide_property=True below) and
+    # always lists every property, so a stray "property" left over from
+    # browsing elsewhere shouldn't make "Reset to latest" appear here --
+    # only period/compare matter on this page, same override
+    # request_context() already applies for a fixed-property workspace.
+    ctx["is_latest"] = ctx["period_is_latest"] and ctx["compare"] == "previous_period"
     month = f"{ctx['end_year']}-{ctx['end_month']:02d}"
     if month > cur:
         month = cur
+
+    # A property arrived from (e.g. its workspace's "Targets" link) doesn't
+    # filter this portfolio-wide table -- it just gets visually focused,
+    # so the table still gives full context while making it obvious which
+    # row you came for.
+    focus_property = request.args.get("property") or None
 
     saved = {r["property_id"]: r for r in conn.execute("SELECT * FROM property_targets")}
     rows, month_set = [], set()
@@ -98,6 +110,7 @@ def index():
         rows=rows, totals=totals, bases=BASES, basis=basis, month=month, month_label=_label(month),
         any_saved=bool(saved), context_bar=True, ctx=ctx, hide_property=True, hide_compare=True,
         multi_month=(ctx["start_year"], ctx["start_month"]) != (ctx["end_year"], ctx["end_month"]),
+        focus_property=focus_property,
     )
 
 

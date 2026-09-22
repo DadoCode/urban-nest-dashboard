@@ -26,9 +26,11 @@ def _range_snapshot(conn, property_id, ctx):
     return cur, prev, last_year
 
 
-def _kpi_rows(conn, property_id, ctx):
+def kpi_rows(conn, property_id, ctx):
     """Four primary KPIs, visually dominant, plus a quieter secondary strip
-    -- replaces the old 7-tile row where every metric got equal weight."""
+    -- replaces the old 7-tile row where every metric got equal weight.
+    Shared with routes/properties.py so a property workspace's own
+    Overview uses the exact same grouping as the portfolio one."""
     cur, prev, last_year = _range_snapshot(conn, property_id, ctx)
     period_label = ("MTD, " if ctx["partial"] and ctx["choice"] == "this_month" else "") + ctx["display"]
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
@@ -101,7 +103,7 @@ def index():
     flats = get_properties(conn, include_overhead=False)
     ctx = request_context(conn)
     viewing = next((p for p in nav_properties if p["id"] == ctx["property_id"]), None) if ctx["property_id"] else None
-    primary_tiles, secondary_tiles, cur = _kpi_rows(conn, ctx["property_id"], ctx)
+    primary_tiles, secondary_tiles, cur = kpi_rows(conn, ctx["property_id"], ctx)
 
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     prop_rows = []

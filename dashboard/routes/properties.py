@@ -9,7 +9,7 @@ import services.ical_sync as ical_sync
 import services.kpis as kpis
 from services.common import MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta
 from services.completeness import completeness_for, health_for, health_state, seed_defaults
-from services.context import compare_bounds, link_params, request_context
+from services.context import compare_bounds, link_params, range_params, request_context
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("properties", __name__)
@@ -21,6 +21,10 @@ def index():
     q = (request.args.get("q") or "").strip().lower()
     status = request.args.get("status", "active")
     ctx = request_context(conn)
+    # This page has no property selector (hide_property=True below) and
+    # always lists every property -- a stray "property" left over from
+    # browsing elsewhere shouldn't make "Reset to latest" appear here.
+    ctx["is_latest"] = ctx["period_is_latest"] and ctx["compare"] == "previous_period"
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
 
     rows_q = "SELECT * FROM properties WHERE type != 'overhead'"
@@ -94,29 +98,6 @@ def _range(ctx):
     return kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
 
 
-def _tiles(conn, property_id, ctx):
-    """Property KPIs for the selected period, with both comparison deltas
-    (the tile picks the one the Compare control selects)."""
-    start, end = _range(ctx)
-    cur = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
-    cmp_b = compare_bounds(ctx)
-    prev = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
-    ly = kpis.adjusted_kpi_snapshot(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
-        ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])))
-    if not (cur["revenue"] or cur["costs"] or cur["booked_nights"]):
-        return []
-    def t(label, key, fmt, base):
-        cv = cur[key]
-        return {"label": label, "value": fmt(cv), "delta": pct_delta(cv, prev[key], min_base=base) if prev else None,
-                "delta_ly": pct_delta(cv, ly[key], min_base=base)}
-    return [
-        t("Revenue", "revenue", lambda v: f"£{v:,.0f}", 100),
-        t("Net profit", "net_profit", lambda v: f"£{v:,.0f}", 300),
-        t("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%", 0.05),
-        t("Booked nights", "booked_nights", lambda v: f"{v:,}", 2),
-    ]
-
-
 def _checklist(conn, property_id, is_overhead, year, month):
     has_calendar = bool(conn.execute("SELECT ical_url FROM properties WHERE id=?", (property_id,)).fetchone()["ical_url"])
     has_documents = bool(conn.execute("SELECT 1 FROM documents WHERE property_id=? LIMIT 1", (property_id,)).fetchone())
@@ -147,8 +128,15 @@ def detail(property_id):
         tiles = [{"label": "Total costs", "value": f"£{cur_cost:,.0f}",
                   "delta": pct_delta(cur_cost, prev_cost) if prev_cost is not None else None,
                   "delta_ly": pct_delta(cur_cost, ly_cost)}] if cur_cost or prev_cost or ly_cost else []
+        primary_tiles, secondary_tiles = tiles, []
     else:
-        tiles = _tiles(conn, property_id, ctx)
+        # Same primary/secondary grouping as Portfolio Overview -- reused
+        # directly rather than re-implemented, so a property workspace's
+        # Overview never drifts from the portfolio one's hierarchy.
+        from routes.overview import kpi_rows
+        primary_tiles, secondary_tiles, cur = kpi_rows(conn, property_id, ctx)
+        if not (cur["revenue"] or cur["costs"] or cur["booked_nights"]):
+            primary_tiles, secondary_tiles = [], []
 
     # Anchored + clipped to trailing 12 months -- see the matching note in
     # routes/overview.py on why a barely-started current month or years of
@@ -159,7 +147,7 @@ def detail(property_id):
 
     resp = make_response(render_template(
         "property/overview.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "overview", is_overhead=is_overhead, tiles=tiles, yoy=yoy),
+        **_ws(ctx, prop, "overview", is_overhead=is_overhead, primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, yoy=yoy),
         months_json=json.dumps([s["ym"] for s in series]),
         income_json=json.dumps([s["revenue"] for s in series]),
         profit_json=json.dumps([s["net_profit"] for s in series]),
@@ -195,6 +183,86 @@ def bookings(property_id):
         **_ws(ctx, prop, "bookings", is_overhead=is_overhead),
         booked_nights=kpis.booked_nights(conn, property_id, start, end),
         adr=kpis.adr(conn, property_id, start, end), bookings=rows,
+    ))
+    _remember_visit(resp, property_id)
+    return resp
+
+
+@bp.route("/properties/<property_id>/calendar")
+def calendar_tab(property_id):
+    """This flat's own booking calendar -- the same grid/query logic as
+    the portfolio Bookings > Calendar tab (services.bookings.calendar_data),
+    just scoped to this one property and never asking you to re-pick it."""
+    conn = db.get_conn()
+    prop, is_overhead, ctx = _load(conn, property_id)
+    if not prop:
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
+    if is_overhead:
+        return redirect(cx_url("properties.detail", property_id=property_id))
+
+    from routes.bookings import calendar_data
+    data = calendar_data(conn, ctx, property_id)
+
+    def month_href(y, m):
+        return url_for("properties.calendar_tab", property_id=property_id,
+                        **range_params(ctx, **{"from": f"{y}-{m:02d}-01", "to": f"{y}-{m:02d}-01"}))
+
+    resp = make_response(render_template(
+        "property/calendar.html", all_properties=get_properties(conn),
+        **_ws(ctx, prop, "calendar", is_overhead=is_overhead),
+        prev_href=month_href(data["py"], data["pm"]), next_href=month_href(data["ny"], data["nm"]),
+        **{k: v for k, v in data.items() if k not in ("py", "pm", "ny", "nm")},
+    ))
+    _remember_visit(resp, property_id)
+    return resp
+
+
+@bp.route("/properties/<property_id>/performance")
+def performance_tab(property_id):
+    """How this one flat has been performing -- occupancy/ADR trend and
+    booked nights for its own history, not a portfolio comparison view
+    (that's what Bookings > Performance is for)."""
+    conn = db.get_conn()
+    prop, is_overhead, ctx = _load(conn, property_id)
+    if not prop:
+        flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
+    if is_overhead:
+        return redirect(cx_url("properties.detail", property_id=property_id))
+
+    start, end = _range(ctx)
+    cmp_b = compare_bounds(ctx)
+    cur = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
+    prev = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
+
+    def t(label, key, fmt, base):
+        cv = cur[key]
+        return {"label": label, "value": fmt(cv), "delta": pct_delta(cv, prev[key], min_base=base) if prev else None}
+    tiles = [
+        t("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%", 0.05),
+        t("ADR", "adr", lambda v: f"£{v:,.0f}", 20),
+        t("Booked nights", "booked_nights", lambda v: f"{v:,.0f}", 2),
+        t("RevPAR", "revpar", lambda v: f"£{v:,.0f}", 20),
+    ] if (cur["booked_nights"] or cur["occupancy"]) else []
+
+    # Same anchoring rule as every other trend chart here: this property's
+    # own recorded months, clipped to the trailing 12 up to the selected
+    # period, so a barely-started month or years of history never mislead.
+    anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
+    series = [s for s in kpis.adjusted_monthly_series(conn, property_id) if s["ym"] <= anchor_ym][-12:]
+    portfolio_by_ym = {s["ym"]: s for s in kpis.adjusted_monthly_series(conn, None)}
+
+    months = [s["ym"] for s in series]
+    occ = [round(s["occupancy"] * 100, 1) for s in series]
+    occ_portfolio = [round(portfolio_by_ym[ym]["occupancy"] * 100, 1) if ym in portfolio_by_ym else None for ym in months]
+    adr_series = [round(s["adr"], 0) if s["adr"] else None for s in series]
+
+    resp = make_response(render_template(
+        "property/performance.html", all_properties=get_properties(conn),
+        **_ws(ctx, prop, "performance", is_overhead=is_overhead, tiles=tiles),
+        months_json=json.dumps(months), occ_json=json.dumps(occ), occ_portfolio_json=json.dumps(occ_portfolio),
+        adr_json=json.dumps(adr_series),
     ))
     _remember_visit(resp, property_id)
     return resp
@@ -315,7 +383,7 @@ def save_ownership(property_id):
     conn = db.get_conn()
     prop = get_property(conn, property_id)
     if not prop or prop["type"] == "overhead":
-        flash("That property doesn't exist.", "error")
+        flash("We couldn't find that property. Pick one from the Properties list.", "error")
         return redirect(url_for("properties.index"))
     kind = request.form.get("kind", "owned")
     fee = None

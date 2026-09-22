@@ -1,0 +1,57 @@
+{# The month calendar grid + upcoming-reservations table, shared by the
+   portfolio Bookings > Calendar tab and a property workspace's own
+   Calendar tab. Needs: prev_href, next_href, month_label, weekday_labels,
+   day_cells, upcoming_rows. #}
+{% from "_components.html" import section, empty_state, channel %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--s3)">
+    <a class="btn secondary" href="{{ prev_href }}">&larr; Prev</a>
+    <div style="text-align:center"><h2 style="margin:0">{{ month_label }}</h2><span class="note">Each day shows how many flats are booked that night. Click a day or a reservation for details.</span></div>
+    <a class="btn secondary" href="{{ next_href }}">Next &rarr;</a>
+  </div>
+  <div class="cal-grid cal-grid-head">
+    {% for w in weekday_labels %}<div class="cal-weekday">{{ w }}</div>{% endfor %}
+  </div>
+  <div class="cal-grid">
+    {% for cell in day_cells %}
+      {% if cell is none %}
+        <div class="cal-cell cal-cell-empty"></div>
+      {% else %}
+        <div class="cal-cell" style="background: rgba(14,159,110,{{ (cell.pct / 100)|round(2) }}); cursor:pointer" hx-get="{{ url_for('bookings.day_drawer', day=cell.iso) }}" hx-target="#drawer" hx-swap="innerHTML" title="{{ cell.occupied }} of {{ cell.total }} {{ 'property' if cell.total == 1 else 'properties' }} occupied · click for the bookings">
+          <div style="display:flex; justify-content:space-between; align-items:center"><span class="cal-day">{{ cell.day }}</span><span class="cal-dots">{% for k in cell.channels %}<i class="chan-{{ k }}"></i>{% endfor %}</span></div>
+          <div class="cal-occ" style="color: {{ '#fff' if cell.pct > 55 else 'var(--ink)' }}">{{ cell.occupied }}/{{ cell.total }}</div>
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <div class="chan-legend">
+    <span class="chan"><i class="chan-airbnb"></i>Airbnb</span>
+    <span class="chan"><i class="chan-booking"></i>Booking.com</span>
+    <span class="chan"><i class="chan-direct"></i>Direct</span>
+    <span>Shading shows how many flats are booked; dots show which channels.</span>
+  </div>
+</div>
+
+{% call section("Upcoming reservations") %}
+<div class="card flush">
+  {% if upcoming_rows %}
+    <table>
+      <thead><tr><th>Flat</th><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th></tr></thead>
+      <tbody>
+        {% for b in upcoming_rows %}
+          <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+            <td>{{ b.property_name }}</td>
+            <td>{{ channel(b.platform) }}</td>
+            <td>{{ b.check_in }}</td>
+            <td>{{ b.check_out }}</td>
+            <td class="num">{{ b.nights }}</td>
+            <td class="num">{{ b.net_revenue|money }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    {{ empty_state("No upcoming reservations", "Reservations come from booking statements. Upload one to see check-ins and check-outs here.", "Upload a statement", url_for('documents.index')) }}
+  {% endif %}
+</div>
+{% endcall %}

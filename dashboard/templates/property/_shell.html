@@ -4,7 +4,13 @@
 {% block content %}
   {{ page_head(prop.name, prop.address) }}
   {% set items = [('overview', 'Overview', cx('properties.detail', property_id=prop.id))] %}
-  {% if not is_overhead %}{% set items = items + [('bookings', 'Bookings', cx('properties.bookings', property_id=prop.id))] %}{% endif %}
+  {% if not is_overhead %}
+    {% set items = items + [
+      ('performance', 'Performance', cx('properties.performance_tab', property_id=prop.id)),
+      ('calendar', 'Calendar', cx('properties.calendar_tab', property_id=prop.id)),
+      ('bookings', 'Bookings', cx('properties.bookings', property_id=prop.id)),
+    ] %}
+  {% endif %}
   {% set items = items + [('expenses', 'Expenses', cx('properties.expenses_tab', property_id=prop.id)), ('documents', 'Documents', cx('properties.documents_tab', property_id=prop.id)), ('settings', 'Settings', cx('properties.settings_tab', property_id=prop.id))] %}
   {{ tabs(items, active_tab) }}
   {% block tab_content %}{% endblock %}

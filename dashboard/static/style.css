@@ -237,7 +237,7 @@ main { max-width: 1160px; margin: 0 auto; padding: var(--s6) var(--s6) 64px; }
 
 table { width: 100%; border-collapse: collapse; font-size: var(--fs-table); }
 th, td { text-align: left; padding: 8px var(--s3); border-bottom: 1px solid var(--line); height: var(--row-h); vertical-align: middle; }
-th { color: var(--muted); font-weight: 500; font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.05em; background: var(--surface-2); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.05em; background: var(--surface-2); white-space: nowrap; position: sticky; top: 0; z-index: 2; }
 tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--surface-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -246,6 +246,8 @@ td:last-child, th:last-child { padding-right: var(--s4); }
 table a { color: var(--ink); font-weight: 500; text-decoration: none; }
 table a:hover { color: var(--brand-ink); text-decoration: underline; }
 tr.clickable { cursor: pointer; }
+tr.focus-row td { background: var(--brand-dim); box-shadow: inset 3px 0 0 var(--brand); }
+tr.focus-row:hover td { background: var(--brand-dim); }
 td.truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- forms & buttons ---------- */
@@ -578,7 +580,7 @@ tr.focus-row td { background: rgba(183, 121, 31, 0.16); }
 .chan-other { background: var(--chan-other); }
 .cal-dots { display: flex; gap: 3px; min-height: 8px; }
 .cal-dots i { width: 6px; height: 6px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85); }
-.chan-legend { display: flex; gap: var(--s4); margin-top: var(--s3); font-size: var(--fs-small); color: var(--muted); }
+.chan-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin-top: var(--s3); font-size: var(--fs-small); color: var(--muted); }
 
 /* ---------- navigation progress + quick jump ---------- */
 

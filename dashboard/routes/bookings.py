@@ -98,16 +98,11 @@ def day_drawer(day):
     return render_template("partials/day_drawer.html", rows=rows, total=total, label=f"{d.day} {MONTH_NAMES[d.month]} {d.year}")
 
 
-@bp.route("/bookings/calendar")
-def calendar_tab(property_id=None):
-    conn = db.get_conn()
-    legacy = request.args.get("month", "")
-    if re.match(r"^\d{4}-\d{2}$", legacy):  # older ?month=YYYY-MM links
-        return redirect(url_for("bookings.calendar_tab", **{"from": legacy + "-01", "to": legacy + "-01"}))
-    ctx = request_context(conn)
-    pid = ctx["property_id"]
-    all_props = get_properties(conn)
-    viewing = next((p for p in all_props if p["id"] == pid), None) if pid else None
+def calendar_data(conn, ctx, pid):
+    """The month grid + upcoming reservations for a given context, scoped
+    to one property (pid set) or the whole portfolio (pid=None) -- shared
+    by the portfolio Bookings > Calendar tab and a property workspace's
+    own Calendar tab, so the same query logic backs both."""
     year, month = ctx["end_year"], ctx["end_month"]
     start, end = kpis.month_bounds(year, month)
     total_flats = 1 if pid else (len(get_properties(conn, include_overhead=False)) or 1)
@@ -131,10 +126,6 @@ def calendar_tab(property_id=None):
         day_cells.append({"day": d, "iso": day.isoformat(), "occupied": occupied, "total": total_flats, "channels": channels,
                            "pct": round(occupied / total_flats * 100)})
 
-    # month arrows move the shared context, so every other page follows
-    def month_href(y, m):
-        return url_for("bookings.calendar_tab", **range_params(ctx, **{"from": f"{y}-{m:02d}-01", "to": f"{y}-{m:02d}-01"}))
-
     py, pm = kpis.prior_month(year, month)
     ny, nm = kpis.add_months(year, month, 1)
 
@@ -147,13 +138,35 @@ def calendar_tab(property_id=None):
         (datetime.date.today().isoformat(), *sparams),
     ).fetchall()
 
+    return {
+        "month_label": f"{MONTH_NAMES[month]} {year}", "day_cells": day_cells,
+        "py": py, "pm": pm, "ny": ny, "nm": nm,
+        "weekday_labels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "upcoming_rows": upcoming_rows,
+    }
+
+
+@bp.route("/bookings/calendar")
+def calendar_tab(property_id=None):
+    conn = db.get_conn()
+    legacy = request.args.get("month", "")
+    if re.match(r"^\d{4}-\d{2}$", legacy):  # older ?month=YYYY-MM links
+        return redirect(url_for("bookings.calendar_tab", **{"from": legacy + "-01", "to": legacy + "-01"}))
+    ctx = request_context(conn)
+    pid = ctx["property_id"]
+    all_props = get_properties(conn)
+    viewing = next((p for p in all_props if p["id"] == pid), None) if pid else None
+    data = calendar_data(conn, ctx, pid)
+
+    # month arrows move the shared context, so every other page follows
+    def month_href(y, m):
+        return url_for("bookings.calendar_tab", **range_params(ctx, **{"from": f"{y}-{m:02d}-01", "to": f"{y}-{m:02d}-01"}))
+
     return render_template(
         "bookings/calendar.html", active="bookings", active_bookings_tab="calendar",
         all_properties=all_props, active_property=None, context_bar=True, ctx=ctx, viewing=viewing, hide_compare=True,
-        month_label=f"{MONTH_NAMES[month]} {year}", day_cells=day_cells,
-        prev_href=month_href(py, pm), next_href=month_href(ny, nm), unit="property" if pid else "properties",
-        weekday_labels=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
-        upcoming_rows=upcoming_rows,
+        prev_href=month_href(data["py"], data["pm"]), next_href=month_href(data["ny"], data["nm"]),
+        **{k: v for k, v in data.items() if k not in ("py", "pm", "ny", "nm")},
     )
 
 
@@ -161,6 +174,10 @@ def calendar_tab(property_id=None):
 def performance(property_id=None):
     conn = db.get_conn()
     ctx = request_context(conn)
+    # This page has no property selector (hide_property=True below) and
+    # always shows every flat -- a stray "property" left over from
+    # browsing elsewhere shouldn't make "Reset to latest" appear here.
+    ctx["is_latest"] = ctx["period_is_latest"] and ctx["compare"] == "previous_period"
     flats = get_properties(conn, include_overhead=False)
     year, month = ctx["end_year"], ctx["end_month"]
     py, pm = kpis.prior_month(year, month)

@@ -1,10 +1,15 @@
 {% extends "property/_shell.html" %}
 {% from "_components.html" import section, kpi_tile, delta, empty_state %}
 {% block tab_content %}
-  {% if tiles %}
+  {% if primary_tiles %}
     <div class="tiles">
-      {% for t in tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
+      {% for t in primary_tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
     </div>
+    {% if secondary_tiles %}
+      <div class="tiles tiles-secondary">
+        {% for t in secondary_tiles %}<div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endfor %}
+      </div>
+    {% endif %}
   {% else %}
     <div class="card">{{ empty_state("No " ~ ctx.display ~ " data for " ~ prop.name, ("Add an expense on the Expenses tab to start tracking shared costs." if is_overhead else "Upload a booking statement or an invoice, or choose a different period."), "Upload documents", url_for('documents.index', property=prop.id)) }}</div>
   {% endif %}
