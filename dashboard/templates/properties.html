@@ -6,6 +6,8 @@
     <button type="button" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
   {% endcall %}
 
+  <p class="note" style="margin:calc(var(--s3) * -1) 0 var(--s4)">Your income totals {{ total_your_income|money }} for {{ current_month }} -- most flats are managed for their owner, so this business only keeps a percentage of revenue on those (set per flat on its Settings tab).</p>
+
   <form method="get" class="filter-bar">
     <input type="text" name="q" value="{{ q }}" placeholder="Search properties…">
     <select name="status" onchange="this.form.submit()">
@@ -27,6 +29,8 @@
               <th class="num"><a class="sort {{ 'on' if sort == key }}" href="{{ cx('properties.index', sort=key, q=q or None, status=status) }}">{{ label }}{% if sort == key %} ↓{% endif %}</a></th>
             {% endfor %}
             <th class="num" title="Revenue per available night">RevPAR</th>
+            <th>Ownership</th>
+            <th class="num" title="What this business actually keeps: revenue x fee% when managed, full net profit when owned">Your income</th>
             <th>Data health</th>
           </tr>
         </thead>
@@ -39,6 +43,8 @@
               <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
               <td class="num">{{ r.adr|money }}</td>
               <td class="num">{{ r.revpar|money }}</td>
+              <td>{% if r.managed %}<span class="pill" title="This business earns {{ '%g'|format(r.fee) }}% of this flat's revenue">Managed · {{ '%g'|format(r.fee) }}%</span>{% else %}<span class="pill pos">Owned</span>{% endif %}</td>
+              <td class="num" style="font-weight:600">{{ r.your_income|money }}</td>
               <td>
                 <button type="button" class="pill {{ r.health_kind }}" title="See exactly what is missing"
                         hx-get="{{ cx('properties.health_drawer', property_id=r.id) }}" hx-target="#drawer" hx-swap="innerHTML">{{ r.health_label }} ›</button>

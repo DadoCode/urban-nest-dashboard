@@ -185,6 +185,7 @@ def ensure_schema():
     for col, ddl in [
         ("ical_url", "TEXT"), ("ical_synced_at", "TEXT"),
         ("type", "TEXT NOT NULL DEFAULT 'flat'"), ("start_date", "TEXT"),
+        ("management_fee_pct", "REAL"),  # NULL/0 = fully owned; e.g. 15 = a manager keeps 85%, this business earns 15% of revenue
     ]:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE properties ADD COLUMN {col} {ddl}")

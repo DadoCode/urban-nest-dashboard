@@ -22,6 +22,28 @@ def _range_snapshot(conn, property_id, ctx):
     return cur, prev, last_year
 
 
+def _business_income(conn, property_id, ctx, flats):
+    """What this business actually keeps for the period: revenue x fee% for
+    managed flats, full net profit for owned ones -- see kpis.business_income.
+    Also returns a per-flat breakdown (when viewing the whole portfolio) and
+    the prior-period comparison, so this reads like the other KPI tiles."""
+    start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+    pstart, pend = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
+    cur = kpis.business_income(conn, property_id, start, end)
+    prev = kpis.business_income(conn, property_id, pstart, pend)
+    rows = []
+    if not property_id:
+        for p in flats:
+            fee = p["management_fee_pct"]
+            rev = kpis.revenue(conn, p["id"], start, end)
+            income = kpis.business_income(conn, p["id"], start, end)
+            if rev or income:
+                rows.append({"name": p["name"], "id": p["id"], "managed": bool(fee), "fee": fee,
+                             "revenue": rev, "income": income})
+        rows.sort(key=lambda r: r["income"], reverse=True)
+    return {"current": cur, "delta": pct_delta(cur, prev, min_base=100), "rows": rows}
+
+
 def _kpi_rows(conn, property_id, ctx):
     """Four primary KPIs, visually dominant, plus a quieter secondary strip
     -- replaces the old 7-tile row where every metric got equal weight."""
@@ -98,6 +120,7 @@ def index():
     ctx = request_context(conn)
     viewing = next((p for p in nav_properties if p["id"] == ctx["property_id"]), None) if ctx["property_id"] else None
     primary_tiles, secondary_tiles, cur = _kpi_rows(conn, ctx["property_id"], ctx)
+    business = _business_income(conn, ctx["property_id"], ctx, flats)
 
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     prop_rows = []
@@ -152,13 +175,28 @@ def index():
     yoy = yoy_pairs(conn, ctx["property_id"], (ctx["end_year"], ctx["end_month"]))
     overhead_property = next((p for p in nav_properties if p["type"] == "overhead"), None)
 
+    # "Year on year" for each flat, not just the portfolio month-by-month --
+    # same [start, end) window a year earlier, one row per property.
+    yoy_by_property = None
+    if not ctx["property_id"]:
+        ly_start, ly_end = kpis.range_bounds(*kpis.same_period_last_year(
+            ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
+        yoy_by_property = []
+        for p in flats:
+            cur_rev = kpis.revenue(conn, p["id"], start, end)
+            ly_rev = kpis.revenue(conn, p["id"], ly_start, ly_end)
+            if cur_rev or ly_rev:
+                yoy_by_property.append({"name": p["name"], "id": p["id"], "this_year": cur_rev, "last_year": ly_rev,
+                                        "delta_pct": pct_delta(cur_rev, ly_rev, min_base=100)})
+        yoy_by_property.sort(key=lambda r: r["this_year"], reverse=True)
+
     return render_template(
         "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats),
         active_property=ctx["property_id"], viewing=viewing, overhead_property=overhead_property,
         primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, ctx=ctx,
-        context_bar=True, prop_rows=prop_rows, yoy=yoy, expense_rows=expense_rows,
+        context_bar=True, prop_rows=prop_rows, yoy=yoy, yoy_by_property=yoy_by_property, expense_rows=expense_rows,
         insights=insights, completeness=completeness, doc_type_labels=DOC_TYPE_LABELS,
-        ctx_params=range_params(ctx), attention_groups=groups, attention_total=len(insights),
+        ctx_params=range_params(ctx), attention_groups=groups, attention_total=len(insights), business=business,
         series_json=json.dumps({
             "months": [s["ym"] for s in portfolio_series],
             "income": [round(s["revenue"], 2) for s in portfolio_series],

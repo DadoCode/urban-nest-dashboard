@@ -16,6 +16,7 @@
     {% endcall %}
   </div>
   <p class="note" style="margin-top:var(--s2)">Each dot is one flat; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
+  <div id="scatter-legend" class="chan-legend" style="margin-top:calc(var(--s2) * -1)"></div>
 
   {% call section("Occupancy heatmap", "Last 12 months, % of nights booked") %}
     <div class="card flush" style="overflow-x:auto">
@@ -70,20 +71,51 @@
 
     const rankedLabels = {{ rows|map(attribute='name')|list|tojson }};
     const rankedValues = {{ rows|map(attribute='occupancy')|list|tojson }}.map(v => Math.round(v * 1000) / 10);
+    const barEndLabels = {
+      id: 'barEndLabels',
+      afterDatasetsDraw(chart) {
+        const meta = chart.getDatasetMeta(0);
+        const { ctx } = chart;
+        ctx.save();
+        ctx.font = '600 11px Inter, sans-serif';
+        ctx.fillStyle = '#46544e';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        meta.data.forEach((bar, i) => {
+          const v = chart.data.datasets[0].data[i];
+          if (v === null || v === undefined) return;
+          ctx.fillText(pctShort(v), bar.x + 6, bar.y);
+        });
+        ctx.restore();
+      },
+    };
+
     new Chart(document.getElementById('rankedChart'), {
       type: 'bar',
+      plugins: [barEndLabels],
       data: { labels: rankedLabels, datasets: [{ label: 'Occupancy', data: rankedValues, backgroundColor: UN.brand }] },
       options: {
         indexAxis: 'y',
+        layout: { padding: { right: 34 } },
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.x)}` } } },
         scales: { x: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort } }, y: { grid: { display: false }, border: { display: false } } },
       },
     });
 
     const PROPERTY_BOOKINGS = {{ cx('properties.bookings', property_id='__ID__')|tojson }};
-    const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map(r => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name, id: r.id }));
+    const DOT_COLORS = ['#0e9f6e', '#3f6489', '#b7791f', '#a34e7c', '#58645f', '#4c7ba0', '#8a6d3b', '#6f8f5e', '#9a5a5a', '#5a7a8a'];
+    const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map((r, i) => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name, id: r.id, color: DOT_COLORS[i % DOT_COLORS.length] }));
     const meanX = scatterPoints.reduce((a, p) => a + p.x, 0) / (scatterPoints.length || 1);
     const meanY = scatterPoints.reduce((a, p) => a + p.y, 0) / (scatterPoints.length || 1);
+    // No point in charting the empty 0-50% band when nothing occupies it --
+    // start the axis just below the lowest flat instead of always at 0.
+    const minY = scatterPoints.length ? Math.max(0, Math.floor(Math.min(...scatterPoints.map(p => p.y)) / 10) * 10 - 10) : 0;
+
+    const scatterLegend = document.getElementById('scatter-legend');
+    if (scatterLegend) {
+      scatterLegend.innerHTML = scatterPoints.map(p =>
+        '<span class="chan"><i style="background:' + p.color + '"></i>' + p.name + '</span>').join('');
+    }
 
     // Quiet quadrant guides at the portfolio averages -- no extra labels beyond the four corners.
     const quadrants = {
@@ -107,7 +139,7 @@
     new Chart(document.getElementById('scatterChart'), {
       type: 'scatter',
       plugins: [quadrants],
-      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: UN.brand, pointRadius: 6, pointHoverRadius: 9 }] },
+      data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: (c) => c.raw ? c.raw.color : UN.brand, pointRadius: 6, pointHoverRadius: 9 }] },
       options: {
         onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
         onClick: (e, els) => { if (els.length) location.href = PROPERTY_BOOKINGS.replace('__ID__', encodeURIComponent(scatterPoints[els[0].index].id)); },
@@ -117,7 +149,7 @@
         },
         scales: {
           x: { title: { display: true, text: 'ADR' }, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: moneyShort } },
-          y: { title: { display: true, text: 'Occupancy' }, beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort } },
+          y: { title: { display: true, text: 'Occupancy' }, min: minY, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort } },
         },
       },
     });

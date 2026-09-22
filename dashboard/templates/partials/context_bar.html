@@ -6,7 +6,10 @@
     </button>
     <div class="context-pop" x-show="open === 'period'" @click.outside="open = null" x-cloak>
       {% for s in ctx.shortcuts if s.key != 'custom' %}
-        <a href="?{{ {'from': s.params['from'], 'to': s.params['to'], 'property': ctx.property_id or 'all', 'compare': ctx.compare}|urlencode }}"
+        {# Year to date defaults to a year-over-year comparison -- "prior
+           period" would mean the months right before January, which isn't
+           what "how's this year going vs last year" means. #}
+        <a href="?{{ {'from': s.params['from'], 'to': s.params['to'], 'property': ctx.property_id or 'all', 'compare': ('previous_year' if s.key == 'ytd' and ctx.choice != 'ytd' else ctx.compare)}|urlencode }}"
            class="context-option {{ 'sel' if s.key == ctx.choice else '' }}">{{ s.label }}</a>
       {% endfor %}
       <form method="get" style="padding:8px 10px; border-top:1px solid var(--line); margin-top:4px; display:flex; flex-direction:column; gap:6px">

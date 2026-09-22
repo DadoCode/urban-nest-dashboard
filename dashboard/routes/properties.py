@@ -42,18 +42,21 @@ def index():
     for p in flats:
         snap = kpis.kpi_snapshot(conn, p["id"], start, end)
         kind, label = health_state(health_for(conn, p["id"], start, end), period_word)
+        fee = p["management_fee_pct"]
         rows.append({
             "id": p["id"], "name": p["name"], "active": p["active"],
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"], "adr": snap["adr"], "revpar": snap["revpar"],
             "health_kind": kind, "health_label": label,
+            "managed": bool(fee), "fee": fee, "your_income": kpis.business_income(conn, p["id"], start, end),
         })
     rows.sort(key=(lambda r: r["name"].lower()) if sort == "name" else (lambda r: r[sort]), reverse=(sort != "name"))
+    total_your_income = sum(r["your_income"] for r in rows)
 
     return render_template(
         "properties.html", active="properties", all_properties=get_properties(conn), active_property=None,
         rows=rows, q=q, status=status, sort=sort, current_month=ctx["display"], total_count=len(rows),
-        context_bar=True, ctx=ctx, hide_property=True,
+        context_bar=True, ctx=ctx, hide_property=True, total_your_income=total_your_income,
     )
 
 
@@ -270,10 +273,12 @@ def settings_tab(property_id):
         flash(f"We couldn't find a property called '{property_id}'. Pick one from the Properties list.", "error")
         return redirect(url_for("properties.index"))
 
+    start, end = _range(ctx)
     resp = make_response(render_template(
         "property/settings.html", all_properties=get_properties(conn),
         **_ws(ctx, prop, "settings", is_overhead=is_overhead),
         checklist=_checklist(conn, property_id, is_overhead, ctx["end_year"], ctx["end_month"]),
+        fee_pct=prop["management_fee_pct"], your_income=None if is_overhead else kpis.business_income(conn, property_id, start, end),
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
@@ -300,6 +305,31 @@ def add():
     conn.commit()
     flash(f"\u2713 Added {name}. Upload its first document or add an expense to start building its figures.", "success")
     return redirect(url_for("properties.detail", property_id=slug))
+
+
+@bp.route("/properties/<property_id>/ownership", methods=["POST"])
+def save_ownership(property_id):
+    conn = db.get_conn()
+    prop = get_property(conn, property_id)
+    if not prop or prop["type"] == "overhead":
+        flash("That property doesn't exist.", "error")
+        return redirect(url_for("properties.index"))
+    kind = request.form.get("kind", "owned")
+    fee = None
+    if kind == "managed":
+        raw = (request.form.get("fee") or "").strip()
+        try:
+            fee = max(0.0, min(100.0, float(raw)))
+        except ValueError:
+            flash("Enter the management fee as a percentage, for example 15.", "error")
+            return redirect(url_for("properties.settings_tab", property_id=property_id))
+    conn.execute("UPDATE properties SET management_fee_pct=? WHERE id=?", (fee, property_id))
+    conn.commit()
+    if fee:
+        flash(f"\u2713 {prop['name']} is set as managed -- this business earns {fee:g}% of its revenue.", "success")
+    else:
+        flash(f"\u2713 {prop['name']} is set as fully owned -- this business earns its full net profit.", "success")
+    return redirect(url_for("properties.settings_tab", property_id=property_id))
 
 
 @bp.route("/property/<property_id>/sync_calendar", methods=["POST"])

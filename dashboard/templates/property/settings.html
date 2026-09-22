@@ -14,6 +14,27 @@
   {% endcall %}
 
   {% if not is_overhead %}
+  {% call section("Ownership", "What this business actually earns from " ~ prop.name) %}
+  <div class="card">
+    <p class="note" style="margin-top:0">Most flats are run under a management agreement: this business keeps only a percentage of revenue and the rest belongs to the flat's owner. Set that here so "your income" is calculated correctly on Overview and Properties.</p>
+    <form method="post" action="{{ url_for('properties.save_ownership', property_id=prop.id) }}" x-data="{ kind: '{{ 'managed' if fee_pct else 'owned' }}' }">
+      <div style="display:flex; gap:var(--s5); margin-bottom:var(--s3)">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="owned" x-model="kind" style="width:auto"> Fully owned</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="managed" x-model="kind" style="width:auto"> Managed for an owner</label>
+      </div>
+      <div x-show="kind === 'managed'" x-cloak style="display:flex; align-items:center; gap:var(--s2); margin-bottom:var(--s3)">
+        <span class="note">This business earns</span>
+        <input type="number" name="fee" min="0" max="100" step="0.1" value="{{ '%g'|format(fee_pct) if fee_pct else '' }}" style="width:80px">
+        <span class="note">% of {{ prop.name }}'s revenue; the rest belongs to the owner.</span>
+      </div>
+      <button type="submit" class="secondary">Save</button>
+    </form>
+    {% if your_income is not none %}
+      <p class="note" style="margin-top:var(--s3)">{{ ctx.display }}: this business earned {{ your_income|money }} from {{ prop.name }}{% if fee_pct %} ({{ '%g'|format(fee_pct) }}% of its revenue){% endif %}.</p>
+    {% endif %}
+  </div>
+  {% endcall %}
+
   {% call section("Booking calendar", "Optional") %}
   <div class="card">
     <p class="note" style="margin-top:0">Paste this flat's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>

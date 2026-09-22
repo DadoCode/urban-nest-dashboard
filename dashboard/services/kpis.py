@@ -206,6 +206,28 @@ def revpar(conn, property_id, start, end):
     return accommodation_revenue(conn, property_id, start, end) / avail if avail else 0.0
 
 
+def business_income(conn, property_id, start, end):
+    """What this business actually earns for the period -- not the same as
+    net_profit(). Most flats are run under a management agreement: the
+    business only keeps a percentage of revenue (properties.management_fee_pct)
+    and the rest belongs to the flat's owner. For a fully-owned flat
+    (no fee set), the business keeps the whole net profit. Portfolio-wide
+    (property_id=None) sums this per flat rather than netting on the total,
+    since owned and managed flats are computed differently."""
+    if property_id:
+        row = conn.execute("SELECT management_fee_pct, type FROM properties WHERE id=?", (property_id,)).fetchone()
+        if not row or row["type"] == "overhead":
+            return 0.0
+        fee = row["management_fee_pct"]
+        if fee:
+            return revenue(conn, property_id, start, end) * fee / 100
+        return net_profit(conn, property_id, start, end)
+    total = 0.0
+    for p in conn.execute("SELECT id FROM properties WHERE type='flat'"):
+        total += business_income(conn, p["id"], start, end)
+    return total
+
+
 def kpi_snapshot(conn, property_id, start, end):
     rev = revenue(conn, property_id, start, end)
     cost = costs(conn, property_id, start, end)

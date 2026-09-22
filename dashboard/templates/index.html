@@ -26,6 +26,27 @@
     {% endfor %}
   </div>
 
+  {% call section("Your business income", "What actually reaches you, after management fees on the flats you don't own outright") %}
+    <div class="card income-card">
+      <div class="income-main">
+        <div class="value">{{ business.current|money }}</div>
+        {{ delta(business.delta, 'vs prior period') }}
+      </div>
+      {% if business.rows %}
+        <div class="income-rows">
+          {% for r in business.rows[:6] %}
+            <a class="income-row" href="{{ cx('properties.detail', property_id=r.id) }}">
+              <span class="name">{{ r.name }}</span>
+              <span class="tag">{% if r.managed %}{{ '%g'|format(r.fee) }}% of {{ r.revenue|money }}{% else %}Owned{% endif %}</span>
+              <span class="amt">{{ r.income|money }}</span>
+            </a>
+          {% endfor %}
+        </div>
+        {% if business.rows|length > 6 %}<a class="note" href="{{ xurl(ctx_params, 'properties.index') }}">See all {{ business.rows|length }} properties →</a>{% endif %}
+      {% endif %}
+    </div>
+  {% endcall %}
+
   {% call section("Portfolio performance", "Click a month to view it · click a costs bar to see its transactions") %}
     <div class="card">
       <div class="chart-tools">
@@ -148,6 +169,26 @@
     {% endcall %}
   </div>
 
+  {% if yoy_by_property %}
+    {% call section("Year on year", "By property, for " ~ ctx.display) %}
+      <div class="card flush">
+        <table>
+          <thead><tr><th>Property</th><th class="num">This year</th><th class="num">Same period last year</th><th class="num">Change</th></tr></thead>
+          <tbody>
+            {% for row in yoy_by_property %}
+              <tr>
+                <td><a href="{{ cx('properties.detail', property_id=row.id) }}">{{ row.name }}</a></td>
+                <td class="num">{{ row.this_year|money }}</td>
+                <td class="num">{{ row.last_year|money }}</td>
+                <td class="num">{% if row.delta_pct is not none %}<span class="delta {{ 'up' if row.delta_pct > 0 else 'down' }}" style="display:inline"><span class="arrow">{{ '↑' if row.delta_pct > 0 else '↓' }}</span>{{ '%.1f'|format(row.delta_pct|abs) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endcall %}
+  {% endif %}
+
   <script>
     const S = {{ series_json|safe }};
     const OCC = {{ occ_props_json|safe }};
@@ -167,7 +208,30 @@
       return all.filter(i => (!f || S.months[i] >= f) && (!t || S.months[i] <= t));
     }
 
+    // Draws the exact £ value above each visible Revenue bar -- "actual number
+    // per month", not just an axis tick -- skipped once bars get too narrow
+    // to keep it legible (short ranges only).
+    const revenueLabels = {
+      id: 'revenueLabels',
+      afterDatasetsDraw(chart) {
+        const meta = chart.getDatasetMeta(0);
+        if (!chart.isDatasetVisible(0) || meta.data.length > 14) return;
+        const { ctx } = chart;
+        ctx.save();
+        ctx.font = '600 11px Inter, sans-serif';
+        ctx.fillStyle = '#46544e';
+        ctx.textAlign = 'center';
+        meta.data.forEach((bar, i) => {
+          const v = chart.data.datasets[0].data[i];
+          if (!v) return;
+          ctx.fillText(moneyFull(v), bar.x, bar.y - 6);
+        });
+        ctx.restore();
+      },
+    };
+
     const main = new Chart(document.getElementById('revenueChart'), {
+      plugins: [revenueLabels],
       data: {
         labels: [],
         datasets: [
