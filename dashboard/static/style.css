@@ -341,6 +341,25 @@ button.pill.neutral { background: var(--neutral-dim); color: var(--ink-soft); }
 }
 .skeleton-line { height: 12px; margin: var(--s3) 0; }
 
+/* ---------- upload progress overlay ---------- */
+
+.upload-overlay {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  background: rgba(20, 32, 28, 0.35); opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
+}
+.upload-overlay.open { opacity: 1; pointer-events: auto; }
+.upload-overlay-box {
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(20, 32, 28, 0.18); padding: var(--s5) var(--s6); min-width: 260px; max-width: 320px; text-align: center;
+}
+@keyframes upload-spin { to { transform: rotate(360deg); } }
+.upload-spinner {
+  width: 26px; height: 26px; margin: 0 auto var(--s3); border-radius: 50%;
+  border: 3px solid var(--line); border-top-color: var(--brand); animation: upload-spin 0.8s linear infinite;
+}
+.upload-overlay-stage { font-weight: 600; font-size: var(--fs-body); }
+.upload-overlay-note { color: var(--muted); font-size: var(--fs-table); margin-top: 4px; }
+
 /* ---------- flash ---------- */
 
 .flash {

@@ -82,6 +82,14 @@
   <div id="drawer-backdrop" class="drawer-backdrop" onclick="closeDrawer()"></div>
   <div id="drawer" class="drawer"></div>
 
+  <div id="upload-overlay" class="upload-overlay">
+    <div class="upload-overlay-box">
+      <div class="upload-spinner"></div>
+      <div id="upload-overlay-stage" class="upload-overlay-stage">Uploading…</div>
+      <div class="upload-overlay-note">This can take a moment for larger files or photos — don't close this tab.</div>
+    </div>
+  </div>
+
   <dialog id="add-apartment-dialog">
     <form method="post" action="{{ url_for('properties.add') }}">
       <h2>Add a property</h2>

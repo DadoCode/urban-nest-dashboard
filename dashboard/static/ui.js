@@ -12,6 +12,24 @@
   document.addEventListener('DOMContentLoaded', () => lockForms(document));
   document.addEventListener('htmx:afterSwap', (e) => lockForms(e.target));
 
+  /* ---------- upload progress overlay: reassurance during the real, synchronous extraction wait ---------- */
+  (function () {
+    const overlay = document.getElementById('upload-overlay');
+    const stageEl = document.getElementById('upload-overlay-stage');
+    if (!overlay || !stageEl) return;
+    const stages = ['Uploading…', 'Reading the document…', 'Extracting line items…', 'Checking for duplicates…', 'Almost done…'];
+    document.querySelectorAll('form.upload-form').forEach(form => {
+      form.addEventListener('submit', (e) => {
+        if (e.defaultPrevented || !form.checkValidity()) return;
+        overlay.classList.add('open');
+        stageEl.textContent = stages[0];
+        let i = 0;
+        setInterval(() => { i = Math.min(i + 1, stages.length - 1); stageEl.textContent = stages[i]; }, 1400);
+        form.querySelectorAll('button[type="submit"]').forEach(b => { b.disabled = true; });
+      });
+    });
+  })();
+
   /* ---------- navigation progress ---------- */
   const bar = document.getElementById('navbar');
   function start() { if (!bar) return; bar.style.opacity = 1; bar.style.width = '70%'; }
