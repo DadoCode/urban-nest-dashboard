@@ -91,11 +91,16 @@ def resolve_context(conn, args):
             fsy, fsm, fey, fem = sy, sm, ey, em
         return {"from": f"{fsy}-{fsm:02d}-01", "to": f"{fey}-{fem:02d}-01"}
 
-    is_latest = (sy, sm, ey, em) == (cy, cm, cy, cm)
-    latest = {"from": f"{cy}-{cm:02d}-01", "to": f"{cy}-{cm:02d}-01",
-              "property": property_id or "all", "compare": compare}
+    # "Latest" means the standard default view: current month, every
+    # property, the default comparison -- not just the right dates. A
+    # property workspace overrides is_latest itself in request_context(),
+    # since "property_id is None" isn't a meaningful idea there (it's
+    # always fixed to that one property by the page, not by a choice).
+    period_is_latest = (sy, sm, ey, em) == (cy, cm, cy, cm)
+    is_latest = period_is_latest and property_id is None and compare == "previous_period"
+    latest = {"from": f"{cy}-{cm:02d}-01", "to": f"{cy}-{cm:02d}-01", "property": "all", "compare": "previous_period"}
     return {
-        "is_latest": is_latest, "latest_params": latest,
+        "is_latest": is_latest, "period_is_latest": period_is_latest, "latest_params": latest,
         "choice": choice, "start_year": sy, "start_month": sm, "end_year": ey, "end_month": em,
         "partial": partial, "display": display,
         "from_input": f"{sy}-{sm:02d}", "to_input": f"{ey}-{em:02d}",
@@ -130,6 +135,9 @@ def request_context(conn, fixed_property=None):
     if fixed_property:
         ctx["property_id"] = fixed_property
         ctx["fixed_property"] = True
+        # The property is fixed by the page, not a choice -- "latest" here
+        # only means the latest month with the default comparison.
+        ctx["is_latest"] = ctx["period_is_latest"] and ctx["compare"] == "previous_period"
     return ctx
 
 

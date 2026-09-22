@@ -3,6 +3,6 @@
 {% block title %}Bookings — Urban Nest Estates{% endblock %}
 {% block content %}
   {{ page_head("Bookings", "What's been booked, what's coming, and how occupancy is trending.") }}
-  {{ tabs([('overview', 'Overview', url_for('bookings.index') ~ nav_qs), ('calendar', 'Calendar', url_for('bookings.calendar_tab')), ('performance', 'Performance', url_for('bookings.performance') ~ nav_qs)], active_bookings_tab) }}
+  {{ tabs([('overview', 'Overview', url_for('bookings.index') ~ nav_qs), ('calendar', 'Calendar', url_for('bookings.calendar_tab') ~ nav_qs), ('performance', 'Performance', url_for('bookings.performance') ~ nav_qs)], active_bookings_tab) }}
   {% block tab_content %}{% endblock %}
 {% endblock %}

@@ -31,7 +31,7 @@
         {% if active == 'properties' and recently_viewed %}
           <div class="section-label" style="padding:6px 10px 2px 31px">Recently viewed</div>
           {% for p in recently_viewed %}
-            <a href="{{ url_for('properties.detail', property_id=p.id) }}" class="nav-link recent {{ 'active' if active_property == p.id else '' }}">{{ p.name }}</a>
+            <a href="{{ url_for('properties.detail', property_id=p.id) }}{{ nav_qs }}" class="nav-link recent {{ 'active' if active_property == p.id else '' }}">{{ p.name }}</a>
           {% endfor %}
         {% endif %}
         <a href="{{ url_for('bookings.index') }}{{ nav_qs }}" class="nav-link {{ 'active' if active == 'bookings' else '' }}"><span class="dot"></span>Bookings</a>

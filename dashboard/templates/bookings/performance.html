@@ -5,18 +5,17 @@
     <div class="card"><div class="chart-box" style="height:200px"><canvas id="portfolioChart"></canvas></div></div>
   {% endcall %}
 
-  <div class="grid-2">
-    {% call section("By flat", current_month) %}
-      <div class="card"><div class="chart-box" style="height:300px"><canvas id="rankedChart"></canvas></div></div>
-    {% endcall %}
-    {% call section("Occupancy vs ADR", current_month) %}
-      <div class="card">
-        <div class="chart-box" style="height:300px"><canvas id="scatterChart"></canvas></div>
-      </div>
-    {% endcall %}
-  </div>
-  <p class="note" style="margin-top:var(--s2)">Each dot is one flat; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
-  <div id="scatter-legend" class="chan-legend" style="margin-top:calc(var(--s2) * -1)"></div>
+  {% call section("By flat", current_month) %}
+    <div class="card"><div class="chart-box" style="height:{{ [rows|length * 34 + 30, 120]|max }}px"><canvas id="rankedChart"></canvas></div></div>
+  {% endcall %}
+
+  {% call section("Occupancy vs ADR", current_month) %}
+    <div class="card">
+      <div class="chart-box" style="height:340px"><canvas id="scatterChart"></canvas></div>
+      <p class="note" style="margin:var(--s3) 0 0">Each dot is one flat; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
+      <div id="scatter-legend" class="chan-legend" style="margin-top:var(--s2)"></div>
+    </div>
+  {% endcall %}
 
   {% call section("Occupancy heatmap", "Last 12 months, % of nights booked") %}
     <div class="card flush" style="overflow-x:auto">
@@ -141,6 +140,7 @@
       plugins: [quadrants],
       data: { datasets: [{ label: 'Flats', data: scatterPoints, backgroundColor: (c) => c.raw ? c.raw.color : UN.brand, pointRadius: 6, pointHoverRadius: 9 }] },
       options: {
+        layout: { padding: { top: 18, right: 14, bottom: 4, left: 4 } },
         onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
         onClick: (e, els) => { if (els.length) location.href = PROPERTY_BOOKINGS.replace('__ID__', encodeURIComponent(scatterPoints[els[0].index].id)); },
         plugins: {

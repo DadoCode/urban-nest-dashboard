@@ -54,5 +54,5 @@
     </div>
   </div>
   {% endif %}
-  {% if not ctx.is_latest %}<a class="ctx-reset" href="?{{ ctx.latest_params|urlencode }}">Reset to latest month</a>{% endif %}
+  {% if not ctx.is_latest %}<a class="ctx-reset" href="?{{ ctx.latest_params|urlencode }}" title="Back to the current month, all properties, default comparison">Reset to latest</a>{% endif %}
 </div>

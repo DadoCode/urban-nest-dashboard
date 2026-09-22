@@ -4,10 +4,12 @@
 {% block content %}
   <p class="note" style="margin:0 0 var(--s2)"><a href="{{ url_for('reports.index') }}">&larr; All reports</a></p>
   {% call page_head(report.title, report.subtitle) %}
-    <a class="btn secondary" href="{{ url_for('reports.export', format='pdf', **params) }}">Export PDF</a>
-    <a class="btn secondary" href="{{ url_for('reports.export', format='xlsx', **params) }}">Export Excel</a>
-    <a class="btn secondary" href="{{ url_for('reports.export', format='csv', **params) }}">Export CSV</a>
+    <span class="note" style="margin-right:2px">Download:</span>
+    <a class="btn" href="{{ url_for('reports.export', format='pdf', **params) }}">PDF</a>
+    <a class="btn secondary" href="{{ url_for('reports.export', format='xlsx', **params) }}">Excel</a>
+    <a class="btn secondary" href="{{ url_for('reports.export', format='csv', **params) }}">CSV</a>
   {% endcall %}
+  <p class="note" style="margin-top:calc(var(--s5) * -1); margin-bottom:var(--s4)">You're viewing a preview -- nothing has downloaded. Use the buttons above to save it.</p>
 
   {% for s in sections %}
     {% call section(s.heading) %}

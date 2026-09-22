@@ -106,7 +106,7 @@
   {% endcall %}
 
   <div class="grid-2">
-    {% call section("Expense breakdown") %}
+    {% call section("Top expenses", (expense_total.amt|money ~ " total") if expense_rows else None) %}
       <div class="card flush">
         {% if expense_rows %}
           <table>
@@ -121,6 +121,9 @@
               {% endfor %}
             </tbody>
           </table>
+          <div style="padding:var(--s3) var(--s4); border-top:1px solid var(--line)">
+            <a class="btn secondary" href="{{ xurl(ctx_params, 'expenses.index') }}#ledger">{% if expense_more %}+{{ expense_more }} more categor{{ 'y' if expense_more == 1 else 'ies' }} · {% endif %}View all expenses →</a>
+          </div>
         {% else %}
           {{ empty_state("No expenses in this period", "Costs appear once invoices or statements are confirmed.", "Upload documents", url_for('documents.index')) }}
         {% endif %}

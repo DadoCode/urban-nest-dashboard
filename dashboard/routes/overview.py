@@ -116,12 +116,19 @@ def index():
 
     expense_scope = "AND property_id=?" if ctx["property_id"] else ""
     expense_params = (ctx["property_id"],) if ctx["property_id"] else ()
+    # Overview answers "what happened" -- only the biggest few categories,
+    # with a link into Expenses (which answers "why") for the rest.
     expense_categories = conn.execute(
         f"""SELECT category, SUM(amount) amt FROM transactions
            WHERE direction='expense' AND category != 'reconciliation' AND date>=? AND date<? {expense_scope}
-           GROUP BY category ORDER BY amt DESC LIMIT 8""",
+           GROUP BY category ORDER BY amt DESC LIMIT 5""",
         (start, end, *expense_params),
     ).fetchall()
+    expense_total = conn.execute(
+        f"""SELECT COUNT(DISTINCT category) n, COALESCE(SUM(amount),0) amt FROM transactions
+           WHERE direction='expense' AND category != 'reconciliation' AND date>=? AND date<? {expense_scope}""",
+        (start, end, *expense_params),
+    ).fetchone()
     pstart, pend = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
     prev_by_category = {r["category"]: r["amt"] for r in conn.execute(
         f"""SELECT category, SUM(amount) amt FROM transactions
@@ -130,6 +137,7 @@ def index():
     ).fetchall()}
     expense_rows = [{"category": r["category"], "amount": r["amt"],
                       "delta": pct_delta(r["amt"], prev_by_category.get(r["category"]))} for r in expense_categories]
+    expense_more = max(0, (expense_total["n"] or 0) - len(expense_rows))
 
     insight_scope = [p for p in flats if p["id"] == ctx["property_id"]] if ctx["property_id"] else flats
     insights = compute_insights(conn, insight_scope, ctx)
@@ -176,6 +184,7 @@ def index():
         active_property=ctx["property_id"], viewing=viewing, overhead_property=overhead_property,
         primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, ctx=ctx,
         context_bar=True, prop_rows=prop_rows, yoy=yoy, yoy_by_property=yoy_by_property, expense_rows=expense_rows,
+        expense_total=expense_total, expense_more=expense_more,
         insights=insights, completeness=completeness, doc_type_labels=DOC_TYPE_LABELS,
         ctx_params=range_params(ctx), attention_groups=groups, attention_total=len(insights),
         series_json=json.dumps({
