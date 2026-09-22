@@ -20,11 +20,14 @@ _fails = {}   # client -> (count, first_failure_ts)
 
 
 def passwords():
-    return {"owner": env.get("UN_OWNER_PASSWORD"), "viewer": env.get("UN_VIEWER_PASSWORD")}
+    """(role, password) pairs. A second full-access password lets a partner
+    have their own login that can be revoked without touching the owner's."""
+    return [("owner", env.get("UN_OWNER_PASSWORD")), ("owner", env.get("UN_OWNER2_PASSWORD")),
+            ("viewer", env.get("UN_VIEWER_PASSWORD"))]
 
 
 def enabled():
-    return bool(passwords()["owner"])
+    return bool(env.get("UN_OWNER_PASSWORD"))
 
 
 def _client():
@@ -85,7 +88,7 @@ def login():
         else:
             given = (request.form.get("password") or "").encode()
             role = None
-            for name, pw in passwords().items():
+            for name, pw in passwords():
                 if pw and hmac.compare_digest(given, pw.encode()):
                     role = name
                     break
