@@ -47,10 +47,15 @@
     </div>
   {% endcall %}
 
-  {% call section("Occupancy by property", "Each line only covers months that flat actually operated in") %}
-    <div class="card">
-      <div class="chart-box" style="height:260px"><canvas id="occChart"></canvas></div>
-      <div id="occ-legend" class="chan-legend" style="margin-top:var(--s2)"></div>
+  {% call section("Occupancy by property", "Last 12 months · click a flat for its full performance") %}
+    <div class="spark-grid">
+      {% for pid, p in occ_props.items() %}
+        <a class="spark-card" href="{{ cx('properties.performance_tab', property_id=pid) }}">
+          <div class="spark-name">{{ p.name }}</div>
+          <div class="spark-value" id="spark-value-{{ pid }}">—</div>
+          <div class="spark-canvas"><canvas id="spark-{{ pid }}"></canvas></div>
+        </a>
+      {% endfor %}
     </div>
   {% endcall %}
 
@@ -113,7 +118,6 @@
     // given flat reads the same colour everywhere in the app.
     const PROP_COLORS = ['#3f6ea3', '#c17a3d', '#6c5b9e', '#8c5a4a', '#b3568f', '#6b6b6b', '#9a9331', '#2f8f96', '#0e9f6e', '#4a5a8a'];
     const occIds = Object.keys(OCC);
-    const occShown = occIds.map(() => true);
 
     function indices() {
       const n = S.months.length, all = S.months.map((_, i) => i);
@@ -167,45 +171,28 @@
       },
     });
 
-    const occ = new Chart(document.getElementById('occChart'), {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: occIds.map((pid, k) => ({
-          label: OCC[pid].name, data: [], borderColor: PROP_COLORS[k % PROP_COLORS.length],
-          backgroundColor: 'transparent', fill: false, tension: 0.3, borderWidth: 1.5, spanGaps: false,
-        })),
-      },
-      options: {
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${pctShort(item.parsed.y)}` } },
+    // Small multiples instead of one crowded multi-line chart: each
+    // property gets its own compact sparkline over its own last 12 months
+    // of real data -- no colour-matching a legend to ten overlapping
+    // lines, no smoothing that invents a misleading curve between two
+    // real points (tension 0, straight segments -- honest, not decorative).
+    occIds.forEach((pid, k) => {
+      const canvas = document.getElementById('spark-' + pid);
+      if (!canvas) return;
+      const months = Object.keys(OCC[pid].values).sort().slice(-12);
+      const values = months.map(m => OCC[pid].values[m]);
+      const valueEl = document.getElementById('spark-value-' + pid);
+      if (valueEl) valueEl.textContent = values.length ? pctShort(values[values.length - 1]) : '—';
+      new Chart(canvas, {
+        type: 'line',
+        data: { labels: months, datasets: [{ data: values, borderColor: PROP_COLORS[k % PROP_COLORS.length], backgroundColor: 'transparent', fill: false, tension: 0, borderWidth: 1.5, pointRadius: 0, spanGaps: false }] },
+        options: {
+          plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => monthLabel(items[0].label), label: (item) => `Occupancy: ${pctShort(item.parsed.y)}` } } },
+          scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
+          elements: { line: { capBezierPoints: false } },
         },
-        scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 5 } } }),
-      },
-    });
-
-    const occLegend = document.getElementById('occ-legend');
-    function renderOccLegend() {
-      if (!occLegend) return;
-      occLegend.innerHTML = occIds.map((pid, k) =>
-        '<button type="button" class="chan chan-toggle' + (occShown[k] ? '' : ' off') + '" data-idx="' + k + '">' +
-        '<i style="background:' + PROP_COLORS[k % PROP_COLORS.length] + '"></i>' + OCC[pid].name + '</button>').join('');
-      occLegend.querySelectorAll('[data-idx]').forEach(btn => {
-        const k = +btn.dataset.idx;
-        btn.addEventListener('click', () => { occShown[k] = !occShown[k]; renderOccLegend(); apply(); });
-        // Hover a property -> emphasise its line, mute the rest.
-        btn.addEventListener('mouseenter', () => {
-          occ.data.datasets.forEach((d, j) => { d.borderColor = j === k ? PROP_COLORS[j % PROP_COLORS.length] : 'rgba(20,32,28,0.10)'; d.borderWidth = j === k ? 2.5 : 1.5; });
-          occ.update('none');
-        });
-        btn.addEventListener('mouseleave', () => {
-          occ.data.datasets.forEach((d, j) => { d.borderColor = PROP_COLORS[j % PROP_COLORS.length]; d.borderWidth = 1.5; });
-          occ.update('none');
-        });
       });
-    }
-    renderOccLegend();
+    });
 
     function apply() {
       const ix = indices(), labels = ix.map(i => S.months[i]);
@@ -215,13 +202,6 @@
       main.data.datasets[2].data = ix.map(i => S.profit[i]);
       shown.forEach((on, k) => main.setDatasetVisibility(k, on));
       main.update();
-
-      occ.data.labels = labels;
-      occIds.forEach((pid, k) => {
-        occ.data.datasets[k].data = labels.map(m => (OCC[pid].values[m] === undefined ? null : OCC[pid].values[m]));
-        occ.setDatasetVisibility(k, occShown[k]);
-      });
-      occ.update();
     }
 
     document.querySelectorAll('#series-seg button').forEach(b => b.addEventListener('click', () => {

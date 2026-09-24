@@ -124,6 +124,15 @@ main { max-width: 1160px; margin: 0 auto; padding: var(--s6) var(--s6) 64px; }
 .grid-2 > * { min-width: 0; }
 @media (max-width: 860px) { .grid-2 { grid-template-columns: 1fr; } }
 
+/* Small multiples: one compact trend per property instead of one crowded
+   multi-line chart -- reads at a glance, never a spaghetti chart. */
+.spark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--s3); }
+.spark-card { display: block; padding: var(--s3) var(--s4); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); text-decoration: none; color: inherit; }
+.spark-card:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.spark-name { font-size: var(--fs-small); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spark-value { font-size: var(--fs-kpi-2); font-weight: 600; margin-top: 2px; }
+.spark-canvas { height: 40px; margin-top: var(--s2); }
+
 /* Cards are reserved for content that is genuinely a unit: a chart, a table. */
 .card {
   background: var(--surface);

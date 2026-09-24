@@ -139,6 +139,6 @@ def index():
             "margin": [round(s["margin"] * 100, 1) for s in portfolio_series],
             "occupancy": [round(s["occupancy"] * 100, 1) for s in portfolio_series],
         }),
-        occ_props_json=json.dumps(occupancy_by_property),
+        occ_props=occupancy_by_property, occ_props_json=json.dumps(occupancy_by_property),
         anchor_ym=anchor_ym,
     )
