@@ -572,6 +572,10 @@ tr.focus-row td { background: rgba(183, 121, 31, 0.16); }
 /* ---------- channels ---------- */
 
 .chan { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+button.chan-toggle { background: none; border: none; padding: 0; height: auto; font: inherit; color: var(--muted); cursor: pointer; }
+button.chan-toggle:hover { color: var(--ink); }
+button.chan-toggle.off { opacity: 0.4; }
+button.chan-toggle.off i { background: var(--muted) !important; }
 .chan i, .cal-dots i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .chan-airbnb { background: var(--chan-airbnb); }
 .chan-booking { background: var(--chan-booking); }

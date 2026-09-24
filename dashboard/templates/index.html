@@ -183,12 +183,16 @@
     const shown = [true, true, true];
     let range = '12', occSel = [];
     const occColors = ['#3f6489', '#58645f', '#b7791f', '#7d6aa8'];
-    // Same restrained per-property palette used on Bookings > Performance's
-    // scatter chart -- one stable colour per property, reused here so a
-    // given flat reads the same colour everywhere in the app.
-    const REV_COLORS = ['#0e9f6e', '#3f6489', '#b7791f', '#a34e7c', '#58645f', '#4c7ba0', '#8a6d3b', '#6f8f5e', '#9a5a5a', '#5a7a8a'];
+    // A wider-hue-spread palette than the scatter chart's, chosen so
+    // adjacent stacked segments stay tellable apart even as thin slivers --
+    // picks ten clearly different hues rather than shades of the same
+    // few colours, and deliberately avoids the app's semantic colours
+    // (brand/positive green, warning amber, negative red) so a property's
+    // colour is never mistaken for a status.
+    const REV_COLORS = ['#3f6ea3', '#c17a3d', '#6c5b9e', '#8c5a4a', '#b3568f', '#6b6b6b', '#9a9331', '#2f8f96', '#0e9f6e', '#4a5a8a'];
     const revIds = Object.keys(REV);
     const N_REV = revIds.length;
+    const revShown = revIds.map(() => true);
 
     function indices() {
       const n = S.months.length, all = S.months.map((_, i) => i);
@@ -214,7 +218,7 @@
         ctx.fillStyle = '#46544e';
         ctx.textAlign = 'center';
         chart.data.labels.forEach((_, i) => {
-          const total = chart.data.datasets.slice(0, N_REV).reduce((sum, d) => sum + (d.data[i] || 0), 0);
+          const total = chart.data.datasets.slice(0, N_REV).reduce((sum, d, k) => sum + (revShown[k] ? (d.data[i] || 0) : 0), 0);
           if (!total) return;
           ctx.fillText(moneyFull(total), x.getPixelForValue(i), y.getPixelForValue(total) - 6);
         });
@@ -229,7 +233,8 @@
         datasets: [
           ...revIds.map((pid, k) => ({
             type: 'bar', label: REV[pid].name, data: [], stack: 'revenue',
-            backgroundColor: REV_COLORS[k % REV_COLORS.length], order: 2,
+            backgroundColor: REV_COLORS[k % REV_COLORS.length],
+            borderColor: '#fff', borderWidth: 1, order: 2,
           })),
           { type: 'bar', label: 'Costs', data: [], stack: 'costs', backgroundColor: UN.costs, order: 2 },
           { type: 'line', label: 'Profit', data: [], stack: 'profit', backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
@@ -264,11 +269,23 @@
       },
     });
 
+    // Click a property to isolate/hide it -- the direct fix for "which
+    // colour is which": rather than only matching by eye, you can toggle
+    // one property at a time and watch its slice disappear from every bar.
     const revenueLegend = document.getElementById('revenue-legend');
-    if (revenueLegend) {
+    function renderRevenueLegend() {
+      if (!revenueLegend) return;
       revenueLegend.innerHTML = revIds.map((pid, k) =>
-        '<span class="chan"><i style="background:' + REV_COLORS[k % REV_COLORS.length] + '"></i>' + REV[pid].name + '</span>').join('');
+        '<button type="button" class="chan chan-toggle' + (revShown[k] ? '' : ' off') + '" data-idx="' + k + '">' +
+        '<i style="background:' + REV_COLORS[k % REV_COLORS.length] + '"></i>' + REV[pid].name + '</button>').join('');
+      revenueLegend.querySelectorAll('[data-idx]').forEach(btn => btn.addEventListener('click', () => {
+        const k = +btn.dataset.idx;
+        revShown[k] = !revShown[k];
+        renderRevenueLegend();
+        apply();
+      }));
     }
+    renderRevenueLegend();
 
     const occ = new Chart(document.getElementById('occChart'), {
       type: 'line',
@@ -287,7 +304,7 @@
       });
       main.data.datasets[N_REV].data = ix.map(i => S.costs[i]);
       main.data.datasets[N_REV + 1].data = ix.map(i => S.profit[i]);
-      for (let k = 0; k < N_REV; k++) main.setDatasetVisibility(k, shown[0]);
+      for (let k = 0; k < N_REV; k++) main.setDatasetVisibility(k, shown[0] && revShown[k]);
       main.setDatasetVisibility(N_REV, shown[1]);
       main.setDatasetVisibility(N_REV + 1, shown[2]);
       main.update();
