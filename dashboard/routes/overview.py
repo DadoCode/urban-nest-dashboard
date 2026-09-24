@@ -4,10 +4,8 @@ from flask import Blueprint, render_template, request
 
 import db
 import services.kpis as kpis
-from services.common import adjusted_yoy_pairs, get_properties, pct_delta
-from services.completeness import completeness_for, DOC_TYPE_LABELS
+from services.common import get_properties, pct_delta
 from services.context import request_context, range_params
-from services.insights import compute_insights
 
 bp = Blueprint("overview", __name__)
 
@@ -65,7 +63,7 @@ def kpi_rows(conn, property_id, ctx):
 
     primary = [
         tile(f"Revenue — {period_label}", "revenue", lambda v: f"£{v:,.0f}"),
-        tile("Net profit", "net_profit", lambda v: f"£{v:,.0f}"),
+        tile("Property Profit", "net_profit", lambda v: f"£{v:,.0f}"),
         tile("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%"),
         tile("RevPAR", "revpar", lambda v: f"£{v:,.0f}"),
     ]
@@ -78,22 +76,6 @@ def kpi_rows(conn, property_id, ctx):
     return primary, secondary, cur
 
 
-def _completeness_summary(conn, flats):
-    """Current-calendar-month rollup -- deliberately not tied to whatever
-    date range the context bar has selected, since "data completeness" is
-    a monthly-cadence concept regardless of what period you're analysing."""
-    year, month = kpis.current_period(conn)
-    start, end = kpis.month_bounds(year, month)
-    rows = []
-    for p in flats:
-        c = completeness_for(conn, p["id"], start, end)
-        if c:
-            rows.append({"name": p["name"], "id": p["id"], **c})
-    if not rows:
-        return None
-    overall = round(sum(r["pct"] for r in rows) / len(rows))
-    gaps = [r for r in rows if r["pct"] < 100]
-    return {"overall": overall, "rows": rows, "gaps": gaps, "month_label": None, "year": year, "month": month}
 
 
 @bp.route("/")
@@ -103,54 +85,38 @@ def index():
     flats = get_properties(conn, include_overhead=False)
     ctx = request_context(conn)
     viewing = next((p for p in nav_properties if p["id"] == ctx["property_id"]), None) if ctx["property_id"] else None
-    primary_tiles, secondary_tiles, cur = kpi_rows(conn, ctx["property_id"], ctx)
+    primary_tiles, _secondary_tiles, cur = kpi_rows(conn, ctx["property_id"], ctx)
 
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
-    prop_rows = []
+
+    # Rent-to-rent/owned and managed flats run on different economics (see
+    # services/kpis.py's adjusted_revenue/business_income) -- mixing them
+    # into one table with the same columns either misrepresents a managed
+    # flat's gross booking revenue as "Urban Nest's revenue" or shows a
+    # meaningless Margin, so they're presented separately.
+    rtr_rows, managed_rows = [], []
     for p in flats:
-        snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
-        prop_rows.append({
-            "id": p["id"], "name": p["name"],
-            "revenue": snap["revenue"], "profit": snap["net_profit"], "margin": snap["margin"],
-            "occupancy": snap["occupancy"], "adr": snap["adr"],
-        })
-    prop_rows.sort(key=lambda r: r["revenue"], reverse=True)
+        if p["management_fee_pct"]:
+            snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
+            managed_rows.append({
+                "id": p["id"], "name": p["name"], "fee": snap["net_profit"],
+                "occupancy": snap["occupancy"], "adr": snap["adr"],
+            })
+        else:
+            snap = kpis.kpi_snapshot(conn, p["id"], start, end)
+            rtr_rows.append({
+                "id": p["id"], "name": p["name"], "revenue": snap["revenue"], "costs": snap["costs"],
+                "profit": snap["net_profit"], "occupancy": snap["occupancy"], "adr": snap["adr"],
+            })
+    rtr_rows.sort(key=lambda r: r["revenue"], reverse=True)
+    managed_rows.sort(key=lambda r: r["fee"], reverse=True)
 
-    expense_scope = "AND property_id=?" if ctx["property_id"] else ""
-    expense_params = (ctx["property_id"],) if ctx["property_id"] else ()
-    # Overview answers "what happened" -- only the biggest few categories,
-    # with a link into Expenses (which answers "why") for the rest.
-    expense_categories = conn.execute(
-        f"""SELECT category, SUM(amount) amt FROM transactions
-           WHERE direction='expense' AND category != 'reconciliation' AND date>=? AND date<? {expense_scope}
-           GROUP BY category ORDER BY amt DESC LIMIT 5""",
-        (start, end, *expense_params),
-    ).fetchall()
-    expense_total = conn.execute(
-        f"""SELECT COUNT(DISTINCT category) n, COALESCE(SUM(amount),0) amt FROM transactions
-           WHERE direction='expense' AND category != 'reconciliation' AND date>=? AND date<? {expense_scope}""",
-        (start, end, *expense_params),
-    ).fetchone()
-    pstart, pend = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
-    prev_by_category = {r["category"]: r["amt"] for r in conn.execute(
-        f"""SELECT category, SUM(amount) amt FROM transactions
-           WHERE direction='expense' AND category != 'reconciliation' AND date>=? AND date<? {expense_scope} GROUP BY category""",
-        (pstart, pend, *expense_params),
-    ).fetchall()}
-    expense_rows = [{"category": r["category"], "amount": r["amt"],
-                      "delta": pct_delta(r["amt"], prev_by_category.get(r["category"]))} for r in expense_categories]
-    expense_more = max(0, (expense_total["n"] or 0) - len(expense_rows))
-
-    insight_scope = [p for p in flats if p["id"] == ctx["property_id"]] if ctx["property_id"] else flats
-    insights = compute_insights(conn, insight_scope, ctx)
-    completeness = _completeness_summary(conn, insight_scope)
-
-    # Trailing 12 months by default (brief §6), regardless of how much
-    # history exists -- a 3-year line is unreadable as the main chart.
-    # Anchored at ctx's end month, not just "whatever the last entry in
-    # monthly_series happens to be" -- a barely-started current month with
-    # one stray transaction would otherwise show up as a misleading cliff
-    # down to near-zero at the end of the line.
+    # Trailing 12 months by default, regardless of how much history exists
+    # -- a 3-year line is unreadable as the main chart. Anchored at ctx's
+    # end month, not just "whatever the last entry in monthly_series
+    # happens to be" -- a barely-started current month with one stray
+    # transaction would otherwise show up as a misleading cliff down to
+    # near-zero at the end of the line.
     anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
     portfolio_series = [s for s in kpis.adjusted_monthly_series(conn, ctx["property_id"]) if s["ym"] <= anchor_ym]
     occupancy_by_property = {
@@ -158,47 +124,13 @@ def index():
                                                   for s in kpis.monthly_series(conn, p["id"]) if s["ym"] <= anchor_ym}}
         for p in flats
     }
-    # Narrowed the same way portfolio_series is: when Overview is filtered
-    # to one property, its Revenue bar should split into just that one
-    # property (matching the already-filtered total), not the whole
-    # portfolio's properties stacked on top of a single-property total.
-    chart_properties = [p for p in flats if p["id"] == ctx["property_id"]] if ctx["property_id"] else flats
-    revenue_by_property = {
-        p["id"]: {"name": p["name"], "values": {s["ym"]: round(s["revenue"], 2)
-                                                  for s in kpis.adjusted_monthly_series(conn, p["id"]) if s["ym"] <= anchor_ym}}
-        for p in chart_properties
-    }
-    groups = []
-    for gname in ("Data", "Performance", "Costs"):
-        items = [dict(i, show=idx < 5) for idx, i in enumerate(insights) if i["group"] == gname]
-        if items:
-            groups.append({"name": gname, "entries": items, "visible": any(i["show"] for i in items)})
-    yoy = adjusted_yoy_pairs(conn, ctx["property_id"], (ctx["end_year"], ctx["end_month"]))
-    overhead_property = next((p for p in nav_properties if p["type"] == "overhead"), None)
-
-    # "Year on year" for each flat, not just the portfolio month-by-month --
-    # same [start, end) window a year earlier, one row per property.
-    yoy_by_property = None
-    if not ctx["property_id"]:
-        ly_start, ly_end = kpis.range_bounds(*kpis.same_period_last_year(
-            ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
-        yoy_by_property = []
-        for p in flats:
-            cur_rev = kpis.adjusted_revenue(conn, p["id"], start, end)
-            ly_rev = kpis.adjusted_revenue(conn, p["id"], ly_start, ly_end)
-            if cur_rev or ly_rev:
-                yoy_by_property.append({"name": p["name"], "id": p["id"], "this_year": cur_rev, "last_year": ly_rev,
-                                        "delta_pct": pct_delta(cur_rev, ly_rev, min_base=100)})
-        yoy_by_property.sort(key=lambda r: r["this_year"], reverse=True)
 
     return render_template(
         "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats),
-        active_property=ctx["property_id"], viewing=viewing, overhead_property=overhead_property,
-        primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, ctx=ctx,
-        context_bar=True, prop_rows=prop_rows, yoy=yoy, yoy_by_property=yoy_by_property, expense_rows=expense_rows,
-        expense_total=expense_total, expense_more=expense_more,
-        insights=insights, completeness=completeness, doc_type_labels=DOC_TYPE_LABELS,
-        ctx_params=range_params(ctx), attention_groups=groups, attention_total=len(insights),
+        active_property=ctx["property_id"], viewing=viewing,
+        primary_tiles=primary_tiles, ctx=ctx,
+        context_bar=True, rtr_rows=rtr_rows, managed_rows=managed_rows,
+        ctx_params=range_params(ctx),
         series_json=json.dumps({
             "months": [s["ym"] for s in portfolio_series],
             "income": [round(s["revenue"], 2) for s in portfolio_series],
@@ -208,6 +140,5 @@ def index():
             "occupancy": [round(s["occupancy"] * 100, 1) for s in portfolio_series],
         }),
         occ_props_json=json.dumps(occupancy_by_property),
-        revenue_props_json=json.dumps(revenue_by_property),
         anchor_ym=anchor_ym,
     )

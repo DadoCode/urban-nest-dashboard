@@ -41,7 +41,7 @@ def index():
         {"label": "Booked nights", "value": f"{nights:,}", "delta": pct_delta(nights, prev_nights, min_base=5) if prev else None},
         {"label": "ADR", "value": f"£{kpis.adr(conn, pid, start, end):,.0f}", "delta": None},
         {"label": "Avg stay", "value": (f"{kpis.avg_stay(conn, pid, start, end):.1f} nights" if kpis.avg_stay(conn, pid, start, end) else "—"), "delta": None},
-        {"label": "Confirmed revenue", "value": f"£{revenue:,.0f}", "delta": pct_delta(revenue, prev_rev, min_base=100) if prev else None},
+        {"label": "Confirmed booking revenue", "value": f"£{revenue:,.0f}", "delta": pct_delta(revenue, prev_rev, min_base=100) if prev else None},
     ]
 
     today = datetime.date.today()

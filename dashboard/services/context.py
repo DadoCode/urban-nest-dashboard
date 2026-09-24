@@ -20,9 +20,14 @@ import services.kpis as kpis
 COOKIE = "un_ctx"
 KEYS = ("from", "to", "property", "compare")
 
-SHORTCUTS = ["this_month", "last_month", "ytd", "last12", "custom"]
+SHORTCUTS = ["this_month", "last_month", "ytd", "last12", "accounting_period", "custom"]
 SHORTCUT_LABELS = {"this_month": "This month", "last_month": "Last month",
-                    "ytd": "Year to date", "last12": "Last 12 months", "custom": "Custom"}
+                    "ytd": "Year to date", "last12": "Last 12 months",
+                    "accounting_period": "Accounting period", "custom": "Custom"}
+# A fixed business period (not inferred from the workbook -- there's no
+# fiscal-year structure in it, this is a deliberate business definition),
+# separate from "Last 12 months" which rolls forward every month.
+ACCOUNTING_PERIOD = (2025, 8, 2026, 8)
 COMPARE_CHOICES = ["previous_period", "previous_year", "none"]
 COMPARE_LABELS = {"previous_period": "Previous period", "previous_year": "Same period last year",
                    "none": "No comparison"}
@@ -87,6 +92,8 @@ def resolve_context(conn, args):
         elif key == "last12":
             fsy, fsm = kpis.add_months(cy, cm, -11)
             fey, fem = cy, cm
+        elif key == "accounting_period":
+            fsy, fsm, fey, fem = ACCOUNTING_PERIOD
         else:  # custom -- keep whatever's currently selected
             fsy, fsm, fey, fem = sy, sm, ey, em
         return {"from": f"{fsy}-{fsm:02d}-01", "to": f"{fey}-{fem:02d}-01"}

@@ -1,39 +1,35 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, section, kpi_tile, delta, pill, empty_state %}
-{% block title %}Overview — Urban Nest Estates{% endblock %}
+{% from "_components.html" import page_head, section, kpi_tile, empty_state %}
+{% block title %}{{ ctx.display }} Overview — Urban Nest Estates{% endblock %}
 {% block content %}
-  {% call page_head("Overview", flats_count ~ " apartments" ~ (" · " ~ viewing.name if viewing else "")) %}
-    {% if overhead_property %}<a class="btn secondary" href="{{ cx('properties.detail', property_id=overhead_property.id) }}">Shared overheads</a>{% endif %}
-  {% endcall %}
+  {{ page_head(ctx.display ~ " Overview", flats_count ~ " apartments" ~ (" · " ~ viewing.name if viewing else "")) }}
+
+  {% set period_views = {'this_month': 'Month', 'ytd': 'YTD', 'accounting_period': 'Accounting Period'} %}
+  <div class="seg" style="margin-bottom:var(--s4)">
+    {% for s in ctx.shortcuts if s.key in period_views %}
+      <a class="{{ 'on' if s.key == ctx.choice or (s.key == 'this_month' and ctx.period_is_latest) else '' }}"
+         href="?{{ {'from': s.params['from'], 'to': s.params['to'], 'property': ctx.property_id or 'all', 'compare': ctx.compare}|urlencode }}">{{ period_views[s.key] }}</a>
+    {% endfor %}
+  </div>
 
   {# Only metrics whose destination genuinely explains them are links. #}
   {% set drill = {
     'revenue': [xurl(ctx_params, 'properties.index', sort='revenue'), 'See revenue by property'],
-    'net_profit': [xurl(ctx_params, 'properties.index', sort='profit'), 'See net profit by property'],
+    'net_profit': [xurl(ctx_params, 'properties.index', sort='profit'), 'See profit by property'],
     'occupancy': [xurl(ctx_params, 'bookings.performance'), 'See occupancy by property and month'],
     'revpar': [xurl(ctx_params, 'bookings.performance'), 'See occupancy and rates by property'],
-    'adr': [xurl(ctx_params, 'bookings.performance'), 'See rates against occupancy'],
-    'booked_nights': [xurl(ctx_params, 'bookings.index'), 'See bookings and channels'],
-    'avg_stay': [xurl(ctx_params, 'bookings.index'), 'See bookings and channels'],
   } %}
   <div class="tiles">
     {% for t in primary_tiles %}{% set d = drill.get(t.key) %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=d[0] if d else None, hint=d[1] if d else None) }}{% endfor %}
   </div>
-  <div class="tiles tiles-secondary">
-    {% for t in secondary_tiles %}{% set d = drill.get(t.key) %}
-      {% if d %}<a class="tile link" href="{{ d[0] }}" title="{{ d[1] }}"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div><span class="chev">›</span></a>
-      {% else %}<div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endif %}
-    {% endfor %}
-  </div>
-  <p class="note" style="margin:var(--s2) 0 0">Revenue and Net profit are what this business actually earns: full figures for a flat you own, only the management fee on one you run for an owner. ADR, RevPAR and Occupancy describe the flat itself and aren't affected.</p>
 
   {% call section("Portfolio performance", "Click a month to view it · click a costs bar to see its transactions") %}
     <div class="card">
       <div class="chart-tools">
         <div class="seg" id="series-seg">
           <button type="button" class="on" data-series="0"><span class="sw" style="background:var(--series-revenue)"></span>Revenue</button>
-          <button type="button" class="on" data-series="1"><span class="sw" style="background:var(--series-costs)"></span>Costs</button>
-          <button type="button" class="on" data-series="2"><span class="sw" style="background:var(--series-profit)"></span>Profit</button>
+          <button type="button" class="on" data-series="1"><span class="sw" style="background:var(--neg)"></span>Costs</button>
+          <button type="button" class="on" data-series="2"><span class="sw" style="background:var(--series-profit)"></span>Property Profit</button>
         </div>
         <div style="display:flex; align-items:center; gap:var(--s2)">
           <span id="custom-range" hidden style="display:none; align-items:center; gap:6px">
@@ -48,151 +44,76 @@
         </div>
       </div>
       <div class="chart-box" style="height:300px"><canvas id="revenueChart"></canvas></div>
-      <div id="revenue-legend" class="chan-legend" style="margin-top:var(--s2)"></div>
     </div>
   {% endcall %}
 
-  <div class="grid-2">
-    {% call section("Occupancy trend", "Portfolio average") %}
-      <div class="card">
-        <div class="chart-tools" style="margin-bottom:var(--s2)">
-          <div id="occ-chips" class="chips" style="margin:0"></div>
-          <select id="occ-add"><option value="">Compare a property…</option>{% for p in prop_rows %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
-        </div>
-        <div class="chart-box" style="height:190px"><canvas id="occChart"></canvas></div>
-      </div>
-    {% endcall %}
-
-    {% call section("Needs attention") %}
-      <div class="card" x-data="{ all: false }">
-        {% if attention_groups %}
-          {% for g in attention_groups %}
-            <div class="att-group" {% if not g.visible %}x-show="all" x-cloak{% endif %}>{{ g.name }}</div>
-            {% for i in g.entries %}
-              <div class="list-row" {% if not i.show %}x-show="all" x-cloak{% endif %}>
-                <span><span style="color: {{ 'var(--warn)' if i.type == 'warning' else ('var(--pos)' if i.type == 'positive' else 'var(--muted)') }}">●</span>&nbsp; {{ i.text }}</span>
-                {% if i.action.drawer %}<a class="btn secondary" style="height:26px" href="#" hx-get="{{ cx(i.action.endpoint, **i.action.params) }}" hx-target="#drawer" hx-swap="innerHTML">{{ i.action.label }}</a>
-                {% else %}<a class="btn secondary" style="height:26px" href="{{ cx(i.action.endpoint, **i.action.params) }}{{ '#' ~ i.action.anchor if i.action.anchor }}">{{ i.action.label }}</a>{% endif %}
-              </div>
-            {% endfor %}
-          {% endfor %}
-          {% if attention_total > 5 %}
-            <button type="button" class="quiet" style="margin-top:var(--s2)" @click="all = !all" x-text="all ? 'Show fewer' : 'View all ({{ attention_total }})'"></button>
-          {% endif %}
-        {% else %}
-          {{ empty_state("Nothing needs attention", "Every property has its expected documents and no figures moved unusually.") }}
-        {% endif %}
-      </div>
-    {% endcall %}
-  </div>
+  {% call section("Occupancy by property", "Each line only covers months that flat actually operated in") %}
+    <div class="card">
+      <div class="chart-box" style="height:260px"><canvas id="occChart"></canvas></div>
+      <div id="occ-legend" class="chan-legend" style="margin-top:var(--s2)"></div>
+    </div>
+  {% endcall %}
 
   {% call section("Property performance") %}
+    <h3 style="margin-top:0">Rent-to-rent / operated</h3>
     <div class="card flush">
-      <table>
-        <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Profit</th><th class="num">Margin</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
-        <tbody>
-          {% for r in prop_rows %}
-            <tr>
-              <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
-              <td class="num">{{ r.revenue|money }}</td>
-              <td class="num">{{ r.profit|money }}</td>
-              <td class="num">{{ '%.0f'|format(r.margin * 100) }}%</td>
-              <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
-              <td class="num">{{ r.adr|money }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endcall %}
-
-  <div class="grid-2">
-    {% call section("Top expenses", (expense_total.amt|money ~ " total") if expense_rows else None) %}
-      <div class="card flush">
-        {% if expense_rows %}
-          <table>
-            <thead><tr><th>Category</th><th class="num">Amount</th><th class="num">Change</th></tr></thead>
-            <tbody>
-              {% for e in expense_rows %}
-                <tr class="clickable" onclick="location.href='{{ xurl(ctx_params, t_category=e.category) }}#ledger'" title="See these transactions">
-                  <td>{{ e.category|replace('_', ' ') }}</td>
-                  <td class="num">{{ e.amount|money }}</td>
-                  <td class="num">{% if e.delta is not none %}<span class="delta {{ 'down' if e.delta > 0 else 'up' }}" style="display:inline"><span class="arrow">{{ '↑' if e.delta > 0 else '↓' }}</span>{{ '%.0f'|format(e.delta|abs) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          <div style="padding:var(--s3) var(--s4); border-top:1px solid var(--line)">
-            <a class="btn secondary" href="{{ xurl(ctx_params, 'expenses.index') }}#ledger">{% if expense_more %}+{{ expense_more }} more categor{{ 'y' if expense_more == 1 else 'ies' }} · {% endif %}View all expenses →</a>
-          </div>
-        {% else %}
-          {{ empty_state("No expenses in this period", "Costs appear once invoices or statements are confirmed.", "Upload documents", url_for('documents.index')) }}
-        {% endif %}
-      </div>
-    {% endcall %}
-    {% call section("Year on year") %}
-      <div class="card flush">
-        {% if yoy %}
-          <table>
-            <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Last year</th><th class="num">Change</th></tr></thead>
-            <tbody>
-              {% for row in yoy[-6:] %}
-                <tr>
-                  <td>{{ row.label }}</td>
-                  <td class="num">{{ row.this_year|money }}</td>
-                  <td class="num">{{ row.last_year|money }}</td>
-                  <td class="num">{% if row.delta_pct is not none %}<span class="delta {{ 'up' if row.delta_pct > 0 else 'down' }}" style="display:inline"><span class="arrow">{{ '↑' if row.delta_pct > 0 else '↓' }}</span>{{ '%.1f'|format(row.delta_pct|abs) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% else %}
-          {{ empty_state("Not enough history yet", "Year-on-year needs the same months in two consecutive years.") }}
-        {% endif %}
-      </div>
-    {% endcall %}
-  </div>
-
-  {% if yoy_by_property %}
-    {% call section("Year on year", "By property, for " ~ ctx.display) %}
-      <div class="card flush">
+      {% if rtr_rows %}
         <table>
-          <thead><tr><th>Property</th><th class="num">This year</th><th class="num">Same period last year</th><th class="num">Change</th></tr></thead>
+          <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Total costs</th><th class="num">Property profit</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
           <tbody>
-            {% for row in yoy_by_property %}
+            {% for r in rtr_rows %}
               <tr>
-                <td><a href="{{ cx('properties.detail', property_id=row.id) }}">{{ row.name }}</a></td>
-                <td class="num">{{ row.this_year|money }}</td>
-                <td class="num">{{ row.last_year|money }}</td>
-                <td class="num">{% if row.delta_pct is not none %}<span class="delta {{ 'up' if row.delta_pct > 0 else 'down' }}" style="display:inline"><span class="arrow">{{ '↑' if row.delta_pct > 0 else '↓' }}</span>{{ '%.1f'|format(row.delta_pct|abs) }}%</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+                <td class="num">{{ r.revenue|money }}</td>
+                <td class="num">{{ r.costs|money }}</td>
+                <td class="num">{{ r.profit|money }}</td>
+                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                <td class="num">{{ r.adr|money }}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
-      </div>
-    {% endcall %}
-  {% endif %}
+      {% else %}
+        {{ empty_state("No rent-to-rent properties", "Owned/operated flats (no management fee set) will appear here.") }}
+      {% endif %}
+    </div>
+
+    <h3 style="margin-top:var(--s5)">Managed</h3>
+    <div class="card flush">
+      {% if managed_rows %}
+        <table>
+          <thead><tr><th>Property</th><th class="num">Management fee earned</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
+          <tbody>
+            {% for r in managed_rows %}
+              <tr>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+                <td class="num">{{ r.fee|money }}</td>
+                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                <td class="num">{{ r.adr|money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        {{ empty_state("No managed properties", "Flats with a management fee set (Settings tab) will appear here.") }}
+      {% endif %}
+    </div>
+  {% endcall %}
 
   <script>
     const S = {{ series_json|safe }};
     const OCC = {{ occ_props_json|safe }};
-    const REV = {{ revenue_props_json|safe }};
     const CTX = {{ ctx_params|tojson }};
     const ANCHOR = {{ anchor_ym|tojson }};
     const EXPENSES = {{ url_for('expenses.index')|tojson }};
     const shown = [true, true, true];
-    let range = '12', occSel = [];
-    const occColors = ['#3f6489', '#58645f', '#b7791f', '#7d6aa8'];
-    // A wider-hue-spread palette than the scatter chart's, chosen so
-    // adjacent stacked segments stay tellable apart even as thin slivers --
-    // picks ten clearly different hues rather than shades of the same
-    // few colours, and deliberately avoids the app's semantic colours
-    // (brand/positive green, warning amber, negative red) so a property's
-    // colour is never mistaken for a status.
-    const REV_COLORS = ['#3f6ea3', '#c17a3d', '#6c5b9e', '#8c5a4a', '#b3568f', '#6b6b6b', '#9a9331', '#2f8f96', '#0e9f6e', '#4a5a8a'];
-    const revIds = Object.keys(REV);
-    const N_REV = revIds.length;
-    const revShown = revIds.map(() => true);
+    let range = '12';
+    // Same restrained per-property palette used on Bookings > Performance's
+    // scatter chart -- one stable colour per property, reused here so a
+    // given flat reads the same colour everywhere in the app.
+    const PROP_COLORS = ['#3f6ea3', '#c17a3d', '#6c5b9e', '#8c5a4a', '#b3568f', '#6b6b6b', '#9a9331', '#2f8f96', '#0e9f6e', '#4a5a8a'];
+    const occIds = Object.keys(OCC);
+    const occShown = occIds.map(() => true);
 
     function indices() {
       const n = S.months.length, all = S.months.map((_, i) => i);
@@ -203,52 +124,25 @@
       return all.filter(i => (!f || S.months[i] >= f) && (!t || S.months[i] <= t));
     }
 
-    // Draws the exact £ value above each visible Revenue stack -- "actual
-    // number per month", not just an axis tick -- skipped once bars get too
-    // narrow to keep it legible (short ranges only). Sums whichever
-    // property segments are currently shown, rather than reading one bar's
-    // own geometry, so it stays correct as the stack grows or shrinks.
-    const revenueLabels = {
-      id: 'revenueLabels',
-      afterDatasetsDraw(chart) {
-        if (!shown[0] || chart.data.labels.length > 14) return;
-        const { ctx, scales: { x, y } } = chart;
-        ctx.save();
-        ctx.font = '600 11px Inter, sans-serif';
-        ctx.fillStyle = '#46544e';
-        ctx.textAlign = 'center';
-        chart.data.labels.forEach((_, i) => {
-          const total = chart.data.datasets.slice(0, N_REV).reduce((sum, d, k) => sum + (revShown[k] ? (d.data[i] || 0) : 0), 0);
-          if (!total) return;
-          ctx.fillText(moneyFull(total), x.getPixelForValue(i), y.getPixelForValue(total) - 6);
-        });
-        ctx.restore();
-      },
-    };
-
     const main = new Chart(document.getElementById('revenueChart'), {
-      plugins: [revenueLabels],
       data: {
         labels: [],
         datasets: [
-          ...revIds.map((pid, k) => ({
-            type: 'bar', label: REV[pid].name, data: [], stack: 'revenue',
-            backgroundColor: REV_COLORS[k % REV_COLORS.length],
-            borderColor: '#fff', borderWidth: 1, order: 2,
-          })),
-          { type: 'bar', label: 'Costs', data: [], stack: 'costs', backgroundColor: UN.costs, order: 2 },
-          { type: 'line', label: 'Profit', data: [], stack: 'profit', backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
+          { type: 'bar', label: 'Revenue', data: [], stack: 'rev', backgroundColor: UN.revenue, order: 2 },
+          { type: 'bar', label: 'Costs', data: [], stack: 'rev', backgroundColor: '#c2413a', order: 2 }, // matches --neg
+          { type: 'line', label: 'Property Profit', data: [], backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
         ],
       },
       options: {
         interaction: { mode: 'index', intersect: false },
+        layout: { padding: { top: 18, bottom: 18 } },
         onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
         onClick: (e, els, chart) => {
           const hit = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true)[0];
           const idx = hit ? hit.index : (els[0] ? els[0].index : null);
           if (idx === null || idx === undefined) return;
           const ym = chart.data.labels[idx];
-          const onCosts = hit && chart.data.datasets[hit.datasetIndex].stack === 'costs';
+          const onCosts = hit && chart.data.datasets[hit.datasetIndex].label === 'Costs';
           const params = new URLSearchParams(Object.assign({}, CTX, { from: ym + '-01', to: ym + '-01' }));
           location.href = (onCosts ? EXPENSES : location.pathname) + '?' + params.toString();
         },
@@ -261,65 +155,73 @@
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}`,
-              afterBody: (items) => { const m = items[0].label; const i = S.months.indexOf(m); return i < 0 ? [] : [`Margin: ${S.margin[i]}%`]; },
+              label: (item) => {
+                const i = S.months.indexOf(item.label);
+                if (item.dataset.label === 'Costs') return `Costs: ${moneyFull(S.costs[i])}`;
+                if (item.dataset.label === 'Revenue') return `Revenue: ${moneyFull(S.income[i])}`;
+                return `Property Profit: ${moneyFull(S.profit[i])}`;
+              },
             },
           },
         },
       },
     });
 
-    // Click a property to isolate/hide it -- the direct fix for "which
-    // colour is which": rather than only matching by eye, you can toggle
-    // one property at a time and watch its slice disappear from every bar.
-    const revenueLegend = document.getElementById('revenue-legend');
-    function renderRevenueLegend() {
-      if (!revenueLegend) return;
-      revenueLegend.innerHTML = revIds.map((pid, k) =>
-        '<button type="button" class="chan chan-toggle' + (revShown[k] ? '' : ' off') + '" data-idx="' + k + '">' +
-        '<i style="background:' + REV_COLORS[k % REV_COLORS.length] + '"></i>' + REV[pid].name + '</button>').join('');
-      revenueLegend.querySelectorAll('[data-idx]').forEach(btn => btn.addEventListener('click', () => {
-        const k = +btn.dataset.idx;
-        revShown[k] = !revShown[k];
-        renderRevenueLegend();
-        apply();
-      }));
-    }
-    renderRevenueLegend();
-
     const occ = new Chart(document.getElementById('occChart'), {
       type: 'line',
-      data: { labels: [], datasets: [{ label: 'Portfolio', data: [], borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false }] },
+      data: {
+        labels: [],
+        datasets: occIds.map((pid, k) => ({
+          label: OCC[pid].name, data: [], borderColor: PROP_COLORS[k % PROP_COLORS.length],
+          backgroundColor: 'transparent', fill: false, tension: 0.3, borderWidth: 1.5, spanGaps: false,
+        })),
+      },
       options: {
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${pctShort(item.parsed.y)}` } } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${pctShort(item.parsed.y)}` } },
+        },
         scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 5 } } }),
       },
     });
 
+    const occLegend = document.getElementById('occ-legend');
+    function renderOccLegend() {
+      if (!occLegend) return;
+      occLegend.innerHTML = occIds.map((pid, k) =>
+        '<button type="button" class="chan chan-toggle' + (occShown[k] ? '' : ' off') + '" data-idx="' + k + '">' +
+        '<i style="background:' + PROP_COLORS[k % PROP_COLORS.length] + '"></i>' + OCC[pid].name + '</button>').join('');
+      occLegend.querySelectorAll('[data-idx]').forEach(btn => {
+        const k = +btn.dataset.idx;
+        btn.addEventListener('click', () => { occShown[k] = !occShown[k]; renderOccLegend(); apply(); });
+        // Hover a property -> emphasise its line, mute the rest.
+        btn.addEventListener('mouseenter', () => {
+          occ.data.datasets.forEach((d, j) => { d.borderColor = j === k ? PROP_COLORS[j % PROP_COLORS.length] : 'rgba(20,32,28,0.10)'; d.borderWidth = j === k ? 2.5 : 1.5; });
+          occ.update('none');
+        });
+        btn.addEventListener('mouseleave', () => {
+          occ.data.datasets.forEach((d, j) => { d.borderColor = PROP_COLORS[j % PROP_COLORS.length]; d.borderWidth = 1.5; });
+          occ.update('none');
+        });
+      });
+    }
+    renderOccLegend();
+
     function apply() {
       const ix = indices(), labels = ix.map(i => S.months[i]);
       main.data.labels = labels;
-      revIds.forEach((pid, k) => {
-        main.data.datasets[k].data = labels.map(m => REV[pid].values[m] || 0);
-      });
-      main.data.datasets[N_REV].data = ix.map(i => S.costs[i]);
-      main.data.datasets[N_REV + 1].data = ix.map(i => S.profit[i]);
-      for (let k = 0; k < N_REV; k++) main.setDatasetVisibility(k, shown[0] && revShown[k]);
-      main.setDatasetVisibility(N_REV, shown[1]);
-      main.setDatasetVisibility(N_REV + 1, shown[2]);
+      main.data.datasets[0].data = ix.map(i => S.income[i]);
+      main.data.datasets[1].data = ix.map(i => -S.costs[i]);
+      main.data.datasets[2].data = ix.map(i => S.profit[i]);
+      shown.forEach((on, k) => main.setDatasetVisibility(k, on));
       main.update();
+
       occ.data.labels = labels;
-      occ.data.datasets = [occ.data.datasets[0]].slice(0, 1);
-      occ.data.datasets[0].data = ix.map(i => S.occupancy[i]);
-      occSel.forEach((pid, k) => occ.data.datasets.push({
-        label: OCC[pid].name, data: labels.map(m => (OCC[pid].values[m] === undefined ? null : OCC[pid].values[m])),
-        borderColor: occColors[k % occColors.length], backgroundColor: 'transparent', fill: false, tension: 0.3, borderWidth: 1.5, spanGaps: false,
-      }));
+      occIds.forEach((pid, k) => {
+        occ.data.datasets[k].data = labels.map(m => (OCC[pid].values[m] === undefined ? null : OCC[pid].values[m]));
+        occ.setDatasetVisibility(k, occShown[k]);
+      });
       occ.update();
-      const chips = document.getElementById('occ-chips');
-      chips.innerHTML = '<span class="note">Portfolio average</span>' + occSel.map((pid, k) =>
-        '<a href="#" class="chip" data-rm="' + pid + '"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + occColors[k % occColors.length] + '"></i> ' + OCC[pid].name + ' <span>×</span></a>').join('');
-      chips.querySelectorAll('[data-rm]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); occSel = occSel.filter(x => x !== a.dataset.rm); apply(); }));
     }
 
     document.querySelectorAll('#series-seg button').forEach(b => b.addEventListener('click', () => {
@@ -336,10 +238,6 @@
       apply();
     }));
     ['r-from', 'r-to'].forEach(id => document.getElementById(id).addEventListener('change', apply));
-    document.getElementById('occ-add').addEventListener('change', e => {
-      const v = e.target.value; e.target.value = '';
-      if (v && !occSel.includes(v) && occSel.length < 4) { occSel.push(v); apply(); }
-    });
     apply();
   </script>
 {% endblock %}

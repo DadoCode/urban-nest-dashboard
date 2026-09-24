@@ -6,7 +6,7 @@
     <button type="button" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
   {% endcall %}
 
-  <p class="note" style="margin:calc(var(--s3) * -1) 0 var(--s4)">Revenue and Net profit below are what this business actually earns -- most flats are managed for their owner, so only a percentage of revenue counts here (set per flat on its Settings tab). ADR and RevPAR describe the flat itself and aren't affected.</p>
+  <p class="note" style="margin:calc(var(--s3) * -1) 0 var(--s4)">Revenue and Property profit below are what this business actually earns -- for a managed flat (set on its Settings tab) that's only the management fee, not the flat's full booking revenue. ADR and RevPAR describe the flat itself and aren't affected.</p>
 
   <form method="get" class="filter-bar">
     <input type="text" name="q" value="{{ q }}" placeholder="Search properties…">
@@ -25,7 +25,7 @@
         <thead>
           <tr>
             <th><a class="sort {{ 'on' if sort == 'name' }}" href="{{ cx('properties.index', sort='name', q=q or None, status=status) }}">Property</a></th>
-            {% for key, label in [('revenue', 'Revenue'), ('profit', 'Net profit'), ('occupancy', 'Occupancy'), ('adr', 'ADR')] %}
+            {% for key, label in [('revenue', 'Revenue'), ('profit', 'Property profit'), ('occupancy', 'Occupancy'), ('adr', 'ADR')] %}
               <th class="num"><a class="sort {{ 'on' if sort == key }}" href="{{ cx('properties.index', sort=key, q=q or None, status=status) }}">{{ label }}{% if sort == key %} ↓{% endif %}</a></th>
             {% endfor %}
             <th class="num" title="Revenue per available night">RevPAR</th>

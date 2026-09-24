@@ -556,10 +556,10 @@ tr.clickable:hover td { background: var(--surface-2); }
 .chip:hover span { color: var(--ink); }
 
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
-.seg button { background: none; color: var(--ink-soft); border: none; border-radius: 0; height: 28px; padding: 0 12px; font-size: var(--fs-small); border-left: 1px solid var(--line); }
-.seg button:first-child { border-left: none; }
-.seg button:hover { background: var(--neutral-dim); }
-.seg button.on { background: var(--brand-dim); color: var(--brand-ink); font-weight: 600; }
+.seg button, .seg a { background: none; color: var(--ink-soft); border: none; border-radius: 0; height: 28px; padding: 0 12px; font-size: var(--fs-small); border-left: 1px solid var(--line); display: inline-flex; align-items: center; text-decoration: none; }
+.seg button:first-child, .seg a:first-child { border-left: none; }
+.seg button:hover, .seg a:hover { background: var(--neutral-dim); }
+.seg button.on, .seg a.on { background: var(--brand-dim); color: var(--brand-ink); font-weight: 600; }
 .seg button.off { color: var(--muted); }
 .seg button .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
 .seg button.off .sw { opacity: 0.3; }
