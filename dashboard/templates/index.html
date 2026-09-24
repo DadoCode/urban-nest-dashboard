@@ -48,6 +48,7 @@
         </div>
       </div>
       <div class="chart-box" style="height:300px"><canvas id="revenueChart"></canvas></div>
+      <div id="revenue-legend" class="chan-legend" style="margin-top:var(--s2)"></div>
     </div>
   {% endcall %}
 
@@ -175,12 +176,19 @@
   <script>
     const S = {{ series_json|safe }};
     const OCC = {{ occ_props_json|safe }};
+    const REV = {{ revenue_props_json|safe }};
     const CTX = {{ ctx_params|tojson }};
     const ANCHOR = {{ anchor_ym|tojson }};
     const EXPENSES = {{ url_for('expenses.index')|tojson }};
     const shown = [true, true, true];
     let range = '12', occSel = [];
     const occColors = ['#3f6489', '#58645f', '#b7791f', '#7d6aa8'];
+    // Same restrained per-property palette used on Bookings > Performance's
+    // scatter chart -- one stable colour per property, reused here so a
+    // given flat reads the same colour everywhere in the app.
+    const REV_COLORS = ['#0e9f6e', '#3f6489', '#b7791f', '#a34e7c', '#58645f', '#4c7ba0', '#8a6d3b', '#6f8f5e', '#9a5a5a', '#5a7a8a'];
+    const revIds = Object.keys(REV);
+    const N_REV = revIds.length;
 
     function indices() {
       const n = S.months.length, all = S.months.map((_, i) => i);
@@ -191,23 +199,24 @@
       return all.filter(i => (!f || S.months[i] >= f) && (!t || S.months[i] <= t));
     }
 
-    // Draws the exact £ value above each visible Revenue bar -- "actual number
-    // per month", not just an axis tick -- skipped once bars get too narrow
-    // to keep it legible (short ranges only).
+    // Draws the exact £ value above each visible Revenue stack -- "actual
+    // number per month", not just an axis tick -- skipped once bars get too
+    // narrow to keep it legible (short ranges only). Sums whichever
+    // property segments are currently shown, rather than reading one bar's
+    // own geometry, so it stays correct as the stack grows or shrinks.
     const revenueLabels = {
       id: 'revenueLabels',
       afterDatasetsDraw(chart) {
-        const meta = chart.getDatasetMeta(0);
-        if (!chart.isDatasetVisible(0) || meta.data.length > 14) return;
-        const { ctx } = chart;
+        if (!shown[0] || chart.data.labels.length > 14) return;
+        const { ctx, scales: { x, y } } = chart;
         ctx.save();
         ctx.font = '600 11px Inter, sans-serif';
         ctx.fillStyle = '#46544e';
         ctx.textAlign = 'center';
-        meta.data.forEach((bar, i) => {
-          const v = chart.data.datasets[0].data[i];
-          if (!v) return;
-          ctx.fillText(moneyFull(v), bar.x, bar.y - 6);
+        chart.data.labels.forEach((_, i) => {
+          const total = chart.data.datasets.slice(0, N_REV).reduce((sum, d) => sum + (d.data[i] || 0), 0);
+          if (!total) return;
+          ctx.fillText(moneyFull(total), x.getPixelForValue(i), y.getPixelForValue(total) - 6);
         });
         ctx.restore();
       },
@@ -218,9 +227,12 @@
       data: {
         labels: [],
         datasets: [
-          { type: 'bar', label: 'Revenue', data: [], backgroundColor: UN.revenue, order: 2 },
-          { type: 'bar', label: 'Costs', data: [], backgroundColor: UN.costs, order: 2 },
-          { type: 'line', label: 'Profit', data: [], backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
+          ...revIds.map((pid, k) => ({
+            type: 'bar', label: REV[pid].name, data: [], stack: 'revenue',
+            backgroundColor: REV_COLORS[k % REV_COLORS.length], order: 2,
+          })),
+          { type: 'bar', label: 'Costs', data: [], stack: 'costs', backgroundColor: UN.costs, order: 2 },
+          { type: 'line', label: 'Profit', data: [], stack: 'profit', backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
         ],
       },
       options: {
@@ -231,10 +243,15 @@
           const idx = hit ? hit.index : (els[0] ? els[0].index : null);
           if (idx === null || idx === undefined) return;
           const ym = chart.data.labels[idx];
+          const onCosts = hit && chart.data.datasets[hit.datasetIndex].stack === 'costs';
           const params = new URLSearchParams(Object.assign({}, CTX, { from: ym + '-01', to: ym + '-01' }));
-          location.href = (hit && hit.datasetIndex === 1 ? EXPENSES : location.pathname) + '?' + params.toString();
+          location.href = (onCosts ? EXPENSES : location.pathname) + '?' + params.toString();
         },
-        scales: quietScales(moneyShort),
+        scales: (() => {
+          const s = quietScales(moneyShort);
+          s.x.stacked = true; s.y.stacked = true;
+          return s;
+        })(),
         plugins: {
           legend: { display: false },
           tooltip: {
@@ -246,6 +263,12 @@
         },
       },
     });
+
+    const revenueLegend = document.getElementById('revenue-legend');
+    if (revenueLegend) {
+      revenueLegend.innerHTML = revIds.map((pid, k) =>
+        '<span class="chan"><i style="background:' + REV_COLORS[k % REV_COLORS.length] + '"></i>' + REV[pid].name + '</span>').join('');
+    }
 
     const occ = new Chart(document.getElementById('occChart'), {
       type: 'line',
@@ -259,10 +282,14 @@
     function apply() {
       const ix = indices(), labels = ix.map(i => S.months[i]);
       main.data.labels = labels;
-      main.data.datasets[0].data = ix.map(i => S.income[i]);
-      main.data.datasets[1].data = ix.map(i => S.costs[i]);
-      main.data.datasets[2].data = ix.map(i => S.profit[i]);
-      shown.forEach((on, k) => main.setDatasetVisibility(k, on));
+      revIds.forEach((pid, k) => {
+        main.data.datasets[k].data = labels.map(m => REV[pid].values[m] || 0);
+      });
+      main.data.datasets[N_REV].data = ix.map(i => S.costs[i]);
+      main.data.datasets[N_REV + 1].data = ix.map(i => S.profit[i]);
+      for (let k = 0; k < N_REV; k++) main.setDatasetVisibility(k, shown[0]);
+      main.setDatasetVisibility(N_REV, shown[1]);
+      main.setDatasetVisibility(N_REV + 1, shown[2]);
       main.update();
       occ.data.labels = labels;
       occ.data.datasets = [occ.data.datasets[0]].slice(0, 1);

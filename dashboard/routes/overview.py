@@ -158,6 +158,16 @@ def index():
                                                   for s in kpis.monthly_series(conn, p["id"]) if s["ym"] <= anchor_ym}}
         for p in flats
     }
+    # Narrowed the same way portfolio_series is: when Overview is filtered
+    # to one property, its Revenue bar should split into just that one
+    # property (matching the already-filtered total), not the whole
+    # portfolio's properties stacked on top of a single-property total.
+    chart_properties = [p for p in flats if p["id"] == ctx["property_id"]] if ctx["property_id"] else flats
+    revenue_by_property = {
+        p["id"]: {"name": p["name"], "values": {s["ym"]: round(s["revenue"], 2)
+                                                  for s in kpis.adjusted_monthly_series(conn, p["id"]) if s["ym"] <= anchor_ym}}
+        for p in chart_properties
+    }
     groups = []
     for gname in ("Data", "Performance", "Costs"):
         items = [dict(i, show=idx < 5) for idx, i in enumerate(insights) if i["group"] == gname]
@@ -198,5 +208,6 @@ def index():
             "occupancy": [round(s["occupancy"] * 100, 1) for s in portfolio_series],
         }),
         occ_props_json=json.dumps(occupancy_by_property),
+        revenue_props_json=json.dumps(revenue_by_property),
         anchor_ym=anchor_ym,
     )
