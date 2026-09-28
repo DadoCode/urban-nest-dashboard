@@ -53,10 +53,25 @@ def _metric_view(key, saved_row, avg, hist, month):
     target = saved_val if saved_val is not None else avg_val
     actual = hist.get(month, {}).get(key)
     ly = hist.get(f"{int(month[:4]) - 1}-{month[5:]}", {}).get(key)
-    pct = round(actual / target * 100) if (actual is not None and target) else None
+    have = actual is not None and bool(target)
+    # actual/target*100 only reads as "progress toward target" when the
+    # target is positive -- dividing by a negative target flips the
+    # direction, so a loss that's worse than a negative profit target can
+    # come out over 100% ("achieved"), and a result far better than a
+    # negative target can come out negative ("not achieved"). Targets
+    # entered by hand are already clamped to >=0 (see _num()), but an
+    # unsaved target falls back to a historical average, which can be
+    # negative for a property whose recorded months were often
+    # unprofitable -- so this does happen with real data, not just
+    # hypothetically. variance (a plain subtraction) stays correct for
+    # any sign and is what the template now shows whenever the
+    # percentage wouldn't be trustworthy.
+    pct = round(actual / target * 100) if (have and target > 0) else None
+    variance = (actual - target) if have else None
     return {"saved": saved_val is not None, "target": target, "avg": avg_val, "actual": actual,
-            "last_year": ly, "pct": pct,
-            "remaining": (target - actual) if (actual is not None and target) else None}
+            "last_year": ly, "pct": pct, "variance": variance,
+            "met": (variance >= 0) if variance is not None else None,
+            "remaining": (target - actual) if have else None}
 
 
 def _property_view(conn, p, saved_row, months, month, cur):
@@ -102,7 +117,12 @@ def index():
         counted = [r["metrics"][key] for r in rows if r["metrics"][key]["target"]]
         target = sum(m["target"] for m in counted)
         actual = sum(m["actual"] or 0 for m in counted)
-        totals[key] = {"target": target, "actual": actual, "pct": round(actual / target * 100) if target else None,
+        variance = actual - target
+        # Same direction fix as _metric_view(): only trust a percentage
+        # when the summed target is positive.
+        totals[key] = {"target": target, "actual": actual,
+                       "pct": round(actual / target * 100) if target > 0 else None,
+                       "variance": variance, "met": variance >= 0,
                        "remaining": target - actual, "n": len(counted)}
 
     return render_template(

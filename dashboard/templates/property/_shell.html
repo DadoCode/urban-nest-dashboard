@@ -2,7 +2,11 @@
 {% from "_components.html" import page_head, tabs %}
 {% block title %}{{ prop.name }} — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head(prop.name, prop.address) }}
+  {# Suppress the subtitle when the address field is empty or just
+     repeats the property name verbatim -- otherwise every page shows
+     "602 Lascar Wharf / 602 Lascar Wharf". A real address still shows
+     normally. #}
+  {{ page_head(prop.name, prop.address if prop.address and prop.address != prop.name else None) }}
   {% set items = [('overview', 'Overview', cx('properties.detail', property_id=prop.id))] %}
   {% if not is_overhead %}
     {% set items = items + [('performance', 'Performance', cx('properties.performance_tab', property_id=prop.id))] %}

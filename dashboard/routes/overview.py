@@ -129,11 +129,29 @@ def index():
     # near-zero at the end of the line.
     anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
     portfolio_series = [s for s in kpis.adjusted_monthly_series(conn, ctx["property_id"]) if s["ym"] <= anchor_ym]
-    occupancy_by_property = {
-        p["id"]: {"name": p["name"], "values": {s["ym"]: round(s["occupancy"] * 100, 1)
-                                                  for s in kpis.monthly_series(conn, p["id"]) if s["ym"] <= anchor_ym}}
-        for p in flats
-    }
+
+    # Same shared-calendar-window + real-gap rule Bookings > Performance's
+    # own per-property series already use: every sparkline is plotted
+    # against the same months, with a break (None) for a month that
+    # property has no record for at all -- instead of the old approach,
+    # which only ever stored keys for months WITH data and let Chart.js
+    # connect whatever real points existed as if they were adjacent on
+    # the calendar. That also meant a property whose only recorded
+    # months happened to have zero real bookings drew a flat "always
+    # fully vacant" line indistinguishable from an honest zero.
+    spark_months = [m for m in kpis.months_with_data(conn, None) if m <= anchor_ym][-12:]
+    occupancy_by_property = {}
+    for p in flats:
+        own_months = set(kpis.months_with_data(conn, p["id"]))
+        values = []
+        for ym in spark_months:
+            if ym not in own_months:
+                values.append(None)
+                continue
+            y, m = map(int, ym.split("-"))
+            s, e = kpis.month_bounds(y, m)
+            values.append(round(kpis.occupancy(conn, p["id"], s, e) * 100, 1))
+        occupancy_by_property[p["id"]] = {"name": p["name"], "values": values}
 
     return render_template(
         "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats),
@@ -151,5 +169,6 @@ def index():
             "revpar": [round(s["revpar"], 2) for s in portfolio_series],
         }),
         occ_props=occupancy_by_property, occ_props_json=json.dumps(occupancy_by_property),
+        spark_months_json=json.dumps(spark_months),
         anchor_ym=anchor_ym,
     )

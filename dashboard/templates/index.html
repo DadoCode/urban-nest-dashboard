@@ -108,6 +108,7 @@
   <script>
     const S = {{ series_json|safe }};
     const OCC = {{ occ_props_json|safe }};
+    const SPARK_MONTHS = {{ spark_months_json|safe }};
     const CTX = {{ ctx_params|tojson }};
     const ANCHOR = {{ anchor_ym|tojson }};
     const EXPENSES = {{ url_for('expenses.index')|tojson }};
@@ -194,20 +195,26 @@
     });
 
     // Small multiples instead of one crowded multi-line chart: each
-    // property gets its own compact sparkline over its own last 12 months
-    // of real data -- no colour-matching a legend to ten overlapping
+    // property gets its own compact sparkline over the same shared
+    // 12-month window -- no colour-matching a legend to ten overlapping
     // lines, no smoothing that invents a misleading curve between two
     // real points (tension 0, straight segments -- honest, not decorative).
+    // OCC[pid].values is already aligned to SPARK_MONTHS with a real gap
+    // (null) for a month this property has no record for at all, so
+    // Chart.js (spanGaps: false) breaks the line there instead of
+    // silently joining two months that aren't actually adjacent, and a
+    // property with no booking data doesn't draw as a flat "always at
+    // 0%" line indistinguishable from a genuine zero.
     occIds.forEach((pid, k) => {
       const canvas = document.getElementById('spark-' + pid);
       if (!canvas) return;
-      const months = Object.keys(OCC[pid].values).sort().slice(-12);
-      const values = months.map(m => OCC[pid].values[m]);
+      const values = OCC[pid].values;
+      const lastReal = [...values].reverse().find(v => v !== null && v !== undefined);
       const valueEl = document.getElementById('spark-value-' + pid);
-      if (valueEl) valueEl.textContent = values.length ? pctShort(values[values.length - 1]) : '—';
+      if (valueEl) valueEl.textContent = (lastReal !== undefined) ? pctShort(lastReal) : '—';
       new Chart(canvas, {
         type: 'line',
-        data: { labels: months, datasets: [{ data: values, borderColor: PROP_COLORS[k % PROP_COLORS.length], backgroundColor: 'transparent', fill: false, tension: 0, borderWidth: 1.5, pointRadius: 0, spanGaps: false }] },
+        data: { labels: SPARK_MONTHS, datasets: [{ data: values, borderColor: PROP_COLORS[k % PROP_COLORS.length], backgroundColor: 'transparent', fill: false, tension: 0, borderWidth: 1.5, pointRadius: 0, spanGaps: false }] },
         options: {
           plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => monthLabel(items[0].label), label: (item) => `Occupancy: ${pctShort(item.parsed.y)}` } } },
           scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },

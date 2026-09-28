@@ -549,6 +549,12 @@ form.only-attention .rv-row:not(.has-flags) { display: none; }
 .target-tile .of { font-size: var(--fs-section); color: var(--muted); font-weight: 400; }
 .target-tile .sub { font-size: var(--fs-small); color: var(--muted); }
 .target-tile .sub strong { color: var(--ink); font-weight: 600; }
+/* Directional variance -- used instead of a percentage-of-target when
+   the target isn't positive (see routes/targets.py), so a worse-than-
+   planned loss never reads as green/achieved. */
+.variance { font-size: var(--fs-small); font-weight: 500; }
+.variance.met, .target-tile .sub.variance.met strong { color: var(--pos); }
+.variance.miss, .target-tile .sub.variance.miss strong { color: var(--neg); }
 
 .drawer-title { font-size: var(--fs-section); font-weight: 600; }
 .tfield { padding-top: var(--s3); border-top: 1px solid var(--line); }

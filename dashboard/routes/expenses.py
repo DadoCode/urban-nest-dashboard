@@ -105,6 +105,13 @@ def index():
         {"label": "Cost / booked night", "value": f"£{cur['per_night']:,.0f}", "delta": d("per_night", 5), "href": None},
     ]
 
+    # The By Property table lists actual properties only -- the shared
+    # overhead cost centre isn't one, and listing it as a row alongside
+    # real flats read as "another property," not company overhead. Its
+    # costs are unaffected everywhere else on this page (tiles, By
+    # category, By vendor, the ledger all still sum every property
+    # including it) -- it's just not a row in this one table. The full
+    # Property Costs / Business Costs split is a separate pass.
     property_rows = []
     if not pid:
         for p in flats:
@@ -112,11 +119,6 @@ def index():
             capex = _real_costs(conn, p["id"], start, end, capex=True)
             property_rows.append({"id": p["id"], "name": p["name"], "opex": opex, "capex": capex, "total": opex + capex})
         property_rows.sort(key=lambda r: r["total"], reverse=True)
-        overhead = next((p for p in get_properties(conn) if p["type"] == "overhead"), None)
-        if overhead:
-            oc = _real_costs(conn, overhead["id"], start, end)
-            if oc:
-                property_rows.append({"id": overhead["id"], "name": overhead["name"], "opex": oc, "capex": 0, "total": oc, "overhead": True})
 
     categories = conn.execute(
         f"""SELECT category, SUM(amount) amt, COUNT(*) n FROM transactions
