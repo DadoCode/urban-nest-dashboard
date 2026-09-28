@@ -30,6 +30,26 @@
     });
   })();
 
+  /* ---------- keyboard access for clickable rows ---------- */
+  /* <tr class="clickable"> (transaction/vendor/category/document/booking
+     rows) only ever worked with a mouse -- a <tr> isn't focusable and has
+     no keyboard handler, so Tab skips it and Enter does nothing. This
+     makes it a real button for keyboard/screen-reader use without
+     changing how it looks or works with a mouse. */
+  function enableRowKeyboardAccess(root) {
+    root.querySelectorAll('tr.clickable:not([tabindex])').forEach(row => {
+      row.setAttribute('tabindex', '0');
+      row.setAttribute('role', 'button');
+      row.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        row.click();
+      });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => enableRowKeyboardAccess(document));
+  document.addEventListener('htmx:afterSwap', (e) => enableRowKeyboardAccess(e.target));
+
   /* ---------- navigation progress ---------- */
   const bar = document.getElementById('navbar');
   function start() { if (!bar) return; bar.style.opacity = 1; bar.style.width = '70%'; }

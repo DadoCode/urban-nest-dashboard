@@ -13,7 +13,11 @@
   --surface-2: #fafbfa;
   --ink: #14201c;
   --ink-soft: #46544e;
-  --muted: #7a8781;
+  /* Darkened from the original #7a8781 -- that only hit ~3.5:1 contrast
+     against the page background (fails WCAG AA's 4.5:1 for text this
+     size), and --muted is what every KPI label, delta line and table
+     note uses. Same hue, just dark enough to actually read cleanly. */
+  --muted: #646e69;
   --line: rgba(20, 32, 28, 0.09);
   --line-strong: rgba(20, 32, 28, 0.16);
 
@@ -21,7 +25,10 @@
   --brand: #0e9f6e;
   --brand-ink: #0a6b49;
   --brand-dim: rgba(14, 159, 110, 0.09);
-  --pos: #1a8a57;
+  /* Darkened slightly from #1a8a57 (was just under 4.5:1) to actually
+     pass contrast on the up-arrow/positive text, same reasoning as
+     --muted above. */
+  --pos: #177c4e;
   --pos-dim: rgba(26, 138, 87, 0.10);
   --warn: #b7791f;
   --warn-dim: rgba(183, 121, 31, 0.12);
@@ -256,6 +263,8 @@ td:last-child, th:last-child { padding-right: var(--s4); }
 table a { color: var(--ink); font-weight: 500; text-decoration: none; }
 table a:hover { color: var(--brand-ink); text-decoration: underline; }
 tr.clickable { cursor: pointer; }
+tr.clickable:focus-visible { outline: none; }
+tr.clickable:focus-visible td { background: var(--brand-dim); box-shadow: inset 3px 0 0 var(--brand); }
 tr.focus-row td { background: var(--brand-dim); box-shadow: inset 3px 0 0 var(--brand); }
 tr.focus-row:hover td { background: var(--brand-dim); }
 td.truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
