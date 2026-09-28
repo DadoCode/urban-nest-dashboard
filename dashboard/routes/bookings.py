@@ -13,6 +13,15 @@ from services.context import compare_bounds, range_params, request_context
 bp = Blueprint("bookings", __name__)
 
 
+def _has_real_bookings(conn):
+    """Whether ANY property has a real day-level booking (not an Excel
+    monthly-aggregate row) -- same signal as properties._ws()'s
+    has_calendar_data, used here to hide the portfolio-wide Calendar tab
+    the same way, for the same reason."""
+    return bool(conn.execute(
+        "SELECT 1 FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate' LIMIT 1").fetchone())
+
+
 @bp.route("/occupancy")
 def legacy_occupancy():
     return redirect(url_for("bookings.performance"), code=301)
@@ -28,6 +37,10 @@ def index():
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     prev = compare_bounds(ctx)
     label = ctx["compare_display"] or ""
+    # Same MTD-vs-full-prior-month fix as Overview's tiles: don't show a
+    # coloured delta when "This Month" (partial so far) is being weighed
+    # against a full prior month -- it isn't a real decline.
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
 
     def metric(fn, *a):
         cur = fn(conn, pid, start, end)
@@ -37,11 +50,11 @@ def index():
     nights, prev_nights = metric(kpis.booked_nights)
     revenue, prev_rev = metric(kpis.accommodation_revenue)
     tiles = [
-        {"label": "Reservations", "value": f"{reservations:,}", "delta": pct_delta(reservations, prev_res, min_base=2) if prev else None},
-        {"label": "Booked nights", "value": f"{nights:,}", "delta": pct_delta(nights, prev_nights, min_base=5) if prev else None},
+        {"label": "Reservations", "value": f"{reservations:,}", "delta": None if mtd else (pct_delta(reservations, prev_res, min_base=2) if prev else None)},
+        {"label": "Booked nights", "value": f"{nights:,}", "delta": None if mtd else (pct_delta(nights, prev_nights, min_base=5) if prev else None)},
         {"label": "ADR", "value": f"£{kpis.adr(conn, pid, start, end):,.0f}", "delta": None},
         {"label": "Avg stay", "value": (f"{kpis.avg_stay(conn, pid, start, end):.1f} nights" if kpis.avg_stay(conn, pid, start, end) else "—"), "delta": None},
-        {"label": "Confirmed booking revenue", "value": f"£{revenue:,.0f}", "delta": pct_delta(revenue, prev_rev, min_base=100) if prev else None},
+        {"label": "Confirmed booking revenue", "value": f"£{revenue:,.0f}", "delta": None if mtd else (pct_delta(revenue, prev_rev, min_base=100) if prev else None)},
     ]
 
     today = datetime.date.today()
@@ -64,6 +77,7 @@ def index():
         "bookings/overview.html", active="bookings", active_bookings_tab="overview",
         all_properties=all_props, active_property=None, context_bar=True, ctx=ctx, viewing=viewing,
         current_month=ctx["display"], compare_label=label, tiles=tiles, upcoming=upcoming, channel_rows=channel_rows,
+        has_calendar_data=_has_real_bookings(conn),
     )
 
 
@@ -166,6 +180,7 @@ def calendar_tab(property_id=None):
         "bookings/calendar.html", active="bookings", active_bookings_tab="calendar",
         all_properties=all_props, active_property=None, context_bar=True, ctx=ctx, viewing=viewing, hide_compare=True,
         prev_href=month_href(data["py"], data["pm"]), next_href=month_href(data["ny"], data["nm"]),
+        has_calendar_data=_has_real_bookings(conn),
         **{k: v for k, v in data.items() if k not in ("py", "pm", "ny", "nm")},
     )
 
@@ -181,6 +196,7 @@ def performance(property_id=None):
     flats = get_properties(conn, include_overhead=False)
     year, month = ctx["end_year"], ctx["end_month"]
     py, pm = kpis.prior_month(year, month)
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
     # Anchored at the selected period and clipped to trailing 12 months --
     # otherwise a barely-started current month (or years of history) would
     # either fake a cliff at the end of the trend line or make it
@@ -209,7 +225,7 @@ def performance(property_id=None):
         rows.append({
             "id": p["id"], "name": p["name"], "occupancy": cur_occ,
             "days_booked": kpis.booked_nights(conn, p["id"], cstart, cend),
-            "delta": pct_delta(cur_occ, prev_occ) if f"{py}-{pm:02d}" in own_months else None,
+            "delta": None if mtd else (pct_delta(cur_occ, prev_occ) if f"{py}-{pm:02d}" in own_months else None),
             "adr": kpis.adr(conn, p["id"], cstart, cend),
         })
     rows.sort(key=lambda r: r["occupancy"], reverse=True)
@@ -234,4 +250,5 @@ def performance(property_id=None):
         heatmap_months=[MONTH_ABBR[int(ym.split('-')[1])] + " " + ym.split('-')[0][2:] for ym in heatmap_months],
         heatmap_rows=heatmap_rows,
         months_json=json.dumps(months), portfolio_json=json.dumps(portfolio_series),
+        has_calendar_data=_has_real_bookings(conn),
     )

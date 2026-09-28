@@ -8,13 +8,18 @@
   {%- endif -%}
 {%- endmacro %}
 
-{% macro kpi_tile(t, compare='previous_period', compare_label='prior period', invert=False, href=None, hint=None) -%}
+{# sparkline_id: opt-in only -- pass a canvas id to reserve a small trend
+   line under the number (the caller draws into it with Chart.js). Leaving
+   it out renders exactly as before, so every existing page that doesn't
+   pass it is unaffected. #}
+{% macro kpi_tile(t, compare='previous_period', compare_label='prior period', invert=False, href=None, hint=None, sparkline_id=None) -%}
   {% if href %}<a href="{{ href }}" title="{{ hint or 'See the detail behind this' }}" class="tile link">{% else %}<div class="tile">{% endif %}
     <div class="label">{{ t.label }}</div>
     <div class="value">{{ t.value }}</div>
     {% if compare == 'previous_period' and t.delta is defined %}{{ delta(t.delta, 'vs ' ~ compare_label, invert) }}
     {% elif compare == 'previous_year' and t.delta_ly is defined %}{{ delta(t.delta_ly, 'vs ' ~ compare_label, invert) }}{% endif %}
     {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
+    {% if sparkline_id %}<div class="tile-spark"><canvas id="{{ sparkline_id }}"></canvas></div>{% endif %}
     {% if href %}<span class="chev">›</span></a>{% else %}</div>{% endif %}
 {%- endmacro %}
 

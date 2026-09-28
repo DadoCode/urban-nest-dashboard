@@ -20,7 +20,7 @@
     'revpar': [xurl(ctx_params, 'bookings.performance'), 'See occupancy and rates by property'],
   } %}
   <div class="tiles">
-    {% for t in primary_tiles %}{% set d = drill.get(t.key) %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=d[0] if d else None, hint=d[1] if d else None) }}{% endfor %}
+    {% for t in primary_tiles %}{% set d = drill.get(t.key) %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=d[0] if d else None, hint=d[1] if d else None, sparkline_id='tile-spark-' ~ t.key) }}{% endfor %}
   </div>
 
   {% call section("Portfolio performance", "Click a month to view it · click a costs bar to see its transactions") %}
@@ -118,6 +118,28 @@
     // given flat reads the same colour everywhere in the app.
     const PROP_COLORS = ['#3f6ea3', '#c17a3d', '#6c5b9e', '#8c5a4a', '#b3568f', '#6b6b6b', '#9a9331', '#2f8f96', '#0e9f6e', '#4a5a8a'];
     const occIds = Object.keys(OCC);
+
+    // Tiny trend line under each of the 4 top numbers -- same idea as the
+    // occupancy small multiples below (no axes, straight segments, just
+    // the shape of the last 12 months) so you can see if a number's been
+    // climbing or sliding without leaving this page.
+    const TILE_SERIES = { revenue: S.income, net_profit: S.profit, occupancy: S.occupancy, revpar: S.revpar };
+    Object.entries(TILE_SERIES).forEach(([key, series]) => {
+      const canvas = document.getElementById('tile-spark-' + key);
+      if (!canvas || !series || !series.length) return;
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: S.months.slice(-12),
+          datasets: [{ data: series.slice(-12), borderColor: UN.brand, backgroundColor: 'transparent', fill: false, tension: 0, borderWidth: 1.5, pointRadius: 0, spanGaps: false }],
+        },
+        options: {
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          scales: { x: { display: false }, y: { display: false } },
+          elements: { line: { capBezierPoints: false } },
+        },
+      });
+    });
 
     function indices() {
       const n = S.months.length, all = S.months.map((_, i) => i);

@@ -233,6 +233,7 @@ main { max-width: 1160px; margin: 0 auto; padding: var(--s6) var(--s6) 64px; }
 .delta.down .arrow { color: var(--neg); }
 .delta.up, .delta.down, .delta.flat { color: var(--muted); background: none; }
 .tile .note { font-size: var(--fs-small); margin-top: 2px; }
+.tile-spark { height: 28px; margin-top: var(--s2); }
 
 .tiles-secondary {
   display: flex; flex-wrap: wrap; gap: var(--s1) var(--s6); background: none; border: none; border-radius: 0; overflow: visible;

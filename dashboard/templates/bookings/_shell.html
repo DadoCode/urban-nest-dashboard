@@ -3,6 +3,14 @@
 {% block title %}Bookings — Urban Nest Estates{% endblock %}
 {% block content %}
   {{ page_head("Bookings", "What's been booked, what's coming, and how occupancy is trending.") }}
-  {{ tabs([('overview', 'Overview', url_for('bookings.index') ~ nav_qs), ('calendar', 'Calendar', url_for('bookings.calendar_tab') ~ nav_qs), ('performance', 'Performance', url_for('bookings.performance') ~ nav_qs)], active_bookings_tab) }}
+  {% set items = [('overview', 'Overview', url_for('bookings.index') ~ nav_qs)] %}
+  {# Same reasoning as the property workspace's own Calendar tab: hide it
+     while there's no real day-level booking anywhere, rather than show
+     an always-empty grid. #}
+  {% if has_calendar_data or active_bookings_tab == 'calendar' %}
+    {% set items = items + [('calendar', 'Calendar', url_for('bookings.calendar_tab') ~ nav_qs)] %}
+  {% endif %}
+  {% set items = items + [('performance', 'Performance', url_for('bookings.performance') ~ nav_qs)] %}
+  {{ tabs(items, active_bookings_tab) }}
   {% block tab_content %}{% endblock %}
 {% endblock %}

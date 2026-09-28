@@ -78,10 +78,22 @@ def _load(conn, property_id):
     return prop, prop["type"] == "overhead", ctx
 
 
-def _ws(ctx, prop, tab, **extra):
+def _ws(conn, ctx, prop, tab, **extra):
     """Template variables every workspace tab shares."""
+    # Whether the Calendar tab has anything real to show -- day-level
+    # bookings, not the monthly-aggregate rows an Excel import creates.
+    # Not the same signal as _checklist()'s ical-only has_calendar: a
+    # property can have real day-level bookings from an uploaded
+    # statement with no iCal ever connected, and gating on iCal alone
+    # would wrongly hide a tab that actually has data. Without this, the
+    # tab showed an empty grid every time for any property that had
+    # never synced a calendar, even ones with real booking data.
+    has_calendar_data = bool(conn.execute(
+        "SELECT 1 FROM bookings WHERE property_id=? AND status='confirmed' AND reservation_id != 'monthly-aggregate' LIMIT 1",
+        (prop["id"],)).fetchone())
     return {"active": "properties", "active_property": prop["id"], "active_tab": tab, "prop": prop,
             "context_bar": True, "ctx": ctx, "fixed_property": prop, "hide_property": True,
+            "has_calendar_data": has_calendar_data,
             "year": ctx["end_year"], "month": ctx["end_month"], "month_name": MONTH_NAMES[ctx["end_month"]], **extra}
 
 
@@ -119,6 +131,10 @@ def detail(property_id):
         return redirect(url_for("properties.index"))
 
     start, end = _range(ctx)
+    # Same MTD-vs-full-prior-period fix as Overview's tiles (see
+    # routes/overview.py's kpi_rows()): a partial "This Month" compared
+    # against a full prior month/year isn't a real decline.
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
     if is_overhead:
         cur_cost = kpis.costs(conn, property_id, start, end)
         cmp_b = compare_bounds(ctx)
@@ -126,8 +142,8 @@ def detail(property_id):
         ly_cost = kpis.costs(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
             ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])))
         tiles = [{"label": "Total costs", "value": f"£{cur_cost:,.0f}",
-                  "delta": pct_delta(cur_cost, prev_cost) if prev_cost is not None else None,
-                  "delta_ly": pct_delta(cur_cost, ly_cost)}] if cur_cost or prev_cost or ly_cost else []
+                  "delta": None if mtd else (pct_delta(cur_cost, prev_cost) if prev_cost is not None else None),
+                  "delta_ly": None if mtd else pct_delta(cur_cost, ly_cost)}] if cur_cost or prev_cost or ly_cost else []
         primary_tiles, secondary_tiles = tiles, []
     else:
         # Same primary/secondary grouping as Portfolio Overview -- reused
@@ -147,7 +163,7 @@ def detail(property_id):
 
     resp = make_response(render_template(
         "property/overview.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "overview", is_overhead=is_overhead, primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, yoy=yoy),
+        **_ws(conn, ctx, prop, "overview", is_overhead=is_overhead, primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, yoy=yoy),
         months_json=json.dumps([s["ym"] for s in series]),
         income_json=json.dumps([s["revenue"] for s in series]),
         profit_json=json.dumps([s["net_profit"] for s in series]),
@@ -180,7 +196,7 @@ def bookings(property_id):
 
     resp = make_response(render_template(
         "property/bookings.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "bookings", is_overhead=is_overhead),
+        **_ws(conn, ctx, prop, "bookings", is_overhead=is_overhead),
         booked_nights=kpis.booked_nights(conn, property_id, start, end),
         adr=kpis.adr(conn, property_id, start, end), bookings=rows,
     ))
@@ -210,7 +226,7 @@ def calendar_tab(property_id):
 
     resp = make_response(render_template(
         "property/calendar.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "calendar", is_overhead=is_overhead),
+        **_ws(conn, ctx, prop, "calendar", is_overhead=is_overhead),
         prev_href=month_href(data["py"], data["pm"]), next_href=month_href(data["ny"], data["nm"]),
         **{k: v for k, v in data.items() if k not in ("py", "pm", "ny", "nm")},
     ))
@@ -236,9 +252,11 @@ def performance_tab(property_id):
     cur = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
     prev = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
 
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
+
     def t(label, key, fmt, base):
         cv = cur[key]
-        return {"label": label, "value": fmt(cv), "delta": pct_delta(cv, prev[key], min_base=base) if prev else None}
+        return {"label": label, "value": fmt(cv), "delta": None if mtd else (pct_delta(cv, prev[key], min_base=base) if prev else None)}
     tiles = [
         t("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%", 0.05),
         t("ADR", "adr", lambda v: f"£{v:,.0f}", 20),
@@ -260,7 +278,7 @@ def performance_tab(property_id):
 
     resp = make_response(render_template(
         "property/performance.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "performance", is_overhead=is_overhead, tiles=tiles),
+        **_ws(conn, ctx, prop, "performance", is_overhead=is_overhead, tiles=tiles),
         months_json=json.dumps(months), occ_json=json.dumps(occ), occ_portfolio_json=json.dumps(occ_portfolio),
         adr_json=json.dumps(adr_series),
     ))
@@ -288,7 +306,7 @@ def expenses_tab(property_id):
 
     resp = make_response(render_template(
         "property/expenses.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "expenses", is_overhead=is_overhead),
+        **_ws(conn, ctx, prop, "expenses", is_overhead=is_overhead),
         expenses=transactions, ledger_total=total,
     ))
     if not is_overhead:
@@ -312,7 +330,7 @@ def documents_tab(property_id):
 
     resp = make_response(render_template(
         "property/documents.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "documents", is_overhead=is_overhead),
+        **_ws(conn, ctx, prop, "documents", is_overhead=is_overhead),
         documents=documents, extraction_available=extraction.available(),
         health=health, health_period=ctx["display"], health_title_text=health_title(ctx),
         prefill_type=request.args.get("type", ""),
@@ -347,7 +365,7 @@ def settings_tab(property_id):
     start, end = _range(ctx)
     resp = make_response(render_template(
         "property/settings.html", all_properties=get_properties(conn),
-        **_ws(ctx, prop, "settings", is_overhead=is_overhead),
+        **_ws(conn, ctx, prop, "settings", is_overhead=is_overhead),
         checklist=_checklist(conn, property_id, is_overhead, ctx["end_year"], ctx["end_month"]),
         fee_pct=prop["management_fee_pct"], your_income=None if is_overhead else kpis.business_income(conn, property_id, start, end),
     ))

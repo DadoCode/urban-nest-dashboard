@@ -14,6 +14,24 @@ from services.vendors import get_or_create_vendor
 bp = Blueprint("expenses", __name__)
 
 
+def _real_costs(conn, property_id, start, end, capex=None):
+    """Money Urban Nest the company actually spent -- unlike kpis.costs()
+    (which sums a FLAT's own expense transactions, including the
+    management-fee transaction that flat books when it pays Urban Nest),
+    this excludes management_fee: for the flat that's a real cost, but
+    for the company it's income coming IN, not spend going out. Local to
+    this page's own rollups/tiles -- kpis.costs() itself is untouched, so
+    every real P&L/profit figure elsewhere is unaffected."""
+    clause, params = ("AND property_id=?", (property_id,)) if property_id else ("", ())
+    capex_clause = "" if capex is None else f"AND capex = {1 if capex else 0}"
+    return conn.execute(
+        f"""SELECT COALESCE(SUM(amount),0) FROM transactions
+            WHERE direction='expense' AND category != 'management_fee' {capex_clause}
+              AND date>=? AND date<? {clause}""",
+        (start, end, *params),
+    ).fetchone()[0]
+
+
 def _ledger_where(ctx, start, end, args):
     """WHERE fragments for the ledger: the shared context (period, property)
     plus the ledger's own narrowing filters. A chart click sets t_month,
@@ -22,7 +40,12 @@ def _ledger_where(ctx, start, end, args):
     if month and re.match(r"^\d{4}-\d{2}$", month):
         y, m = map(int, month.split("-"))
         start, end = kpis.month_bounds(y, m)
-    clauses, params = ["t.direction='expense'", "t.date>=?", "t.date<?"], [start, end]
+    # management_fee is excluded here too -- see _real_costs(). Expenses
+    # is "what did the company spend", and a management-fee transaction
+    # is never that (it's the flat paying Urban Nest, i.e. Urban Nest's
+    # own income) -- it already has a home, "Management Fee Earned" on
+    # Overview/Properties, so it isn't just missing from this list.
+    clauses, params = ["t.direction='expense'", "t.category != 'management_fee'", "t.date>=?", "t.date<?"], [start, end]
     if ctx["property_id"]:
         clauses.append("t.property_id=?"); params.append(ctx["property_id"])
     if args.get("t_category"):
@@ -57,11 +80,11 @@ def index():
     for ym in months:
         y, m = map(int, ym.split("-"))
         s, e = kpis.month_bounds(y, m)
-        opex_series.append(kpis.costs(conn, pid, s, e, capex=False))
-        capex_series.append(kpis.costs(conn, pid, s, e, capex=True))
+        opex_series.append(_real_costs(conn, pid, s, e, capex=False))
+        capex_series.append(_real_costs(conn, pid, s, e, capex=True))
 
     def tally(a, b):
-        total_opex, total_capex = kpis.costs(conn, pid, a, b, capex=False), kpis.costs(conn, pid, a, b, capex=True)
+        total_opex, total_capex = _real_costs(conn, pid, a, b, capex=False), _real_costs(conn, pid, a, b, capex=True)
         cleaning = conn.execute(
             f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='expense' AND category='cleaning' AND date>=? AND date<? {scope}",
             (a, b, *scope_params)).fetchone()[0]
@@ -71,7 +94,9 @@ def index():
 
     cur = tally(start, end)
     prev = tally(*cmp_bounds) if cmp_bounds else None
-    d = lambda key, base=100: pct_delta(cur[key], prev[key], min_base=base) if prev else None
+    # Same MTD-vs-full-prior-period fix as Overview's tiles.
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
+    d = lambda key, base=100: None if mtd else (pct_delta(cur[key], prev[key], min_base=base) if prev else None)
     tiles = [
         {"label": "Total costs", "value": f"£{cur['total']:,.0f}", "delta": d("total"), "href": None},
         {"label": "Opex", "value": f"£{cur['opex']:,.0f}", "delta": d("opex"), "href": {"t_type": "opex"}},
@@ -83,23 +108,23 @@ def index():
     property_rows = []
     if not pid:
         for p in flats:
-            opex = kpis.costs(conn, p["id"], start, end, capex=False)
-            capex = kpis.costs(conn, p["id"], start, end, capex=True)
+            opex = _real_costs(conn, p["id"], start, end, capex=False)
+            capex = _real_costs(conn, p["id"], start, end, capex=True)
             property_rows.append({"id": p["id"], "name": p["name"], "opex": opex, "capex": capex, "total": opex + capex})
         property_rows.sort(key=lambda r: r["total"], reverse=True)
         overhead = next((p for p in get_properties(conn) if p["type"] == "overhead"), None)
         if overhead:
-            oc = kpis.costs(conn, overhead["id"], start, end)
+            oc = _real_costs(conn, overhead["id"], start, end)
             if oc:
                 property_rows.append({"id": overhead["id"], "name": overhead["name"], "opex": oc, "capex": 0, "total": oc, "overhead": True})
 
     categories = conn.execute(
         f"""SELECT category, SUM(amount) amt, COUNT(*) n FROM transactions
-            WHERE direction='expense' AND date>=? AND date<? {scope} GROUP BY category ORDER BY amt DESC""",
+            WHERE direction='expense' AND category != 'management_fee' AND date>=? AND date<? {scope} GROUP BY category ORDER BY amt DESC""",
         (start, end, *scope_params)).fetchall()
     vendors = conn.execute(
         f"""SELECT v.id, v.name, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN vendors v ON v.id = t.vendor_id
-            WHERE t.direction='expense' AND t.category != 'reconciliation' AND t.date>=? AND t.date<? {scope.replace('property_id', 't.property_id')}
+            WHERE t.direction='expense' AND t.category NOT IN ('reconciliation', 'management_fee') AND t.date>=? AND t.date<? {scope.replace('property_id', 't.property_id')}
             GROUP BY v.id ORDER BY amt DESC LIMIT 10""",
         (start, end, *scope_params)).fetchall()
 
@@ -135,7 +160,11 @@ def index():
         context_bar=True, ctx=ctx, viewing=viewing, tiles=tiles, property_rows=property_rows,
         categories_rows=categories, vendor_rows=vendors, ledger=ledger, ledger_total=ledger_total,
         f=f, chips=chips, ledger_base=urlencode(base), base_params=base,
-        all_vendors=conn.execute("SELECT id, name FROM vendors ORDER BY name").fetchall(), categories=CATEGORIES,
+        all_vendors=conn.execute("SELECT id, name FROM vendors ORDER BY name").fetchall(),
+        # management_fee isn't offered as a filter here -- it's excluded
+        # from this whole page (see _real_costs), so filtering by it would
+        # only ever turn up empty.
+        categories=[c for c in CATEGORIES if c != "management_fee"],
         months_json=json.dumps(months), opex_json=json.dumps(opex_series), capex_json=json.dumps(capex_series),
         compare_label=ctx["compare_display"] or "",
     )

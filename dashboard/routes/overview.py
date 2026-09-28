@@ -47,13 +47,22 @@ def kpi_rows(conn, property_id, ctx):
     MIN_BASE = {"revenue": 100, "net_profit": 1000, "adr": 20, "revpar": 20,
                 "occupancy": 0.05, "margin": 0.05, "booked_nights": 2, "avg_stay": 0.5}
 
+    # This Month vs "prior period"/"prior year" compares a partial month
+    # (however many days have happened so far) against a FULL prior month
+    # -- that's not a real decline, it's an unfinished month next to a
+    # finished one, but it rendered exactly like a real red down-arrow
+    # every time. Same condition already used for the "MTD," label prefix
+    # above -- suppress the coloured delta rather than show a comparison
+    # that isn't actually fair.
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
+
     def tile(label, key, value_fmt, extra_note=None, cur_val=None, prev_val=None):
         cv = cur_val if cur_val is not None else cur[key]
         pv = prev_val if prev_val is not None else prev[key]
         lv = (last_year[key] if key in last_year.keys() else None) if cur_val is None else None
         min_base = MIN_BASE.get(key, 0)
-        delta = pct_delta(cv, pv, min_base=min_base)
-        delta_ly = pct_delta(cv, lv, min_base=min_base) if lv is not None else None
+        delta = None if mtd else pct_delta(cv, pv, min_base=min_base)
+        delta_ly = None if mtd else (pct_delta(cv, lv, min_base=min_base) if lv is not None else None)
         return {
             "key": key, "label": label, "value": value_fmt(cv),
             "delta": delta,
@@ -138,6 +147,7 @@ def index():
             "profit": [round(s["net_profit"], 2) for s in portfolio_series],
             "margin": [round(s["margin"] * 100, 1) for s in portfolio_series],
             "occupancy": [round(s["occupancy"] * 100, 1) for s in portfolio_series],
+            "revpar": [round(s["revpar"], 2) for s in portfolio_series],
         }),
         occ_props=occupancy_by_property, occ_props_json=json.dumps(occupancy_by_property),
         anchor_ym=anchor_ym,
