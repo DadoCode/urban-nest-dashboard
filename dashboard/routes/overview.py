@@ -109,6 +109,7 @@ def index():
             snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
             managed_rows.append({
                 "id": p["id"], "name": p["name"], "fee": snap["net_profit"],
+                "fee_pct": p["management_fee_pct"],
                 "occupancy": snap["occupancy"], "adr": snap["adr"],
             })
         else:
