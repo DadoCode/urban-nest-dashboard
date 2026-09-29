@@ -22,7 +22,7 @@
                 <td>{{ b.check_out }}</td>
                 <td class="num">{{ b.nights }}</td>
                 <td class="num">{{ b.net_revenue|money }}</td>
-                <td class="note">{{ b.source }}</td>
+                <td class="note">{{ b.source|replace('_', ' ')|title }}</td>
               </tr>
             {% endfor %}
           </tbody>

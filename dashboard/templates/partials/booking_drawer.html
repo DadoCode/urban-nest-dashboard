@@ -23,7 +23,7 @@
 </div>
 
 <div class="drawer-section">
-  <div class="drawer-field"><span>Source</span><strong>{{ b.source|replace('_', ' ') }}</strong></div>
+  <div class="drawer-field"><span>Source</span><strong>{{ b.source|replace('_', ' ')|title }}</strong></div>
   {% if doc %}
     <div class="drawer-field"><span>Document</span><a href="{{ url_for('documents.review', doc_id=doc.id) }}">{{ doc.filename }}</a></div>
   {% else %}

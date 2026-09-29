@@ -48,7 +48,7 @@
             <tbody>
               {% for c in categories_rows %}
                 <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_category=c.category) }}#ledger'">
-                  <td>{% if c.category == 'reconciliation' %}Historical adjustment{% else %}{{ c.category|replace('_', ' ') }}{% endif %}</td>
+                  <td>{% if c.category == 'reconciliation' %}Historical Adjustment{% else %}{{ c.category|replace('_', ' ')|title }}{% endif %}</td>
                   <td class="num">{{ c.n }}</td><td class="num">{{ c.amt|money }}</td>
                 </tr>
               {% endfor %}
@@ -102,7 +102,7 @@
       <input type="text" name="t_q" value="{{ f.t_q }}" placeholder="Search vendor or description…">
       <select name="t_category" onchange="this.form.submit()">
         <option value="">All categories</option>
-        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if f.t_category == c }}>{{ c|replace('_', ' ') }}</option>{% endfor %}
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if f.t_category == c }}>{{ c|replace('_', ' ')|title }}</option>{% endfor %}
       </select>
       <select name="t_type" onchange="this.form.submit()">
         <option value="">Opex and capex</option>
@@ -134,10 +134,10 @@
                 <td class="truncate">{{ t.vendor or '—' }}</td>
                 <td class="truncate note">{{ t.description or '' }}</td>
                 <td>{{ t.property_name }}</td>
-                <td>{% if t.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% else %}{{ t.category|replace('_', ' ') }}{% endif %}</td>
+                <td>{% if t.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical Adjustment</span>{% else %}{{ t.category|replace('_', ' ')|title }}{% endif %}</td>
                 <td>{{ 'Capex' if t.capex else 'Opex' }}</td>
                 <td class="num">{{ t.amount|money2 }}</td>
-                <td class="note">{{ t.source|replace('_', ' ') }}</td>
+                <td class="note">{{ t.source|replace('_', ' ')|title }}</td>
               </tr>
             {% endfor %}
           </tbody>

@@ -33,10 +33,10 @@
                 <td>{{ e.date }}</td>
                 <td class="truncate">{{ e.vendor or '—' }}</td>
                 <td class="truncate note">{{ e.description or '' }}</td>
-                <td>{% if e.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical adjustment</span>{% else %}{{ e.category|replace('_', ' ') }}{% endif %}</td>
+                <td>{% if e.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical Adjustment</span>{% else %}{{ e.category|replace('_', ' ')|title }}{% endif %}</td>
                 <td>{{ 'Capex' if e.capex else 'Opex' }}</td>
                 <td class="num">{{ e.amount|money2 }}</td>
-                <td class="note">{{ e.source|replace('_', ' ') }}</td>
+                <td class="note">{{ e.source|replace('_', ' ')|title }}</td>
               </tr>
             {% endfor %}
           </tbody>

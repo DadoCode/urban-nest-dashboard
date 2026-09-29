@@ -13,7 +13,7 @@
 <div class="drawer-section">
   <div class="drawer-field"><span>Property</span><strong>{{ tx.property_name }}</strong></div>
   <div class="drawer-field"><span>Classification</span><strong>{{ 'Capex' if tx.capex else 'Opex' }}</strong></div>
-  <div class="drawer-field"><span>Source</span><strong>{{ tx.source }}</strong></div>
+  <div class="drawer-field"><span>Source</span><strong>{{ tx.source|replace('_', ' ')|title }}</strong></div>
   {% if doc %}
     <div class="drawer-field"><span>Document</span><span style="text-align:right"><a href="{{ url_for('documents.review', doc_id=doc.id, item=line.id if line else None) }}">{{ doc.filename }}</a>{% if line and line.source_page %}<br><span class="note">page {{ line.source_page }}</span>{% elif line and line.source_row %}<br><span class="note">row {{ line.source_row }}</span>{% endif %}</span></div>
     <a class="btn secondary" style="margin-top:var(--s2); width:100%" href="{{ url_for('documents.review', doc_id=doc.id, item=line.id if line else None) }}">View source document</a>
@@ -44,7 +44,7 @@
     <label>Amount £ <input type="number" step="0.01" name="amount" value="{{ tx.amount }}"></label>
     <label>Category
       <select name="category">
-        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == tx.category }}>{{ c }}</option>{% endfor %}
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == tx.category }}>{{ c|replace('_', ' ')|title }}</option>{% endfor %}
       </select>
     </label>
     <label style="flex-direction:row; align-items:center; gap:6px"><input type="checkbox" name="capex" {{ 'checked' if tx.capex }} style="width:auto"> Capex</label>
