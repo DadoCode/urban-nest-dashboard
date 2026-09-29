@@ -72,7 +72,7 @@ def kpi_rows(conn, property_id, ctx):
         }
 
     primary = [
-        tile(f"Revenue — {period_label}", "revenue", lambda v: f"£{v:,.0f}"),
+        tile(f"Urban Nest Revenue — {period_label}", "revenue", lambda v: f"£{v:,.0f}"),
         tile("Property Profit", "net_profit", lambda v: f"£{v:,.0f}"),
         tile("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%"),
         tile("RevPAR", "revpar", lambda v: f"£{v:,.0f}"),

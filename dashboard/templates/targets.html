@@ -32,10 +32,11 @@
 
   {% call section("Portfolio — " ~ month_label) %}
     <div class="tiles two">
-      {% for key, label in [('revenue', 'Revenue'), ('profit', 'Net profit')] %}
+      {% set tile_info = {'revenue': METRIC_INFO.gross_booking_revenue, 'profit': METRIC_INFO.property_operating_profit} %}
+      {% for key, label in [('revenue', 'Gross Booking Revenue'), ('profit', 'Property Operating Profit')] %}
         {% set t = totals[key] %}
         <div class="tile target-tile">
-          <div class="label">{{ label }}</div>
+          <div class="label">{{ label }}<span class="info-dot" title="{{ tile_info[key] }}" tabindex="0" aria-label="{{ tile_info[key] }}">ⓘ</span></div>
           {% if t.n %}
             <div class="value">{{ t.actual|money }} <span class="of">/ {{ t.target|money }}</span></div>
             {% if t.pct is not none %}
@@ -46,12 +47,12 @@
             {% endif %}
           {% else %}
             <div class="value">—</div>
-            <div class="sub">No targets yet — none of the flats has enough history to average.</div>
+            <div class="sub">No targets yet — none of the properties has enough history to average.</div>
           {% endif %}
         </div>
       {% endfor %}
     </div>
-    <p class="note" style="margin-top:var(--s2)">Sum of the flats. Shared overhead costs aren't included in profit.</p>
+    <p class="note" style="margin-top:var(--s2)">Sum of the properties. Company-level business costs aren't included in Property Operating Profit.</p>
   {% endcall %}
 
   {% call section("By property", "Click a row to edit its targets") %}
@@ -61,8 +62,8 @@
           <thead>
             <tr>
               <th>Property</th>
-              <th class="num">Revenue</th><th class="num">Target</th><th>Progress</th>
-              <th class="num">Profit</th><th class="num">Target</th><th>Progress</th>
+              <th class="num" title="{{ METRIC_INFO.gross_booking_revenue }}">Gross Revenue</th><th class="num">Target</th><th>Progress</th>
+              <th class="num" title="{{ METRIC_INFO.property_operating_profit }}">Op. Profit</th><th class="num">Target</th><th>Progress</th>
               <th class="num">Occupancy</th>
               <th></th>
             </tr>

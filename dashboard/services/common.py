@@ -18,11 +18,19 @@ CATEGORIES = ["purchase", "cleaning", "utilities", "rent", "deposit", "council_t
 # _components.html); referenced directly by `title=` where a plain
 # table header wants the same wording without the visible icon.
 METRIC_INFO = {
-    "gross_booking_revenue": "Total guest booking value for reservations in this period -- not the same as Urban Nest's own income. A managed property's booking value mostly belongs to its owner; Urban Nest's own income from it is Management Fee Earned.",
-    "fee": "The management fee this business earned from a flat it manages for its owner.",
-    "net_profit": "Revenue minus this property's own costs -- for a managed flat, the same figure as its Revenue, since Urban Nest never sees that flat's own revenue or costs beyond the fee.",
+    "gross_booking_revenue": "Total guest booking value for reservations in this period -- not the same as Urban Nest Revenue. A managed property's booking value mostly belongs to its owner; Urban Nest's own income from it is Management Fee Earned.",
+    "revenue": "Revenue Urban Nest itself earns in the selected period: full property revenue for operated properties, plus management fees earned from managed properties.",
+    "fee": "The management fee Urban Nest earns for managing the property, based on the agreed percentage of its booking revenue.",
+    "net_profit": "Revenue minus this property's own costs. For a managed property, this equals Management Fee Earned, since Urban Nest's own income from it is just the fee.",
     "adr": "Average nightly rate actually achieved on booked nights.",
-    "revpar": "Revenue per available night (occupancy × ADR) -- how hard a flat is working.",
+    "revpar": "Revenue per available night (occupancy × ADR) -- how hard a property is working.",
+    # Targets' own calculation is NOT business-model-aware (see
+    # routes/targets.py) -- it's gross revenue minus this property's own
+    # costs for every property the same way, including a managed
+    # property's management-fee expense. That's a different number from
+    # the adjusted "Property Profit" shown on Overview/Properties, so it
+    # gets its own distinct name rather than reusing that one.
+    "property_operating_profit": "Gross booking revenue minus this property's own operating costs, before company-level business expenses. For a managed property this reflects the property's own economics, not Urban Nest's management income -- see Management Fee Earned for that.",
 }
 
 

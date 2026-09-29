@@ -132,9 +132,10 @@ def create_app():
     flask_app.jinja_env.filters["money2"] = lambda v: money(v, 2)
     flask_app.jinja_env.filters["money_k"] = money_k
     flask_app.jinja_env.filters["pct"] = lambda v, places=0: "—" if v is None else f"{v:.{places}f}%"
-    from services.common import CHANNELS, channel_key
+    from services.common import CHANNELS, METRIC_INFO, channel_key
     flask_app.jinja_env.filters["channel_key"] = channel_key
     flask_app.jinja_env.globals["CHANNELS"] = CHANNELS
+    flask_app.jinja_env.globals["METRIC_INFO"] = METRIC_INFO
     flask_app.jinja_env.filters["doc_label"] = lambda k: DOC_TYPE_LABELS.get(k, k)
 
     def xurl(base, endpoint="expenses.index", **extra):

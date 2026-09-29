@@ -2,7 +2,7 @@
 {% from "_components.html" import page_head, section, kpi_tile, empty_state %}
 {% block title %}{{ ctx.display }} Overview — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head(ctx.display ~ " Overview", flats_count ~ " apartments" ~ (" · " ~ viewing.name if viewing else "")) }}
+  {{ page_head(ctx.display ~ " Overview", flats_count ~ " active properties" ~ (" · " ~ viewing.name if viewing else "")) }}
 
   {% set period_views = {'this_month': 'Month', 'ytd': 'YTD', 'accounting_period': 'Accounting Period'} %}
   <div class="seg" style="margin-bottom:var(--s4)">
@@ -47,7 +47,7 @@
     </div>
   {% endcall %}
 
-  {% call section("Occupancy by property", "Last 12 months · click a flat for its full performance") %}
+  {% call section("Occupancy by property", "Last 12 months · click a property for its full performance") %}
     <div class="spark-grid">
       {% for pid, p in occ_props.items() %}
         <a class="spark-card" href="{{ cx('properties.performance_tab', property_id=pid) }}">
@@ -60,7 +60,7 @@
   {% endcall %}
 
   {% call section("Property performance") %}
-    <h3 style="margin-top:0">Rent-to-rent / operated</h3>
+    <h3 style="margin-top:0">Operated (rent-to-rent)</h3>
     <div class="card flush">
       {% if rtr_rows %}
         <table>
@@ -79,7 +79,7 @@
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No rent-to-rent properties", "Operated flats (no management fee set) will appear here.") }}
+        {{ empty_state("No operated properties", "Operated properties (no management fee set) will appear here.") }}
       {% endif %}
     </div>
 
@@ -87,7 +87,7 @@
     <div class="card flush">
       {% if managed_rows %}
         <table>
-          <thead><tr><th>Property</th><th class="num" title="The management fee this business earned from a flat it manages for its owner.">Management fee earned</th><th class="num">Occupancy</th><th class="num" title="Average nightly rate actually achieved on booked nights.">ADR</th></tr></thead>
+          <thead><tr><th>Property</th><th class="num">Management fee earned<span class="info-dot" title="{{ METRIC_INFO.fee }}" tabindex="0" aria-label="{{ METRIC_INFO.fee }}">ⓘ</span></th><th class="num">Occupancy</th><th class="num" title="Average nightly rate actually achieved on booked nights.">ADR</th></tr></thead>
           <tbody>
             {% for r in managed_rows %}
               <tr>
