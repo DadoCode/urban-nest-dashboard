@@ -33,12 +33,17 @@ def _scope(args):
 def _costs(conn, start, end, scope="all", property_id=None, capex=None):
     """Sum of real expense transactions for a scope, joined to
     properties.type so Property/Business is decided by cost-centre, not
-    category. A management-fee transaction sits on a flat's own book
-    and is a Property Cost here -- it was hidden from this page
-    entirely in an earlier pass; Phase 3 shows it correctly, under
-    Property Costs, rather than hiding it, so every real transaction is
-    accounted for exactly once (see the phase3_verify script)."""
-    clauses = ["t.direction='expense'", "t.date>=?", "t.date<?"]
+    category. category='management_fee' is always excluded here: that
+    transaction sits on a flat's own book with direction='expense'
+    (money leaving the FLAT's account), which is correct for the flat's
+    own P&L -- but it's the fee Urban Nest itself receives, already
+    counted as Urban Nest Revenue / Management Fee Earned elsewhere.
+    Counting it again here as Expenses spend would double it: once as
+    income, once as a cost. Corrected after a real regression -- a first
+    version of this Phase 3 pass counted it as a Property Cost, which
+    put money Urban Nest earns on the same page as money it spent (see
+    tests/test_expenses_management_fee.py)."""
+    clauses = ["t.direction='expense'", "t.category != 'management_fee'", "t.date>=?", "t.date<?"]
     params = [start, end]
     if property_id:
         clauses.append("t.property_id=?")
@@ -70,7 +75,14 @@ def _ledger_where(ctx, start, end, args):
     if month and re.match(r"^\d{4}-\d{2}$", month):
         y, m = map(int, month.split("-"))
         start, end = kpis.month_bounds(y, m)
-    clauses = ["t.direction='expense'", "t.date>=?", "t.date<?"]
+    # category != 'management_fee' here too, for the same reason as
+    # _costs() -- the ledger's own header total ("N · £X") has to match
+    # the summary tiles above it, so the exclusion has to be identical
+    # everywhere this page shows a total, not just in the tiles. The fee
+    # transactions aren't deleted -- they're still fully visible via
+    # Management Fee Earned's own drilldown and the transaction drawer,
+    # just not listed as if they were company spend on this page.
+    clauses = ["t.direction='expense'", "t.category != 'management_fee'", "t.date>=?", "t.date<?"]
     params = [start, end]
     if ctx["property_id"]:
         clauses.append("t.property_id=?"); params.append(ctx["property_id"])
@@ -213,7 +225,8 @@ def index():
         property_rows.sort(key=lambda r: r["total"], reverse=True)
         property_categories = conn.execute(
             """SELECT t.category, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN properties p ON p.id=t.property_id
-               WHERE t.direction='expense' AND p.type='flat' AND t.date>=? AND t.date<? GROUP BY t.category ORDER BY amt DESC""",
+               WHERE t.direction='expense' AND t.category != 'management_fee' AND p.type='flat' AND t.date>=? AND t.date<?
+               GROUP BY t.category ORDER BY amt DESC""",
             (start, end)).fetchall()
 
     # ---- Business Costs section: category breakdown only (no "by property" -- there is no property) ----
@@ -221,7 +234,8 @@ def index():
     if not pid and scope in ("all", "business"):
         business_categories = conn.execute(
             """SELECT t.category, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN properties p ON p.id=t.property_id
-               WHERE t.direction='expense' AND p.type='overhead' AND t.date>=? AND t.date<? GROUP BY t.category ORDER BY amt DESC""",
+               WHERE t.direction='expense' AND t.category != 'management_fee' AND p.type='overhead' AND t.date>=? AND t.date<?
+               GROUP BY t.category ORDER BY amt DESC""",
             (start, end)).fetchall()
 
     # ---- vendors, respecting the current scope ----
@@ -232,11 +246,25 @@ def index():
         vendor_scope_clause = "AND p.type='flat'"
     elif scope == "business":
         vendor_scope_clause = "AND p.type='overhead'"
+    # LEFT JOIN, not JOIN: a transaction can carry a raw vendor name
+    # (t.vendor) without yet having a resolved vendor_id -- an INNER
+    # JOIN here silently dropped every such row, which is exactly why
+    # this table showed "No vendors" on data that plainly had vendor
+    # names in its own ledger (confirmed against the demo: vendor_id was
+    # NULL on every transaction there, purely a seed-data gap, but the
+    # query itself needed to not depend on vendor_id being populated to
+    # begin with). Grouped by the resolved name so id-linked and
+    # not-yet-linked spellings of the same vendor still merge together
+    # when they happen to match exactly; v.id (kept for the click-
+    # through filter) is NULL for an unlinked row, so the template falls
+    # back to a text-search link for those.
     vendors = conn.execute(
-        f"""SELECT v.id, v.name, SUM(t.amount) amt, COUNT(*) n FROM transactions t
-            JOIN vendors v ON v.id = t.vendor_id JOIN properties p ON p.id = t.property_id
-            WHERE t.direction='expense' AND t.category != 'reconciliation' AND t.date>=? AND t.date<? {vendor_scope_clause}
-            GROUP BY v.id ORDER BY amt DESC LIMIT 10""",
+        f"""SELECT v.id, COALESCE(v.name, t.vendor) AS name, SUM(t.amount) amt, COUNT(*) n FROM transactions t
+            LEFT JOIN vendors v ON v.id = t.vendor_id JOIN properties p ON p.id = t.property_id
+            WHERE t.direction='expense' AND t.category NOT IN ('reconciliation', 'management_fee')
+              AND COALESCE(v.name, t.vendor) IS NOT NULL AND COALESCE(v.name, t.vendor) != ''
+              AND t.date>=? AND t.date<? {vendor_scope_clause}
+            GROUP BY COALESCE(v.name, t.vendor) ORDER BY amt DESC LIMIT 10""",
         (start, end, *vendor_scope_params)).fetchall()
 
     # ---- ledger, on this page, driven by the shared context + its own filters ----

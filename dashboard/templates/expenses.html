@@ -96,7 +96,8 @@
           <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
           <tbody>
             {% for v in vendor_rows %}
-              <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_vendor=v.id) }}#ledger'"><td>{{ v.name }}</td><td class="num">{{ v.n }}</td><td class="num">{{ v.amt|money }}</td></tr>
+              {% set link = xurl(base_params, t_vendor=v.id) if v.id else xurl(base_params, t_q=v.name) %}
+              <tr class="clickable" onclick="location.href='{{ link }}#ledger'"><td>{{ v.name }}</td><td class="num">{{ v.n }}</td><td class="num">{{ v.amt|money }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
