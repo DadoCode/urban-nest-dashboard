@@ -3,7 +3,7 @@
 {% block tab_content %}
   <div class="tiles">
     <div class="tile"><div class="label">Booked nights</div><div class="value">{{ booked_nights }}</div></div>
-    <div class="tile"><div class="label">ADR</div><div class="value">{{ adr|money }}</div></div>
+    <div class="tile"><div class="label" title="Average nightly rate actually achieved on booked nights.">ADR</div><div class="value">{{ adr|money }}</div></div>
     <div class="tile"><div class="label">Reservations</div><div class="value">{{ bookings|length }}</div></div>
   </div>
 

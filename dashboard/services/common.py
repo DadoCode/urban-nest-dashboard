@@ -11,6 +11,20 @@ MONTH_ABBR = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
 CATEGORIES = ["purchase", "cleaning", "utilities", "rent", "deposit", "council_tax", "maintenance", "management_fee",
               "insurance", "software", "accounting", "marketing", "salary", "furniture", "booking_income", "other"]
 
+# One-sentence definitions for the handful of labels that are easy to
+# misread -- not a replacement for a clear name, just precision on top
+# of one. Keyed by the same `key` every KPI tile already carries, so a
+# tile picks its own definition up automatically (see kpi_tile() in
+# _components.html); referenced directly by `title=` where a plain
+# table header wants the same wording without the visible icon.
+METRIC_INFO = {
+    "gross_booking_revenue": "Total guest booking value for reservations in this period -- not the same as Urban Nest's own income. A managed property's booking value mostly belongs to its owner; Urban Nest's own income from it is Management Fee Earned.",
+    "fee": "The management fee this business earned from a flat it manages for its owner.",
+    "net_profit": "Revenue minus this property's own costs -- for a managed flat, the same figure as its Revenue, since Urban Nest never sees that flat's own revenue or costs beyond the fee.",
+    "adr": "Average nightly rate actually achieved on booked nights.",
+    "revpar": "Revenue per available night (occupancy × ADR) -- how hard a flat is working.",
+}
+
 
 def pct_delta(current, previous, min_base=0):
     """None when there's nothing to compare against, or when `previous` is

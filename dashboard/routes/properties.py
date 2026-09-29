@@ -7,7 +7,7 @@ import db
 import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
-from services.common import MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta
+from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta
 from services.completeness import completeness_for, health_for, health_state, seed_defaults
 from services.context import compare_bounds, link_params, range_params, request_context
 from services.vendors import get_or_create_vendor
@@ -256,7 +256,8 @@ def performance_tab(property_id):
 
     def t(label, key, fmt, base):
         cv = cur[key]
-        return {"label": label, "value": fmt(cv), "delta": None if mtd else (pct_delta(cv, prev[key], min_base=base) if prev else None)}
+        return {"label": label, "value": fmt(cv), "info": METRIC_INFO.get(key),
+                "delta": None if mtd else (pct_delta(cv, prev[key], min_base=base) if prev else None)}
     tiles = [
         t("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%", 0.05),
         t("ADR", "adr", lambda v: f"£{v:,.0f}", 20),

@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request
 
 import db
 import services.kpis as kpis
-from services.common import get_properties, pct_delta
+from services.common import METRIC_INFO, get_properties, pct_delta
 from services.context import request_context, range_params
 
 bp = Blueprint("overview", __name__)
@@ -68,6 +68,7 @@ def kpi_rows(conn, property_id, ctx):
             "delta": delta,
             "delta_ly": delta_ly,
             "note": extra_note,
+            "info": METRIC_INFO.get(key),
         }
 
     primary = [

@@ -14,12 +14,12 @@
   {% endcall %}
 
   {% if not is_overhead %}
-  {% call section("Ownership", "What this business actually earns from " ~ prop.name) %}
+  {% call section("Model", "What this business actually earns from " ~ prop.name) %}
   <div class="card">
     <p class="note" style="margin-top:0">Most flats are run under a management agreement: this business keeps only a percentage of revenue and the rest belongs to the flat's owner. Set that here so "your income" is calculated correctly on Overview and Properties.</p>
     <form method="post" action="{{ url_for('properties.save_ownership', property_id=prop.id) }}" x-data="{ kind: '{{ 'managed' if fee_pct else 'owned' }}' }">
       <div style="display:flex; gap:var(--s5); margin-bottom:var(--s3)">
-        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="owned" x-model="kind" style="width:auto"> Fully owned</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="owned" x-model="kind" style="width:auto"> Operated by Urban Nest</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="managed" x-model="kind" style="width:auto"> Managed for an owner</label>
       </div>
       <div x-show="kind === 'managed'" x-cloak style="display:flex; align-items:center; gap:var(--s2); margin-bottom:var(--s3)">

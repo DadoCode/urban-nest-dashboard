@@ -7,7 +7,7 @@
     </div>
     {% if secondary_tiles %}
       <div class="tiles tiles-secondary">
-        {% for t in secondary_tiles %}<div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endfor %}
+        {% for t in secondary_tiles %}<div class="tile"><div class="label" {% if t.info %}title="{{ t.info }}"{% endif %}>{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endfor %}
       </div>
     {% endif %}
   {% else %}

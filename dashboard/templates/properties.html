@@ -6,8 +6,6 @@
     <button type="button" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
   {% endcall %}
 
-  <p class="note" style="margin:calc(var(--s3) * -1) 0 var(--s4)">Revenue and Property profit below are what this business actually earns -- for a managed flat (set on its Settings tab) that's only the management fee, not the flat's full booking revenue. ADR and RevPAR describe the flat itself and aren't affected.</p>
-
   <form method="get" class="filter-bar">
     <input type="text" name="q" value="{{ q }}" placeholder="Search properties…">
     <select name="status" onchange="this.form.submit()">
@@ -25,11 +23,16 @@
         <thead>
           <tr>
             <th><a class="sort {{ 'on' if sort == 'name' }}" href="{{ cx('properties.index', sort='name', q=q or None, status=status) }}">Property</a></th>
+            {% set col_info = {
+              'revenue': "Full booking revenue for an operated flat -- for a managed flat, only its management fee (the rest belongs to the owner).",
+              'profit': "Revenue minus this flat's own costs -- for a managed flat, the same figure as its Revenue, since Urban Nest never sees that flat's own revenue or costs beyond the fee.",
+              'adr': 'Average nightly rate actually achieved on booked nights.',
+            } %}
             {% for key, label in [('revenue', 'Revenue'), ('profit', 'Property profit'), ('occupancy', 'Occupancy'), ('adr', 'ADR')] %}
-              <th class="num"><a class="sort {{ 'on' if sort == key }}" href="{{ cx('properties.index', sort=key, q=q or None, status=status) }}">{{ label }}{% if sort == key %} ↓{% endif %}</a></th>
+              <th class="num"><a class="sort {{ 'on' if sort == key }}" href="{{ cx('properties.index', sort=key, q=q or None, status=status) }}" {% if col_info.get(key) %}title="{{ col_info[key] }}"{% endif %}>{{ label }}{% if sort == key %} ↓{% endif %}</a></th>
             {% endfor %}
-            <th class="num" title="Revenue per available night">RevPAR</th>
-            <th>Ownership</th>
+            <th class="num" title="Revenue per available night (occupancy × ADR) -- how hard a flat is working.">RevPAR</th>
+            <th>Model</th>
             <th>Data health</th>
           </tr>
         </thead>
@@ -42,7 +45,7 @@
               <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
               <td class="num">{{ r.adr|money }}</td>
               <td class="num">{{ r.revpar|money }}</td>
-              <td>{% if r.managed %}<span class="pill" title="This business earns {{ '%g'|format(r.fee) }}% of this flat's revenue">Managed · {{ '%g'|format(r.fee) }}%</span>{% else %}<span class="pill pos">Owned</span>{% endif %}</td>
+              <td>{% if r.managed %}<span class="pill" title="This business earns {{ '%g'|format(r.fee) }}% of this flat's revenue">Managed · {{ '%g'|format(r.fee) }}%</span>{% else %}<span class="pill pos">Operated</span>{% endif %}</td>
               <td>
                 <button type="button" class="pill {{ r.health_kind }}" title="See exactly what is missing"
                         hx-get="{{ cx('properties.health_drawer', property_id=r.id) }}" hx-target="#drawer" hx-swap="innerHTML">{{ r.health_label }} ›</button>

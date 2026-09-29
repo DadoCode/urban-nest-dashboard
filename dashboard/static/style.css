@@ -233,6 +233,11 @@ main { max-width: 1160px; margin: 0 auto; padding: var(--s6) var(--s6) 64px; }
 .tile { padding: var(--s3) var(--s4) 14px; border-left: 1px solid var(--line); min-width: 0; }
 .tile:first-child { border-left: none; }
 .tile .label { font-size: var(--fs-label); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+/* Precision on top of an already-clear label, not a replacement for
+   one -- see services/common.py's METRIC_INFO. Native title tooltip:
+   no new JS, works on hover and (via tabindex) keyboard focus. */
+.info-dot { display: inline-block; margin-left: 4px; font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--line-strong); cursor: help; vertical-align: 1px; }
+.info-dot:hover, .info-dot:focus-visible { color: var(--muted); outline: none; }
 .tile .value { font-size: var(--fs-kpi); font-weight: 600; margin-top: 2px; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .tile .delta, .delta { display: block; margin-top: 2px; font-size: var(--fs-small); font-weight: 400; color: var(--muted); padding: 0; background: none; border-radius: 0; }
 .delta .arrow { font-weight: 600; margin-right: 2px; }

@@ -64,7 +64,7 @@
     <div class="card flush">
       {% if rtr_rows %}
         <table>
-          <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Total costs</th><th class="num">Property profit</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
+          <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Total costs</th><th class="num" title="Revenue minus this property's own costs.">Property profit</th><th class="num">Occupancy</th><th class="num" title="Average nightly rate actually achieved on booked nights.">ADR</th></tr></thead>
           <tbody>
             {% for r in rtr_rows %}
               <tr>
@@ -79,7 +79,7 @@
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No rent-to-rent properties", "Owned/operated flats (no management fee set) will appear here.") }}
+        {{ empty_state("No rent-to-rent properties", "Operated flats (no management fee set) will appear here.") }}
       {% endif %}
     </div>
 
@@ -87,7 +87,7 @@
     <div class="card flush">
       {% if managed_rows %}
         <table>
-          <thead><tr><th>Property</th><th class="num">Management fee earned</th><th class="num">Occupancy</th><th class="num">ADR</th></tr></thead>
+          <thead><tr><th>Property</th><th class="num" title="The management fee this business earned from a flat it manages for its owner.">Management fee earned</th><th class="num">Occupancy</th><th class="num" title="Average nightly rate actually achieved on booked nights.">ADR</th></tr></thead>
           <tbody>
             {% for r in managed_rows %}
               <tr>

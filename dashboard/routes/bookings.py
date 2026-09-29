@@ -7,7 +7,7 @@ from flask import Blueprint, redirect, render_template, request, url_for
 
 import db
 import services.kpis as kpis
-from services.common import MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta
+from services.common import METRIC_INFO, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta
 from services.context import compare_bounds, range_params, request_context
 
 bp = Blueprint("bookings", __name__)
@@ -52,9 +52,9 @@ def index():
     tiles = [
         {"label": "Reservations", "value": f"{reservations:,}", "delta": None if mtd else (pct_delta(reservations, prev_res, min_base=2) if prev else None)},
         {"label": "Booked nights", "value": f"{nights:,}", "delta": None if mtd else (pct_delta(nights, prev_nights, min_base=5) if prev else None)},
-        {"label": "ADR", "value": f"£{kpis.adr(conn, pid, start, end):,.0f}", "delta": None},
+        {"label": "ADR", "value": f"£{kpis.adr(conn, pid, start, end):,.0f}", "info": METRIC_INFO["adr"], "delta": None},
         {"label": "Avg stay", "value": (f"{kpis.avg_stay(conn, pid, start, end):.1f} nights" if kpis.avg_stay(conn, pid, start, end) else "—"), "delta": None},
-        {"label": "Confirmed booking revenue", "value": f"£{revenue:,.0f}", "delta": None if mtd else (pct_delta(revenue, prev_rev, min_base=100) if prev else None)},
+        {"label": "Gross Booking Revenue", "value": f"£{revenue:,.0f}", "info": METRIC_INFO["gross_booking_revenue"], "delta": None if mtd else (pct_delta(revenue, prev_rev, min_base=100) if prev else None)},
     ]
 
     today = datetime.date.today()

@@ -93,13 +93,13 @@ def _property_table(conn, start, end, heading="By property", use_adjusted=False)
         row = [p["name"], s["revenue"], s["costs"], s["net_profit"], s["margin"] * 100, s["occupancy"] * 100, s["adr"]]
         if use_adjusted:
             fee = p["management_fee_pct"]
-            row.append(f"Managed · {fee:g}%" if fee else "Owned")
+            row.append(f"Managed · {fee:g}%" if fee else "Operated")
         rows.append(row)
     rows.sort(key=lambda r: r[1], reverse=True)
     columns = [_col("Property"), _col("Revenue", "money"), _col("Costs", "money"), _col("Net profit", "money"),
                _col("Margin", "pct"), _col("Occupancy", "pct"), _col("ADR", "money")]
     if use_adjusted:
-        columns.append(_col("Ownership"))
+        columns.append(_col("Model"))
     return {"heading": heading, "columns": columns, "rows": rows}
 
 
