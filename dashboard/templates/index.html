@@ -2,7 +2,7 @@
 {% from "_components.html" import page_head, section, kpi_tile, empty_state %}
 {% block title %}{{ ctx.display }} Overview — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head(ctx.display ~ " Overview", flats_count ~ " active properties" ~ (" · " ~ viewing.name if viewing else "")) }}
+  {{ page_head(ctx.display ~ " Overview", flats_count ~ " properties" ~ (" · " ~ viewing.name if viewing else "")) }}
 
   {% set period_views = {'this_month': 'Month', 'ytd': 'YTD', 'accounting_period': 'Accounting Period'} %}
   <div class="seg" style="margin-bottom:var(--s4)">
@@ -27,7 +27,7 @@
     <div class="card">
       <div class="chart-tools">
         <div class="seg" id="series-seg">
-          <button type="button" class="on" data-series="0"><span class="sw" style="background:var(--series-revenue)"></span>Revenue</button>
+          <button type="button" class="on" data-series="0"><span class="sw" style="background:var(--series-revenue)"></span>Urban Nest Revenue</button>
           <button type="button" class="on" data-series="1"><span class="sw" style="background:var(--neg)"></span>Costs</button>
           <button type="button" class="on" data-series="2"><span class="sw" style="background:var(--series-profit)"></span>Property Profit</button>
         </div>
@@ -155,7 +155,7 @@
       data: {
         labels: [],
         datasets: [
-          { type: 'bar', label: 'Revenue', data: [], stack: 'rev', backgroundColor: UN.revenue, order: 2 },
+          { type: 'bar', label: 'Urban Nest Revenue', data: [], stack: 'rev', backgroundColor: UN.revenue, order: 2 },
           { type: 'bar', label: 'Costs', data: [], stack: 'rev', backgroundColor: '#c2413a', order: 2 }, // matches --neg
           { type: 'line', label: 'Property Profit', data: [], backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
         ],
@@ -185,7 +185,7 @@
               label: (item) => {
                 const i = S.months.indexOf(item.label);
                 if (item.dataset.label === 'Costs') return `Costs: ${moneyFull(S.costs[i])}`;
-                if (item.dataset.label === 'Revenue') return `Revenue: ${moneyFull(S.income[i])}`;
+                if (item.dataset.label === 'Urban Nest Revenue') return `Urban Nest Revenue: ${moneyFull(S.income[i])}`;
                 return `Property Profit: ${moneyFull(S.profit[i])}`;
               },
             },
