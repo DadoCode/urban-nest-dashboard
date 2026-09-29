@@ -5,14 +5,14 @@
     <div class="card"><div class="chart-box" style="height:200px"><canvas id="portfolioChart"></canvas></div></div>
   {% endcall %}
 
-  {% call section("By flat", current_month) %}
+  {% call section("By property", current_month) %}
     <div class="card"><div class="chart-box" style="height:{{ [rows|length * 34 + 30, 120]|max }}px"><canvas id="rankedChart"></canvas></div></div>
   {% endcall %}
 
   {% call section("Occupancy vs ADR", current_month) %}
     <div class="card">
       <div class="chart-box" style="height:340px"><canvas id="scatterChart"></canvas></div>
-      <p class="note" style="margin:var(--s3) 0 0">Each dot is one flat; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
+      <p class="note" style="margin:var(--s3) 0 0">Each dot is one property; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
       <div id="scatter-legend" class="chan-legend" style="margin-top:var(--s2)"></div>
     </div>
   {% endcall %}
@@ -20,7 +20,7 @@
   {% call section("Occupancy heatmap", "Last 12 months, % of nights booked") %}
     <div class="card flush" style="overflow-x:auto">
       <table style="font-size:var(--fs-small)">
-        <thead><tr><th>Flat</th>{% for m in heatmap_months %}<th class="num" style="padding:8px 6px">{{ m }}</th>{% endfor %}</tr></thead>
+        <thead><tr><th>Property</th>{% for m in heatmap_months %}<th class="num" style="padding:8px 6px">{{ m }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for r in heatmap_rows %}
             <tr>
@@ -39,10 +39,10 @@
     </div>
   {% endcall %}
 
-  {% call section("By flat", "Detail") %}
+  {% call section("By property", "Detail") %}
     <div class="card flush">
       <table>
-        <thead><tr><th>Flat</th><th class="num">Occupancy</th><th class="num">Days booked</th><th class="num">Change vs prior month</th></tr></thead>
+        <thead><tr><th>Property</th><th class="num">Occupancy</th><th class="num">Days booked</th><th class="num">Change vs prior month</th></tr></thead>
         <tbody>
           {% for r in rows %}
             <tr>

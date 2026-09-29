@@ -2,16 +2,25 @@
 {% from "_components.html" import page_head, section, delta, empty_state %}
 {% block title %}Expenses — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Expenses", "Operating and capital costs" ~ (" · " ~ viewing.name if viewing else " across the portfolio")) }}
+  {{ page_head("Expenses", "Property and business costs" ~ (" · " ~ viewing.name if viewing else " across the portfolio")) }}
+
+  {% if scope is not none %}
+    {% set scope_views = {'all': 'All', 'property': 'Property Costs', 'business': 'Business Costs'} %}
+    <div class="seg" style="margin-bottom:var(--s4)">
+      {% for key, label in scope_views.items() %}
+        <a class="{{ 'on' if scope == key }}" href="{{ xurl(base_params, scope=key) }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
 
   <div class="tiles">
-    {% for t in tiles %}
-      {% if t.href %}<a class="tile" href="{{ xurl(base_params, **t.href) }}#ledger" title="Show these transactions">
-      {% else %}<div class="tile">{% endif %}
-        <div class="label">{{ t.label }}</div>
+    {% for t in summary_tiles %}
+      <div class="tile">
+        <div class="label">{{ t.label }}{% if t.info %}<span class="info-dot" title="{{ t.info }}" tabindex="0" aria-label="{{ t.info }}">ⓘ</span>{% endif %}</div>
         <div class="value">{{ t.value }}</div>
+        {% if t.sub %}<div class="note">{{ t.sub }}</div>{% endif %}
         {{ delta(t.delta, 'vs ' ~ compare_label, True) if t.delta is not none and compare_label }}
-      {% if t.href %}</a>{% else %}</div>{% endif %}
+      </div>
     {% endfor %}
   </div>
 
@@ -19,70 +28,70 @@
     <div class="card"><div class="chart-box" style="height:260px"><canvas id="costsChart"></canvas></div></div>
   {% endcall %}
 
-  <div class="grid-2">
-    {% if property_rows %}
-      {% call section("By property") %}
-        <div class="card flush">
-          <table>
-            <thead><tr><th>Property</th><th class="num">Opex</th><th class="num">Capex</th><th class="num">Total</th></tr></thead>
-            <tbody>
-              {% for r in property_rows %}
-                <tr class="clickable" onclick="location.href='{{ xurl(base_params, property=r.id) }}#ledger'">
-                  <td>{{ r.name }}</td>
-                  <td class="num">{{ r.opex|money }}</td>
-                  <td class="num">{{ r.capex|money }}</td>
-                  <td class="num" style="font-weight:600">{{ r.total|money }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% endcall %}
-    {% endif %}
-
-    {% call section("By category") %}
-      <div class="card flush">
-        {% if categories_rows %}
-          <table>
-            <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
-            <tbody>
-              {% for c in categories_rows %}
-                <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_category=c.category) }}#ledger'">
-                  <td>{% if c.category == 'reconciliation' %}Historical Adjustment{% else %}{{ c.category|replace('_', ' ')|title }}{% endif %}</td>
-                  <td class="num">{{ c.n }}</td><td class="num">{{ c.amt|money }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% else %}
-          {{ empty_state("No expenses in this period", "Costs appear once invoices or statements are confirmed. Try a different period.", "Upload documents", url_for('documents.index')) }}
-        {% endif %}
-      </div>
-    {% endcall %}
-
-    {% if not property_rows %}
-      {% call section("Top vendors") %}
-        <div class="card flush">
-          {% if vendor_rows %}
+  {% if property_rows or property_categories %}
+    {% call section("Property costs", "Which properties are costing us money") %}
+      <div class="grid-2">
+        {% if property_rows %}
+          <div class="card flush">
             <table>
-              <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+              <thead><tr><th>Property</th><th class="num">Opex</th><th class="num">Capex</th><th class="num">Total</th></tr></thead>
               <tbody>
-                {% for v in vendor_rows %}
-                  <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_vendor=v.id) }}#ledger'"><td>{{ v.name }}</td><td class="num">{{ v.n }}</td><td class="num">{{ v.amt|money }}</td></tr>
+                {% for r in property_rows %}
+                  <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_scope=r.id) }}#ledger'">
+                    <td>{{ r.name }}</td>
+                    <td class="num">{{ r.opex|money }}</td>
+                    <td class="num">{{ r.capex|money }}</td>
+                    <td class="num" style="font-weight:600">{{ r.total|money }}</td>
+                  </tr>
                 {% endfor %}
               </tbody>
             </table>
-          {% else %}
-            {{ empty_state("No vendors in this period", "Vendors appear once expenses carry a supplier name.") }}
-          {% endif %}
-        </div>
-      {% endcall %}
-    {% endif %}
-  </div>
+          </div>
+        {% endif %}
+        {% if property_categories %}
+          <div class="card flush">
+            <table>
+              <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+              <tbody>
+                {% for c in property_categories %}
+                  <tr class="clickable" onclick="location.href='{{ xurl(base_params, scope='property', t_category=c.category) }}#ledger'">
+                    <td>{% if c.category == 'reconciliation' %}Historical Adjustment{% else %}{{ c.category|replace('_', ' ')|title }}{% endif %}</td>
+                    <td class="num">{{ c.n }}</td><td class="num">{{ c.amt|money }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </div>
+    {% endcall %}
+  {% endif %}
 
-  {% if property_rows and vendor_rows %}
-    {% call section("Top vendors") %}
+  {% if business_categories %}
+    {% call section("Business costs", "What it costs to run Urban Nest itself") %}
       <div class="card flush">
+        <table>
+          <thead><tr><th>Category</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            {% for c in business_categories %}
+              <tr class="clickable" onclick="location.href='{{ xurl(base_params, scope='business', t_category=c.category) }}#ledger'">
+                <td>{{ c.category|replace('_', ' ')|title }}</td>
+                <td class="num">{{ c.n }}</td><td class="num">{{ c.amt|money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endcall %}
+  {% elif scope == 'business' %}
+    {% call section("Business costs") %}
+      {{ empty_state("No business costs in this period", "Company-level costs (software, salaries, accounting, marketing) appear here once recorded against Business, not a property.") }}
+    {% endcall %}
+  {% endif %}
+
+  {% call section("Top vendors") %}
+    <div class="card flush">
+      {% if vendor_rows %}
         <table>
           <thead><tr><th>Vendor</th><th class="num">Items</th><th class="num">Amount</th></tr></thead>
           <tbody>
@@ -91,15 +100,25 @@
             {% endfor %}
           </tbody>
         </table>
-      </div>
-    {% endcall %}
-  {% endif %}
+      {% else %}
+        {{ empty_state("No vendors in this period", "Vendors appear once expenses carry a supplier name.") }}
+      {% endif %}
+    </div>
+  {% endcall %}
 
   {% call section("Transactions", (ledger_total.n ~ " · " ~ (ledger_total.amt|money)) if ledger_total.n else None, "ledger") %}
     <form method="get" class="filter-bar">
       {% for k, v in base_params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      {% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}
       {% if f.t_month %}<input type="hidden" name="t_month" value="{{ f.t_month }}">{% endif %}
       <input type="text" name="t_q" value="{{ f.t_q }}" placeholder="Search vendor or description…">
+      {% if scope is not none %}
+        <select name="t_scope" onchange="this.form.submit()">
+          <option value="">All scopes</option>
+          <option value="business" {{ 'selected' if f.t_scope == 'business' }}>Business</option>
+          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if f.t_scope == p.id }}>{{ p.name }}</option>{% endfor %}
+        </select>
+      {% endif %}
       <select name="t_category" onchange="this.form.submit()">
         <option value="">All categories</option>
         {% for c in categories %}<option value="{{ c }}" {{ 'selected' if f.t_category == c }}>{{ c|replace('_', ' ')|title }}</option>{% endfor %}
@@ -119,21 +138,21 @@
       <div class="chips">
         <span class="note">Showing</span>
         {% for c in chips %}<a class="chip" href="{{ c.href }}">{{ c.label }} <span>×</span></a>{% endfor %}
-        <a class="clear-link" href="{{ xurl(base_params) }}#ledger">Clear all</a>
+        <a class="clear-link" href="{{ xurl(base_params, scope=scope) if scope else xurl(base_params) }}#ledger">Clear all</a>
       </div>
     {% endif %}
 
     <div class="card flush">
       {% if ledger %}
         <table>
-          <thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Property</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
+          <thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Scope</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
           <tbody>
             {% for t in ledger %}
               <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML">
                 <td>{{ t.date }}</td>
                 <td class="truncate">{{ t.vendor or '—' }}</td>
                 <td class="truncate note">{{ t.description or '' }}</td>
-                <td>{{ t.property_name }}</td>
+                <td>{{ 'Business' if t.property_type == 'overhead' else t.property_name }}</td>
                 <td>{% if t.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical Adjustment</span>{% else %}{{ t.category|replace('_', ' ')|title }}{% endif %}</td>
                 <td>{{ 'Capex' if t.capex else 'Opex' }}</td>
                 <td class="num">{{ t.amount|money2 }}</td>
@@ -143,7 +162,7 @@
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No transactions match", "Nothing in this period fits the filters above. Clear a filter or change the period.", "Clear filters", xurl(base_params) ~ '#ledger') }}
+        {{ empty_state("No transactions match", "Nothing in this period fits the filters above. Clear a filter or change the period.", "Clear filters", (xurl(base_params, scope=scope) if scope else xurl(base_params)) ~ '#ledger') }}
       {% endif %}
     </div>
     {% if ledger_total.n > ledger|length %}<p class="note" style="margin-top:var(--s2)">Showing the latest {{ ledger|length }} of {{ ledger_total.n }} matching transactions.</p>{% endif %}
@@ -151,18 +170,17 @@
 
   <script>
     const months = {{ months_json|safe }};
-    const opex = {{ opex_json|safe }};
-    const capex = {{ capex_json|safe }};
+    const SERIES = {{ chart_series_json|safe }};
     const LEDGER_BASE = {{ ledger_base|tojson }};
+    const SCOPE = {{ (scope or '')|tojson }};
+    const SERIES_COLORS = { 'Property Costs': UN.costs, 'Business Costs': UN.capex, 'Costs': UN.costs };
+    const seriesNames = Object.keys(SERIES);
 
     new Chart(document.getElementById('costsChart'), {
       type: 'bar',
       data: {
         labels: months,
-        datasets: [
-          { label: 'Opex', data: opex, backgroundColor: UN.costs },
-          { label: 'Capex', data: capex, backgroundColor: UN.capex },
-        ],
+        datasets: seriesNames.map((name) => ({ label: name, data: SERIES[name], backgroundColor: SERIES_COLORS[name] || UN.costs })),
       },
       options: {
         interaction: { mode: 'index', intersect: false },
@@ -170,11 +188,18 @@
         onClick: (e, els, chart) => {
           const hit = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true)[0] || els[0];
           if (!hit) return;
-          const type = hit.datasetIndex === 0 ? 'opex' : 'capex';
-          location.href = '?' + LEDGER_BASE + '&t_month=' + months[hit.index] + '&t_type=' + type + '#ledger';
+          const clickedScope = chart.data.datasets[hit.datasetIndex].label === 'Business Costs' ? 'business'
+            : chart.data.datasets[hit.datasetIndex].label === 'Property Costs' ? 'property' : SCOPE;
+          const p = new URLSearchParams(LEDGER_BASE);
+          p.set('t_month', months[hit.index]);
+          if (clickedScope) p.set('scope', clickedScope); else p.delete('scope');
+          location.href = '?' + p.toString() + '#ledger';
         },
-        scales: quietScales(moneyShort, { x: { stacked: true, grid: { display: false }, border: { display: false }, ticks: monthTicks() }, y: { stacked: true, beginAtZero: true, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: moneyShort, maxTicksLimit: 6 } } }),
-        plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
+        scales: quietScales(moneyShort, { x: { stacked: seriesNames.length > 1, grid: { display: false }, border: { display: false }, ticks: monthTicks() }, y: { stacked: seriesNames.length > 1, beginAtZero: true, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: moneyShort, maxTicksLimit: 6 } } }),
+        plugins: {
+          legend: { display: seriesNames.length > 1 },
+          tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } },
+        },
       },
     });
   </script>

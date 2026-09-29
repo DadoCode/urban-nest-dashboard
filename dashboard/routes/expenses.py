@@ -13,41 +13,78 @@ from services.vendors import get_or_create_vendor
 
 bp = Blueprint("expenses", __name__)
 
+# ----------------------------------------------------------------------
+# Phase 3 classification rule (see the audit note below): a transaction
+# is a PROPERTY cost or a BUSINESS cost purely by which cost centre it's
+# actually posted to (properties.type = 'flat' vs 'overhead') -- never
+# guessed from its category. There's exactly one overhead cost centre in
+# the schema today (id='general-overheads') and property_id is NOT NULL
+# on every transaction, so "type='overhead'" is the complete, reliable
+# signal -- no property_id IS NULL case exists to handle separately.
+# ----------------------------------------------------------------------
+SCOPES = ("all", "property", "business")
 
-def _real_costs(conn, property_id, start, end, capex=None):
-    """Money Urban Nest the company actually spent -- unlike kpis.costs()
-    (which sums a FLAT's own expense transactions, including the
-    management-fee transaction that flat books when it pays Urban Nest),
-    this excludes management_fee: for the flat that's a real cost, but
-    for the company it's income coming IN, not spend going out. Local to
-    this page's own rollups/tiles -- kpis.costs() itself is untouched, so
-    every real P&L/profit figure elsewhere is unaffected."""
-    clause, params = ("AND property_id=?", (property_id,)) if property_id else ("", ())
-    capex_clause = "" if capex is None else f"AND capex = {1 if capex else 0}"
-    return conn.execute(
-        f"""SELECT COALESCE(SUM(amount),0) FROM transactions
-            WHERE direction='expense' AND category != 'management_fee' {capex_clause}
-              AND date>=? AND date<? {clause}""",
-        (start, end, *params),
-    ).fetchone()[0]
+
+def _scope(args):
+    s = args.get("scope", "all")
+    return s if s in SCOPES else "all"
+
+
+def _costs(conn, start, end, scope="all", property_id=None, capex=None):
+    """Sum of real expense transactions for a scope, joined to
+    properties.type so Property/Business is decided by cost-centre, not
+    category. A management-fee transaction sits on a flat's own book
+    and is a Property Cost here -- it was hidden from this page
+    entirely in an earlier pass; Phase 3 shows it correctly, under
+    Property Costs, rather than hiding it, so every real transaction is
+    accounted for exactly once (see the phase3_verify script)."""
+    clauses = ["t.direction='expense'", "t.date>=?", "t.date<?"]
+    params = [start, end]
+    if property_id:
+        clauses.append("t.property_id=?")
+        params.append(property_id)
+    elif scope == "property":
+        clauses.append("p.type='flat'")
+    elif scope == "business":
+        clauses.append("p.type='overhead'")
+    if capex is not None:
+        clauses.append(f"t.capex={1 if capex else 0}")
+    where = " AND ".join(clauses)
+    row = conn.execute(
+        f"SELECT COALESCE(SUM(t.amount),0) FROM transactions t JOIN properties p ON p.id=t.property_id WHERE {where}",
+        params).fetchone()
+    return row[0]
 
 
 def _ledger_where(ctx, start, end, args):
-    """WHERE fragments for the ledger: the shared context (period, property)
-    plus the ledger's own narrowing filters. A chart click sets t_month,
-    which replaces the period with that single month."""
+    """WHERE fragments for the ledger: the shared context (period,
+    property) plus the ledger's own narrowing filters. A chart click
+    sets t_month, which replaces the period with that single month.
+    t_scope narrows to one specific property or 'business' within
+    whatever the page's top-level segment already selected -- distinct
+    from the global property switcher (ctx['property_id']), which the
+    route only lets apply when it's set to a single specific property
+    (see index()); when the global switcher is "All properties" this is
+    the only property-level narrowing available."""
     month = args.get("t_month") or ""
     if month and re.match(r"^\d{4}-\d{2}$", month):
         y, m = map(int, month.split("-"))
         start, end = kpis.month_bounds(y, m)
-    # management_fee is excluded here too -- see _real_costs(). Expenses
-    # is "what did the company spend", and a management-fee transaction
-    # is never that (it's the flat paying Urban Nest, i.e. Urban Nest's
-    # own income) -- it already has a home, "Management Fee Earned" on
-    # Overview/Properties, so it isn't just missing from this list.
-    clauses, params = ["t.direction='expense'", "t.category != 'management_fee'", "t.date>=?", "t.date<?"], [start, end]
+    clauses = ["t.direction='expense'", "t.date>=?", "t.date<?"]
+    params = [start, end]
     if ctx["property_id"]:
         clauses.append("t.property_id=?"); params.append(ctx["property_id"])
+    scope = _scope(args)
+    if not ctx["property_id"]:
+        if scope == "property":
+            clauses.append("p.type='flat'")
+        elif scope == "business":
+            clauses.append("p.type='overhead'")
+    t_scope = args.get("t_scope") or ""
+    if t_scope == "business":
+        clauses.append("p.type='overhead'")
+    elif t_scope:
+        clauses.append("t.property_id=?"); params.append(t_scope)
     if args.get("t_category"):
         clauses.append("t.category=?"); params.append(args["t_category"])
     if args.get("t_type") == "opex":
@@ -59,7 +96,7 @@ def _ledger_where(ctx, start, end, args):
     q = (args.get("t_q") or "").strip()
     if q:
         clauses.append("(t.vendor LIKE ? OR t.description LIKE ?)"); params += [f"%{q}%", f"%{q}%"]
-    return clauses, params, month
+    return clauses, params, month, scope, t_scope
 
 
 @bp.route("/expenses")
@@ -71,86 +108,164 @@ def index():
     viewing = next((p for p in get_properties(conn) if p["id"] == pid), None) if pid else None
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     cmp_bounds = compare_bounds(ctx)
-    scope, scope_params = ("AND property_id=?", (pid,)) if pid else ("", ())
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
+    d = lambda cur, prev, base=100: None if mtd else (pct_delta(cur, prev, min_base=base) if prev is not None else None)
 
-    # Anchored + clipped to trailing 12 months ending at the selected period.
+    # A specific cost centre is already selected via the global context
+    # bar -- the Property/Business split doesn't apply to one property,
+    # so this page falls back to a single-scope view (same shape as
+    # before Phase 3, just without a standalone Opex/Capex tile pair).
+    scope = None if pid else _scope(request.args)
+
+    if pid:
+        cur_total = _costs(conn, start, end, property_id=pid)
+        cur_opex = _costs(conn, start, end, property_id=pid, capex=False)
+        cur_capex = _costs(conn, start, end, property_id=pid, capex=True)
+        nights = kpis.booked_nights(conn, pid, start, end)
+        if cmp_bounds:
+            prev_total = _costs(conn, start=cmp_bounds[0], end=cmp_bounds[1], property_id=pid)
+            prev_nights = kpis.booked_nights(conn, pid, *cmp_bounds)
+        else:
+            prev_total = prev_nights = None
+        summary_tiles = [{
+            "label": "Total costs", "value": f"£{cur_total:,.0f}",
+            "sub": f"Opex £{cur_opex:,.0f} · Capex £{cur_capex:,.0f}",
+            "delta": d(cur_total, prev_total),
+        }, {
+            "label": "Cost / booked night", "info": "Total recorded costs for this property divided by its booked nights in the selected period.",
+            "value": f"£{(cur_total / nights):,.0f}" if nights else "£0",
+            "delta": d(cur_total / nights if nights else 0, prev_total / prev_nights if prev_nights else None, base=5),
+        }]
+        property_total = business_total = None
+    else:
+        property_total = _costs(conn, start, end, scope="property")
+        business_total = _costs(conn, start, end, scope="business")
+        total = property_total + business_total
+        opex = _costs(conn, start, end, scope=scope, capex=False)
+        capex = _costs(conn, start, end, scope=scope, capex=True)
+        headline = {"all": total, "property": property_total, "business": business_total}[scope]
+        nights = kpis.booked_nights(conn, None, start, end)
+
+        def prev_of(fn):
+            return fn(*cmp_bounds) if cmp_bounds else None
+
+        summary_tiles = []
+        if scope == "all":
+            summary_tiles.append({"label": "Property Costs", "value": f"£{property_total:,.0f}",
+                                   "delta": d(property_total, prev_of(lambda a, b: _costs(conn, a, b, scope="property")))})
+            summary_tiles.append({"label": "Business Costs", "value": f"£{business_total:,.0f}",
+                                   "delta": d(business_total, prev_of(lambda a, b: _costs(conn, a, b, scope="business")))})
+        headline_label = {"all": "Total Recorded Costs", "property": "Property Costs", "business": "Business Costs"}[scope]
+        summary_tiles.append({
+            "label": headline_label, "value": f"£{headline:,.0f}",
+            "sub": f"Opex £{opex:,.0f} · Capex £{capex:,.0f}",
+            "delta": d(headline, prev_of(lambda a, b: _costs(conn, a, b, scope=scope))),
+        })
+        # Cost/booked night isn't a meaningful number for Business Costs
+        # alone (company overhead has no "booked nights" of its own) --
+        # left out of that view rather than forced in. See routes/
+        # expenses.py's index() docstring / the Phase 3 report for the
+        # reasoning; recorded here so it isn't silently redefined later.
+        if scope != "business":
+            numerator = total if scope == "all" else property_total
+            info = ("Total recorded costs (property + business) divided by booked nights in the selected period."
+                    if scope == "all" else
+                    "Property costs divided by booked nights in the selected period.")
+            summary_tiles.append({
+                "label": "Cost / booked night", "info": info,
+                "value": f"£{(numerator / nights):,.0f}" if nights else "£0",
+                "delta": d(numerator / nights if nights else 0,
+                           (prev_of(lambda a, b: _costs(conn, a, b, scope=scope)) / kpis.booked_nights(conn, None, *cmp_bounds))
+                           if cmp_bounds and kpis.booked_nights(conn, None, *cmp_bounds) else None, base=5),
+            })
+
+    # Anchored + clipped to trailing 12 months, same rule as every other
+    # trend chart in the app.
     anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
     months = [m for m in kpis.months_with_data(conn, pid) if m <= anchor_ym][-12:]
-    opex_series, capex_series = [], []
-    for ym in months:
-        y, m = map(int, ym.split("-"))
-        s, e = kpis.month_bounds(y, m)
-        opex_series.append(_real_costs(conn, pid, s, e, capex=False))
-        capex_series.append(_real_costs(conn, pid, s, e, capex=True))
+    if pid:
+        chart_series = {"Costs": []}
+        for ym in months:
+            y, m = map(int, ym.split("-"))
+            s, e = kpis.month_bounds(y, m)
+            chart_series["Costs"].append(_costs(conn, s, e, property_id=pid))
+    else:
+        # Property vs Business, not Opex vs Capex -- that's the split
+        # this page is actually organised around now (item 12). A
+        # single property view above keeps one plain Costs series:
+        # splitting Property/Business for one already-single-scope
+        # property would just relabel the same bar, not add information.
+        chart_series = {"Property Costs": [], "Business Costs": []}
+        for ym in months:
+            y, m = map(int, ym.split("-"))
+            s, e = kpis.month_bounds(y, m)
+            chart_series["Property Costs"].append(_costs(conn, s, e, scope="property"))
+            chart_series["Business Costs"].append(_costs(conn, s, e, scope="business"))
 
-    def tally(a, b):
-        total_opex, total_capex = _real_costs(conn, pid, a, b, capex=False), _real_costs(conn, pid, a, b, capex=True)
-        cleaning = conn.execute(
-            f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='expense' AND category='cleaning' AND date>=? AND date<? {scope}",
-            (a, b, *scope_params)).fetchone()[0]
-        nights = kpis.booked_nights(conn, pid, a, b)
-        return {"total": total_opex + total_capex, "opex": total_opex, "capex": total_capex, "cleaning": cleaning,
-                "per_night": (total_opex + total_capex) / nights if nights else 0}
-
-    cur = tally(start, end)
-    prev = tally(*cmp_bounds) if cmp_bounds else None
-    # Same MTD-vs-full-prior-period fix as Overview's tiles.
-    mtd = ctx["partial"] and ctx["choice"] == "this_month"
-    d = lambda key, base=100: None if mtd else (pct_delta(cur[key], prev[key], min_base=base) if prev else None)
-    tiles = [
-        {"label": "Total costs", "value": f"£{cur['total']:,.0f}", "delta": d("total"), "href": None},
-        {"label": "Opex", "value": f"£{cur['opex']:,.0f}", "delta": d("opex"), "href": {"t_type": "opex"}},
-        {"label": "Capex", "value": f"£{cur['capex']:,.0f}", "delta": d("capex", 200), "href": {"t_type": "capex"}},
-        {"label": "Cleaning", "value": f"£{cur['cleaning']:,.0f}", "delta": d("cleaning", 50), "href": {"t_category": "cleaning"}},
-        {"label": "Cost / booked night", "value": f"£{cur['per_night']:,.0f}", "delta": d("per_night", 5), "href": None},
-    ]
-
-    # The By Property table lists actual properties only -- the shared
-    # overhead cost centre isn't one, and listing it as a row alongside
-    # real flats read as "another property," not company overhead. Its
-    # costs are unaffected everywhere else on this page (tiles, By
-    # category, By vendor, the ledger all still sum every property
-    # including it) -- it's just not a row in this one table. The full
-    # Property Costs / Business Costs split is a separate pass.
+    # ---- Property Costs section: by-property table + category breakdown ----
     property_rows = []
-    if not pid:
+    property_categories = []
+    if not pid and scope in ("all", "property"):
         for p in flats:
-            opex = _real_costs(conn, p["id"], start, end, capex=False)
-            capex = _real_costs(conn, p["id"], start, end, capex=True)
-            property_rows.append({"id": p["id"], "name": p["name"], "opex": opex, "capex": capex, "total": opex + capex})
+            opex = _costs(conn, start, end, property_id=p["id"], capex=False)
+            capex_amt = _costs(conn, start, end, property_id=p["id"], capex=True)
+            property_rows.append({"id": p["id"], "name": p["name"], "opex": opex, "capex": capex_amt, "total": opex + capex_amt})
         property_rows.sort(key=lambda r: r["total"], reverse=True)
+        property_categories = conn.execute(
+            """SELECT t.category, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN properties p ON p.id=t.property_id
+               WHERE t.direction='expense' AND p.type='flat' AND t.date>=? AND t.date<? GROUP BY t.category ORDER BY amt DESC""",
+            (start, end)).fetchall()
 
-    categories = conn.execute(
-        f"""SELECT category, SUM(amount) amt, COUNT(*) n FROM transactions
-            WHERE direction='expense' AND category != 'management_fee' AND date>=? AND date<? {scope} GROUP BY category ORDER BY amt DESC""",
-        (start, end, *scope_params)).fetchall()
+    # ---- Business Costs section: category breakdown only (no "by property" -- there is no property) ----
+    business_categories = []
+    if not pid and scope in ("all", "business"):
+        business_categories = conn.execute(
+            """SELECT t.category, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN properties p ON p.id=t.property_id
+               WHERE t.direction='expense' AND p.type='overhead' AND t.date>=? AND t.date<? GROUP BY t.category ORDER BY amt DESC""",
+            (start, end)).fetchall()
+
+    # ---- vendors, respecting the current scope ----
+    vendor_scope_clause, vendor_scope_params = "", []
+    if pid:
+        vendor_scope_clause, vendor_scope_params = "AND t.property_id=?", [pid]
+    elif scope == "property":
+        vendor_scope_clause = "AND p.type='flat'"
+    elif scope == "business":
+        vendor_scope_clause = "AND p.type='overhead'"
     vendors = conn.execute(
-        f"""SELECT v.id, v.name, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN vendors v ON v.id = t.vendor_id
-            WHERE t.direction='expense' AND t.category NOT IN ('reconciliation', 'management_fee') AND t.date>=? AND t.date<? {scope.replace('property_id', 't.property_id')}
+        f"""SELECT v.id, v.name, SUM(t.amount) amt, COUNT(*) n FROM transactions t
+            JOIN vendors v ON v.id = t.vendor_id JOIN properties p ON p.id = t.property_id
+            WHERE t.direction='expense' AND t.category != 'reconciliation' AND t.date>=? AND t.date<? {vendor_scope_clause}
             GROUP BY v.id ORDER BY amt DESC LIMIT 10""",
-        (start, end, *scope_params)).fetchall()
+        (start, end, *vendor_scope_params)).fetchall()
 
     # ---- ledger, on this page, driven by the shared context + its own filters ----
-    clauses, params, f_month = _ledger_where(ctx, start, end, request.args)
+    clauses, params, f_month, f_scope, f_t_scope = _ledger_where(ctx, start, end, request.args)
     where = " AND ".join(clauses)
     ledger = conn.execute(
-        f"""SELECT t.*, p.name AS property_name FROM transactions t JOIN properties p ON p.id = t.property_id
+        f"""SELECT t.*, p.name AS property_name, p.type AS property_type FROM transactions t
+            JOIN properties p ON p.id = t.property_id
             WHERE {where} ORDER BY t.date DESC, t.id DESC LIMIT 200""", params).fetchall()
-    ledger_total = conn.execute(f"SELECT COUNT(*) n, COALESCE(SUM(t.amount),0) amt FROM transactions t WHERE {where}", params).fetchone()
+    ledger_total = conn.execute(
+        f"SELECT COUNT(*) n, COALESCE(SUM(t.amount),0) amt FROM transactions t JOIN properties p ON p.id=t.property_id WHERE {where}",
+        params).fetchone()
 
-    f = {k: request.args.get(k) or "" for k in ("t_category", "t_type", "t_vendor", "t_q")}
+    f = {k: request.args.get(k) or "" for k in ("t_category", "t_type", "t_vendor", "t_q", "t_scope")}
     f["t_month"] = f_month
     chips = []
     base = range_params(ctx)
     def chip(label, drop):
         keep = {k: v for k, v in f.items() if v and k != drop}
-        chips.append({"label": label, "href": url_for("expenses.index", **{**base, **keep}) + "#ledger"})
+        chips.append({"label": label, "href": url_for("expenses.index", **{**base, **({"scope": scope} if scope else {}), **keep}) + "#ledger"})
     if f_month:
         y, m = map(int, f_month.split("-")); chip(f"{MONTH_NAMES[m]} {y}", "t_month")
+    if f["t_scope"]:
+        sname = "Business" if f["t_scope"] == "business" else next((p["name"] for p in flats if p["id"] == f["t_scope"]), f["t_scope"])
+        chip(sname, "t_scope")
     if f["t_type"]:
         chip(f["t_type"].capitalize(), "t_type")
     if f["t_category"]:
-        chip(f["t_category"].replace("_", " ").capitalize(), "t_category")
+        chip(f["t_category"].replace("_", " ").title(), "t_category")
     if f["t_vendor"]:
         vname = conn.execute("SELECT name FROM vendors WHERE id=?", (f["t_vendor"],)).fetchone()
         chip(vname["name"] if vname else "Vendor", "t_vendor")
@@ -159,15 +274,14 @@ def index():
 
     return render_template(
         "expenses.html", active="expenses", all_properties=get_properties(conn), active_property=None,
-        context_bar=True, ctx=ctx, viewing=viewing, tiles=tiles, property_rows=property_rows,
-        categories_rows=categories, vendor_rows=vendors, ledger=ledger, ledger_total=ledger_total,
-        f=f, chips=chips, ledger_base=urlencode(base), base_params=base,
+        context_bar=True, ctx=ctx, viewing=viewing, scope=scope, flats=flats,
+        summary_tiles=summary_tiles, property_rows=property_rows,
+        property_categories=property_categories, business_categories=business_categories,
+        vendor_rows=vendors, ledger=ledger, ledger_total=ledger_total,
+        f=f, chips=chips, ledger_base=urlencode({**base, **({"scope": scope} if scope else {})}), base_params=base,
         all_vendors=conn.execute("SELECT id, name FROM vendors ORDER BY name").fetchall(),
-        # management_fee isn't offered as a filter here -- it's excluded
-        # from this whole page (see _real_costs), so filtering by it would
-        # only ever turn up empty.
-        categories=[c for c in CATEGORIES if c != "management_fee"],
-        months_json=json.dumps(months), opex_json=json.dumps(opex_series), capex_json=json.dumps(capex_series),
+        categories=CATEGORIES,
+        months_json=json.dumps(months), chart_series_json=json.dumps(chart_series),
         compare_label=ctx["compare_display"] or "",
     )
 
@@ -231,7 +345,7 @@ def edit_transaction(tx_id):
              new_values["amount"], new_values["category"], new_values["capex"], tx_id),
         )
         conn.commit()
-        flash("\u2713 Transaction updated.", "success")
+        flash("✓ Transaction updated.", "success")
     return redirect(url_for("expenses.index"))
 
 
@@ -248,5 +362,5 @@ def delete_transaction(tx_id):
     conn.execute("UPDATE document_items SET duplicate_of=NULL WHERE duplicate_of=?", (tx_id,))
     conn.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
     conn.commit()
-    flash("\u2713 Transaction deleted.", "success")
+    flash("✓ Transaction deleted.", "success")
     return redirect(url_for("expenses.index"))
