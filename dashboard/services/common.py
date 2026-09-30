@@ -32,6 +32,7 @@ METRIC_INFO = {
     # Overview/Properties, so it gets its own distinct name ("Operating
     # Profit") rather than reusing that one.
     "operating_profit": "Gross Booking Revenue minus property-level operating costs. Company-level business expenses are not included.",
+    "property_costs": "Genuine costs recorded against this property in the selected period. Management-fee transfers are excluded -- that's Urban Nest's own income, not a cost.",
 }
 
 

@@ -1,5 +1,5 @@
 {% extends "property/_shell.html" %}
-{% from "_components.html" import section, kpi_tile, empty_state %}
+{% from "_components.html" import section, kpi_tile, delta, empty_state %}
 {% block tab_content %}
   {% if tiles %}
     <div class="tiles">
@@ -9,28 +9,73 @@
     <div class="card">{{ empty_state("No " ~ ctx.display ~ " booking data for " ~ prop.name, "Upload a booking statement or choose a different period.", "Upload documents", url_for('documents.index', property=prop.id)) }}</div>
   {% endif %}
 
+  {% call section("Financial performance", "Gross Booking Revenue and Management Fee Earned over time" if managed else "Urban Nest Revenue, costs and Property Profit over time") %}
+    <div class="card"><div class="chart-box" style="height:260px"><canvas id="financialChart"></canvas></div></div>
+  {% endcall %}
+
   <div class="grid-2">
-    {% call section("Occupancy trend", "This flat vs the portfolio average") %}
+    {% call section("Occupancy", "This property vs the portfolio average") %}
       <div class="card"><div class="chart-box" style="height:240px"><canvas id="occChart"></canvas></div></div>
     {% endcall %}
-    {% call section("ADR trend") %}
-      <div class="card"><div class="chart-box" style="height:240px"><canvas id="adrChart"></canvas></div></div>
+    {% call section("Rate & efficiency", "ADR and RevPAR over time") %}
+      <div class="card"><div class="chart-box" style="height:240px"><canvas id="rateChart"></canvas></div></div>
     {% endcall %}
   </div>
+
+  {% call section("Year on year") %}
+    <div class="card flush">
+      {% if yoy %}
+        <table>
+          <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Same month last year</th><th class="num">Change</th></tr></thead>
+          <tbody>
+            {% for row in yoy %}
+              <tr>
+                <td>{{ row.label }}</td>
+                <td class="num">{{ row.this_year|money }}</td>
+                <td class="num">{{ row.last_year|money }}</td>
+                <td class="num">{% if row.delta_pct is not none %}{{ delta(row.delta_pct, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        {{ empty_state("Not enough history yet", "Year-on-year needs the same months in two consecutive years.") }}
+      {% endif %}
+    </div>
+  {% endcall %}
 
   <script>
     const months = {{ months_json|safe }};
     const occ = {{ occ_json|safe }};
     const occPortfolio = {{ occ_portfolio_json|safe }};
     const adrSeries = {{ adr_json|safe }};
+    const revparSeries = {{ revpar_json|safe }};
+    const financial = {{ financial_json|safe }};
+
+    const financialDatasets = [
+      { type: 'bar', label: financial.series_a_label, data: financial.series_a, backgroundColor: UN.revenue, order: 2 },
+    ];
+    if (financial.costs) {
+      financialDatasets.push({ type: 'bar', label: 'Costs', data: financial.costs, backgroundColor: UN.costs, order: 2 });
+    }
+    financialDatasets.push({ type: 'line', label: financial.series_b_label, data: financial.series_b, backgroundColor: UN.profit, borderColor: UN.profit, tension: 0, pointHoverRadius: 5, order: 1 });
+
+    new Chart(document.getElementById('financialChart'), {
+      data: { labels: financial.months, datasets: financialDatasets },
+      options: {
+        interaction: { mode: 'index', intersect: false },
+        scales: quietScales(moneyShort),
+        plugins: { tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}` } } },
+      },
+    });
 
     new Chart(document.getElementById('occChart'), {
       type: 'line',
       data: {
         labels: months,
         datasets: [
-          { label: 'This flat', data: occ, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false },
-          { label: 'Portfolio avg', data: occPortfolio, borderColor: UN.costs, borderDash: [4, 4], fill: false, tension: 0.3, spanGaps: false, pointRadius: 0 },
+          { label: 'This property', data: occ, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0, spanGaps: false },
+          { label: 'Portfolio avg', data: occPortfolio, borderColor: UN.costs, borderDash: [4, 4], fill: false, tension: 0, spanGaps: false, pointRadius: 0 },
         ],
       },
       options: {
@@ -39,11 +84,17 @@
       },
     });
 
-    new Chart(document.getElementById('adrChart'), {
+    new Chart(document.getElementById('rateChart'), {
       type: 'line',
-      data: { labels: months, datasets: [{ label: 'ADR', data: adrSeries, borderColor: UN.profit, backgroundColor: 'rgba(63,100,137,0.10)', fill: true, tension: 0.3, spanGaps: false }] },
+      data: {
+        labels: months,
+        datasets: [
+          { label: 'ADR', data: adrSeries, borderColor: UN.profit, backgroundColor: 'transparent', fill: false, tension: 0, spanGaps: false },
+          { label: 'RevPAR', data: revparSeries, borderColor: UN.brand, backgroundColor: 'transparent', fill: false, tension: 0, spanGaps: false, borderDash: [4, 4] },
+        ],
+      },
       options: {
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `ADR: ${moneyFull(i.parsed.y)}` } } },
+        plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
         scales: quietScales(moneyShort),
       },
     });

@@ -116,6 +116,69 @@ def _checklist(conn, property_id, is_overhead, year, month):
     return {"has_calendar": has_calendar, "has_documents": has_documents}
 
 
+def _overview_tiles(conn, prop, ctx):
+    """Overview's tile set genuinely differs by business model -- not a
+    redesign for its own sake. For an operated flat, Revenue and
+    Property Profit are meaningfully different numbers. For a managed
+    flat, adjusted Revenue and Property Profit are the SAME figure
+    (both are just the fee) -- showing both under those two names on
+    the property's own Overview is exactly the "why is Revenue the same
+    as Profit" confusion flagged earlier. A managed property instead
+    gets Gross Booking Revenue (the real guest booking value) next to
+    Management Fee Earned (what Urban Nest actually keeps): two
+    genuinely different numbers, each labelled for what it actually
+    is -- matching Phase 4's item 9 exactly."""
+    from routes.expenses import _costs
+    property_id = prop["id"]
+    start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+    cmp_b = compare_bounds(ctx)
+    mtd = ctx["partial"] and ctx["choice"] == "this_month"
+    period_label = ("MTD, " if mtd else "") + ctx["display"]
+
+    def d(cur_v, prev_v, base=0):
+        return None if mtd else (pct_delta(cur_v, prev_v, min_base=base) if prev_v is not None else None)
+
+    if prop["management_fee_pct"]:
+        cur_gross = kpis.revenue(conn, property_id, start, end)
+        cur_fee = kpis.business_income(conn, property_id, start, end)
+        cur_occ = kpis.occupancy(conn, property_id, start, end)
+        prev_gross, prev_fee, prev_occ = (kpis.revenue(conn, property_id, *cmp_b), kpis.business_income(conn, property_id, *cmp_b),
+                                           kpis.occupancy(conn, property_id, *cmp_b)) if cmp_b else (None, None, None)
+        primary = [
+            {"key": "gross_booking_revenue", "label": f"Gross Booking Revenue — {period_label}", "value": f"£{cur_gross:,.0f}",
+             "delta": d(cur_gross, prev_gross, 100), "info": METRIC_INFO.get("gross_booking_revenue")},
+            {"key": "fee", "label": "Management Fee Earned", "value": f"£{cur_fee:,.0f}",
+             "delta": d(cur_fee, prev_fee, 20), "info": METRIC_INFO.get("fee")},
+            {"key": "occupancy", "label": "Occupancy", "value": f"{cur_occ * 100:.0f}%", "delta": d(cur_occ, prev_occ, 0.05)},
+        ]
+        has_data = bool(cur_gross or cur_occ or cur_fee)
+        secondary = [
+            {"label": "ADR", "value": f"£{kpis.adr(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("adr")},
+            {"label": "RevPAR", "value": f"£{kpis.revpar(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("revpar")},
+        ] if has_data else []
+    else:
+        snap = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
+        prev_snap = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
+        cur_costs = _costs(conn, start, end, property_id=property_id)
+        prev_costs = _costs(conn, *cmp_b, property_id=property_id) if cmp_b else None
+        primary = [
+            {"key": "revenue", "label": f"Urban Nest Revenue — {period_label}", "value": f"£{snap['revenue']:,.0f}",
+             "delta": d(snap["revenue"], prev_snap["revenue"] if prev_snap else None, 100), "info": METRIC_INFO.get("revenue")},
+            {"key": "property_costs", "label": "Property Costs", "value": f"£{cur_costs:,.0f}",
+             "delta": d(cur_costs, prev_costs, 100), "info": METRIC_INFO.get("property_costs")},
+            {"key": "net_profit", "label": "Property Profit", "value": f"£{snap['net_profit']:,.0f}",
+             "delta": d(snap["net_profit"], prev_snap["net_profit"] if prev_snap else None, 1000), "info": METRIC_INFO.get("net_profit")},
+            {"key": "occupancy", "label": "Occupancy", "value": f"{snap['occupancy'] * 100:.0f}%",
+             "delta": d(snap["occupancy"], prev_snap["occupancy"] if prev_snap else None, 0.05)},
+        ]
+        has_data = bool(snap["revenue"] or snap["occupancy"] or cur_costs)
+        secondary = [
+            {"label": "ADR", "value": f"£{snap['adr']:,.0f}", "info": METRIC_INFO.get("adr")},
+            {"label": "RevPAR", "value": f"£{snap['revpar']:,.0f}", "info": METRIC_INFO.get("revpar")},
+        ] if has_data else []
+    return (primary, secondary) if has_data else ([], [])
+
+
 def _remember_visit(resp, property_id):
     from app import RECENT_COOKIE, RECENT_MAX
     prior = [i for i in request.cookies.get(RECENT_COOKIE, "").split(",") if i and i != property_id]
@@ -135,41 +198,34 @@ def detail(property_id):
     # routes/overview.py's kpi_rows()): a partial "This Month" compared
     # against a full prior month/year isn't a real decline.
     mtd = ctx["partial"] and ctx["choice"] == "this_month"
+    # Overview is the current-period result only -- Phase 4 moves every
+    # historical trend chart (and Year on year) to Performance, which
+    # owns "how is this changing over time". The overhead cost-centre
+    # has no Performance tab of its own (see _shell.html), so its one
+    # chart stays here; a real flat's chart data is no longer prepared
+    # on this route at all.
     if is_overhead:
         cur_cost = kpis.costs(conn, property_id, start, end)
         cmp_b = compare_bounds(ctx)
         prev_cost = kpis.costs(conn, property_id, *cmp_b) if cmp_b else None
         ly_cost = kpis.costs(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
             ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])))
-        tiles = [{"label": "Total costs", "value": f"£{cur_cost:,.0f}",
+        primary_tiles = [{"label": "Total costs", "value": f"£{cur_cost:,.0f}",
                   "delta": None if mtd else (pct_delta(cur_cost, prev_cost) if prev_cost is not None else None),
                   "delta_ly": None if mtd else pct_delta(cur_cost, ly_cost)}] if cur_cost or prev_cost or ly_cost else []
-        primary_tiles, secondary_tiles = tiles, []
+        secondary_tiles = []
+        anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
+        series = [s for s in kpis.monthly_series(conn, property_id) if s["ym"] <= anchor_ym][-12:]
+        chart_kwargs = {"months_json": json.dumps([s["ym"] for s in series]),
+                         "costs_json": json.dumps([s["costs"] for s in series])}
     else:
-        # Same primary/secondary grouping as Portfolio Overview -- reused
-        # directly rather than re-implemented, so a property workspace's
-        # Overview never drifts from the portfolio one's hierarchy.
-        from routes.overview import kpi_rows
-        primary_tiles, secondary_tiles, cur = kpi_rows(conn, property_id, ctx)
-        if not (cur["revenue"] or cur["costs"] or cur["booked_nights"]):
-            primary_tiles, secondary_tiles = [], []
-
-    # Anchored + clipped to trailing 12 months -- see the matching note in
-    # routes/overview.py on why a barely-started current month or years of
-    # unclipped history both make the trend chart misleading.
-    anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
-    series = [s for s in kpis.adjusted_monthly_series(conn, property_id) if s["ym"] <= anchor_ym][-12:]
-    yoy = adjusted_yoy_pairs(conn, property_id, (ctx["end_year"], ctx["end_month"]))
+        primary_tiles, secondary_tiles = _overview_tiles(conn, prop, ctx)
+        chart_kwargs = {}
 
     resp = make_response(render_template(
         "property/overview.html", all_properties=get_properties(conn),
-        **_ws(conn, ctx, prop, "overview", is_overhead=is_overhead, primary_tiles=primary_tiles, secondary_tiles=secondary_tiles, yoy=yoy),
-        months_json=json.dumps([s["ym"] for s in series]),
-        income_json=json.dumps([s["revenue"] for s in series]),
-        profit_json=json.dumps([s["net_profit"] for s in series]),
-        costs_json=json.dumps([s["costs"] for s in series]),
-        margin_json=json.dumps([round(s["margin"] * 100, 1) for s in series]),
-        occupancy_json=json.dumps([round(s["occupancy"] * 100, 1) for s in series]),
+        **_ws(conn, ctx, prop, "overview", is_overhead=is_overhead, primary_tiles=primary_tiles, secondary_tiles=secondary_tiles),
+        **chart_kwargs,
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
@@ -199,6 +255,12 @@ def bookings(property_id):
         **_ws(conn, ctx, prop, "bookings", is_overhead=is_overhead),
         booked_nights=kpis.booked_nights(conn, property_id, start, end),
         adr=kpis.adr(conn, property_id, start, end), bookings=rows,
+        # Bookings is the reservation evidence layer -- what guests
+        # actually booked and paid, so it's Gross Booking Revenue (the
+        # true guest value) here, never the adjusted Urban Nest figure
+        # Overview/Performance show.
+        gross_booking_revenue=kpis.accommodation_revenue(conn, property_id, start, end),
+        avg_stay=kpis.avg_stay(conn, property_id, start, end),
     ))
     _remember_visit(resp, property_id)
     return resp
@@ -251,6 +313,7 @@ def performance_tab(property_id):
     cmp_b = compare_bounds(ctx)
     cur = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
     prev = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
+    managed = bool(prop["management_fee_pct"])
 
     mtd = ctx["partial"] and ctx["choice"] == "this_month"
 
@@ -276,12 +339,33 @@ def performance_tab(property_id):
     occ = [round(s["occupancy"] * 100, 1) for s in series]
     occ_portfolio = [round(portfolio_by_ym[ym]["occupancy"] * 100, 1) if ym in portfolio_by_ym else None for ym in months]
     adr_series = [round(s["adr"], 0) if s["adr"] else None for s in series]
+    revpar_series = [round(s["revpar"], 0) if s["revpar"] else None for s in series]
+
+    # Financial Performance -- moved here from Overview (Phase 4: Overview
+    # is current-period only, Performance owns "how is this changing over
+    # time"). The series themselves differ by model, same reasoning as
+    # _overview_tiles(): a managed flat's adjusted revenue/costs/profit
+    # would just be the fee trend plotted three times over, so it gets its
+    # own genuinely different pair of series instead (gross booking value
+    # vs the fee Urban Nest actually keeps from it).
+    if managed:
+        gross_series = [round(kpis.revenue(conn, property_id, *kpis.month_bounds(*map(int, s["ym"].split("-")))), 2) for s in series]
+        fee_series = [round(s["net_profit"], 2) for s in series]
+        financial = {"months": months, "series_a": gross_series, "series_a_label": "Gross Booking Revenue",
+                     "series_b": fee_series, "series_b_label": "Management Fee Earned", "costs": None}
+    else:
+        financial = {"months": months, "series_a": [round(s["revenue"], 2) for s in series], "series_a_label": "Urban Nest Revenue",
+                     "series_b": [round(s["net_profit"], 2) for s in series], "series_b_label": "Property Profit",
+                     "costs": [round(s["costs"], 2) for s in series]}
+
+    yoy = adjusted_yoy_pairs(conn, property_id, (ctx["end_year"], ctx["end_month"]))
 
     resp = make_response(render_template(
         "property/performance.html", all_properties=get_properties(conn),
-        **_ws(conn, ctx, prop, "performance", is_overhead=is_overhead, tiles=tiles),
+        **_ws(conn, ctx, prop, "performance", is_overhead=is_overhead, tiles=tiles, yoy=yoy, managed=managed),
         months_json=json.dumps(months), occ_json=json.dumps(occ), occ_portfolio_json=json.dumps(occ_portfolio),
-        adr_json=json.dumps(adr_series),
+        adr_json=json.dumps(adr_series), revpar_json=json.dumps(revpar_series),
+        financial_json=json.dumps(financial),
     ))
     _remember_visit(resp, property_id)
     return resp
@@ -296,13 +380,18 @@ def expenses_tab(property_id):
         return redirect(url_for("properties.index"))
 
     start, end = _range(ctx)
+    # Same Phase 3 semantics as the portfolio Expenses page: a
+    # management-fee transfer is Urban Nest's own income, not a cost --
+    # excluded here too, so "what did this property cost" never
+    # silently includes money Urban Nest earned from it.
     transactions = conn.execute(
-        """SELECT * FROM transactions WHERE property_id=? AND direction='expense' AND date>=? AND date<?
-           ORDER BY date DESC, id DESC LIMIT 200""",
+        """SELECT * FROM transactions WHERE property_id=? AND direction='expense' AND category != 'management_fee'
+           AND date>=? AND date<? ORDER BY date DESC, id DESC LIMIT 200""",
         (property_id, start, end),
     ).fetchall()
     total = conn.execute(
-        "SELECT COUNT(*) n, COALESCE(SUM(amount),0) amt FROM transactions WHERE property_id=? AND direction='expense' AND date>=? AND date<?",
+        """SELECT COUNT(*) n, COALESCE(SUM(amount),0) amt FROM transactions
+           WHERE property_id=? AND direction='expense' AND category != 'management_fee' AND date>=? AND date<?""",
         (property_id, start, end)).fetchone()
 
     resp = make_response(render_template(

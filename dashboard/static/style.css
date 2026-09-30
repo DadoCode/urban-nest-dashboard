@@ -222,6 +222,13 @@ main { max-width: 1160px; margin: 0 auto; padding: var(--s6) var(--s6) 64px; }
 .tab:hover { color: var(--ink); background: var(--neutral-dim); }
 .tab.active { color: var(--brand-ink); border-bottom-color: var(--brand); font-weight: 600; background: var(--brand-dim); }
 .tab .count { margin-left: 6px; font-size: var(--fs-label); color: var(--muted); font-weight: 500; }
+/* Admin/source tabs (Documents, Settings) stay in the same bar -- one
+   workspace, not two nav rows -- but read as visually subordinate to
+   the analysis tabs: a thin divider and a quieter resting color. */
+.tabs-divider { width: 1px; align-self: stretch; background: var(--line-strong); margin: 6px var(--s2) 6px 0; }
+.tab-secondary { color: var(--muted); }
+.tab-secondary:hover { color: var(--ink-soft); }
+.tab-secondary.active { color: var(--ink-soft); background: var(--neutral-dim); border-bottom-color: var(--line-strong); font-weight: 500; }
 
 /* ---------- KPIs: one compact row, then a quiet strip ---------- */
 

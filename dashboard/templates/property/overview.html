@@ -18,90 +18,20 @@
     {% call section("Monthly cost trend") %}
       <div class="card"><div class="chart-box" style="height:240px"><canvas id="revenueChart"></canvas></div></div>
     {% endcall %}
-  {% else %}
-    <div class="grid-2">
-      {% call section("Revenue, costs and profit") %}
-        <div class="card"><div class="chart-box" style="height:240px"><canvas id="revenueChart"></canvas></div></div>
-      {% endcall %}
-      {% call section("Occupancy") %}
-        <div class="card"><div class="chart-box" style="height:240px"><canvas id="occChart"></canvas></div></div>
-      {% endcall %}
-    </div>
 
-    {% call section("Year on year") %}
-      <div class="card flush">
-        {% if yoy %}
-          <table>
-            <thead><tr><th>Month</th><th class="num">This year</th><th class="num">Same month last year</th><th class="num">Change</th></tr></thead>
-            <tbody>
-              {% for row in yoy %}
-                <tr>
-                  <td>{{ row.label }}</td>
-                  <td class="num">{{ row.this_year|money }}</td>
-                  <td class="num">{{ row.last_year|money }}</td>
-                  <td class="num">{% if row.delta_pct is not none %}{{ delta(row.delta_pct, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% else %}
-          {{ empty_state("Not enough history yet", "Year-on-year needs the same months in two consecutive years.") }}
-        {% endif %}
-      </div>
-    {% endcall %}
-  {% endif %}
-
-  <script>
-    const months = {{ months_json|safe }};
-    const income = {{ income_json|safe }};
-    const profit = {{ profit_json|safe }};
-    const costs = {{ costs_json|safe }};
-    const margin = {{ margin_json|safe }};
-    const occupancy = {{ occupancy_json|safe }};
-
-    {% if is_overhead %}
-    new Chart(document.getElementById('revenueChart'), {
-      type: 'bar',
-      data: { labels: months, datasets: [{ label: 'Costs', data: costs, backgroundColor: UN.costs }] },
-      options: {
-        scales: quietScales(moneyShort),
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Costs: ${moneyFull(i.parsed.y)}` } } },
-      },
-    });
-    {% else %}
-    new Chart(document.getElementById('revenueChart'), {
-      data: {
-        labels: months,
-        datasets: [
-          { type: 'bar', label: 'Revenue', data: income, backgroundColor: UN.revenue },
-          { type: 'bar', label: 'Costs', data: costs, backgroundColor: UN.costs },
-          { type: 'line', label: 'Profit', data: profit, backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 5 },
-        ],
-      },
-      options: {
-        interaction: { mode: 'index', intersect: false },
-        scales: quietScales(moneyShort),
-        plugins: {
-          tooltip: {
-            callbacks: {
-              label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}`,
-              afterBody: (items) => margin.length ? [`Margin: ${margin[items[0].dataIndex]}%`] : [],
-            },
-          },
-        },
-      },
-    });
-    {% endif %}
-
-    if (document.getElementById('occChart')) {
-      new Chart(document.getElementById('occChart'), {
-        type: 'line',
-        data: { labels: months, datasets: [{ label: 'Occupancy', data: occupancy, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0.3, spanGaps: false }] },
+    <script>
+      const months = {{ months_json|safe }};
+      const costs = {{ costs_json|safe }};
+      new Chart(document.getElementById('revenueChart'), {
+        type: 'bar',
+        data: { labels: months, datasets: [{ label: 'Costs', data: costs, backgroundColor: UN.costs }] },
         options: {
-          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.y)}` } } },
-          scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
+          scales: quietScales(moneyShort),
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Costs: ${moneyFull(i.parsed.y)}` } } },
         },
       });
-    }
-  </script>
+    </script>
+  {% else %}
+    <p class="note" style="margin-top:var(--s4)">Trends, benchmarking and year-on-year comparison live on <a href="{{ cx('properties.performance_tab', property_id=prop.id) }}">Performance</a>.</p>
+  {% endif %}
 {% endblock %}

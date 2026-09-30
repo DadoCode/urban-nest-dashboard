@@ -52,11 +52,19 @@
   </div>
 {%- endmacro %}
 
-{# items: list of (key, label, href) #}
+{# items: list of (key, label, href) or (key, label, href, secondary).
+   secondary=True marks an admin/source tab (Documents, Settings) -- a
+   thin divider before the first one and muted styling keep it visually
+   subordinate to the analysis tabs without a second nav bar. #}
 {% macro tabs(items, active) -%}
   <nav class="tabs">
-    {% for key, label, href in items %}
-      <a href="{{ href }}" class="tab {{ 'active' if key == active else '' }}">{{ label }}</a>
+    {% set prev_secondary = namespace(value=False) %}
+    {% for item in items %}
+      {% set key, label, href = item[0], item[1], item[2] %}
+      {% set is_secondary = item[3] if item|length > 3 else False %}
+      {% if is_secondary and not prev_secondary.value %}<span class="tabs-divider"></span>{% endif %}
+      {% set prev_secondary.value = is_secondary %}
+      <a href="{{ href }}" class="tab {{ 'active' if key == active else '' }} {{ 'tab-secondary' if is_secondary else '' }}">{{ label }}</a>
     {% endfor %}
   </nav>
 {%- endmacro %}
