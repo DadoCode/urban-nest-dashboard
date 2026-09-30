@@ -105,6 +105,9 @@
         {{ empty_state("No vendors in this period", "Vendors appear once expenses carry a supplier name.") }}
       {% endif %}
     </div>
+    {% if vendorless_total > 0 %}
+      <p class="note" style="margin-top:var(--s2)">{{ vendorless_total|money }} of costs in this view have no vendor and {{ 'is' if vendor_rows|length == 0 else 'are' }} excluded from the vendor ranking.</p>
+    {% endif %}
   {% endcall %}
 
   {% call section("Transactions", (ledger_total.n ~ " · " ~ (ledger_total.amt|money)) if ledger_total.n else None, "ledger") %}

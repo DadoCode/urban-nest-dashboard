@@ -266,6 +266,19 @@ def index():
               AND t.date>=? AND t.date<? {vendor_scope_clause}
             GROUP BY COALESCE(v.name, t.vendor) ORDER BY amt DESC LIMIT 10""",
         (start, end, *vendor_scope_params)).fetchall()
+    # Salary, rent and similar recurring costs usually carry no vendor
+    # name at all -- real, not a bug, but a first-time viewer comparing
+    # this total against the tile above it would otherwise wonder where
+    # the rest went. Same WHERE condition as the ranking above, just
+    # inverted, so the two numbers always add up to the same total this
+    # page already shows elsewhere.
+    vendorless_total = conn.execute(
+        f"""SELECT COALESCE(SUM(t.amount),0) FROM transactions t
+            LEFT JOIN vendors v ON v.id = t.vendor_id JOIN properties p ON p.id = t.property_id
+            WHERE t.direction='expense' AND t.category NOT IN ('reconciliation', 'management_fee')
+              AND (COALESCE(v.name, t.vendor) IS NULL OR COALESCE(v.name, t.vendor) = '')
+              AND t.date>=? AND t.date<? {vendor_scope_clause}""",
+        (start, end, *vendor_scope_params)).fetchone()[0]
 
     # ---- ledger, on this page, driven by the shared context + its own filters ----
     clauses, params, f_month, f_scope, f_t_scope = _ledger_where(ctx, start, end, request.args)
@@ -305,7 +318,7 @@ def index():
         context_bar=True, ctx=ctx, viewing=viewing, scope=scope, flats=flats,
         summary_tiles=summary_tiles, property_rows=property_rows,
         property_categories=property_categories, business_categories=business_categories,
-        vendor_rows=vendors, ledger=ledger, ledger_total=ledger_total,
+        vendor_rows=vendors, vendorless_total=vendorless_total, ledger=ledger, ledger_total=ledger_total,
         f=f, chips=chips, ledger_base=urlencode({**base, **({"scope": scope} if scope else {})}), base_params=base,
         all_vendors=conn.execute("SELECT id, name FROM vendors ORDER BY name").fetchall(),
         categories=CATEGORIES,
