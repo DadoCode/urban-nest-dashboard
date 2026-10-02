@@ -2,7 +2,8 @@
 {% from "_components.html" import page_head, empty_state %}
 {% block title %}Documents — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Documents", "Upload statements and invoices, review what was extracted, then confirm. Nothing reaches your figures until you do.") }}
+  {{ page_head("Documents", "Upload statements and invoices, review what was extracted, then confirm. Confirming stores the records; reservations only change a month's figures once you reconcile that month.") }}
+  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('reconcile.index') }}">Reconciliation{% if recon_needed %} ({{ recon_needed }} month{{ 's' if recon_needed != 1 }} need a decision){% endif %}</a> · <a href="{{ url_for('reconcile.figures') }}">Figure audit</a></p>
 
   <span id="upload"></span>
   {% if prefill_property or prefill_type %}

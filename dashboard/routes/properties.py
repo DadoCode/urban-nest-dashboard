@@ -7,6 +7,7 @@ import db
 import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
+import services.sources as src
 from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta
 from services.completeness import completeness_for, health_for, health_state, seed_defaults
 from services.context import compare_bounds, link_params, range_params, request_context
@@ -297,6 +298,9 @@ def bookings(property_id):
     total_rows = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where}", params).fetchone()[0]
     platforms = [r[0] for r in conn.execute(f"SELECT DISTINCT COALESCE(NULLIF(platform,''),'other') FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
     sources = [r[0] for r in conn.execute(f"SELECT DISTINCT source FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
+    S = src.Sources(conn, property_id, start, end)
+    inactive_stored = sum(1 for r in rows if r["source"] != "excel_import"
+                          and any(S.active(property_id, ym) == src.LEGACY for ym, _lo, _hi in src.stay_pieces(r, start, end)))
     filters = {"b_when": b_when, "b_platform": b_platform, "b_source": b_source, "b_status": b_status if b_status != "confirmed" else ""}
 
     def sort_href(column):
@@ -311,7 +315,7 @@ def bookings(property_id):
         adr=kpis.adr(conn, property_id, start, end), bookings=rows, total_rows=total_rows,
         b_sort=b_sort, b_dir=b_dir, sort_href=sort_href, filters=filters, platforms=platforms, sources=sources,
         has_future=bool(facts["future"]), has_cancelled=bool(facts["cancelled"]),
-        ctx_params=link_params(),
+        ctx_params=link_params(), inactive_stored=inactive_stored,
         # Bookings is the reservation evidence layer -- what guests
         # actually booked and paid, so it's Gross Booking Revenue (the
         # true guest value) here, never the adjusted Urban Nest figure

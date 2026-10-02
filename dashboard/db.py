@@ -190,6 +190,20 @@ CREATE TABLE IF NOT EXISTS property_aliases (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Which booking data feeds the KPIs for one property and month. A row exists
+-- ONLY when a person decided; importing a document never writes one. With no
+-- row: Excel history if the month has any, otherwise the detailed reservations
+-- (see services/sources.py). The Excel rows themselves are never altered.
+CREATE TABLE IF NOT EXISTS booking_source_state (
+    property_id TEXT NOT NULL REFERENCES properties(id),
+    month TEXT NOT NULL,                       -- 'YYYY-MM'
+    active_source TEXT NOT NULL,               -- 'legacy_aggregate' | 'detailed'
+    decided_at TEXT NOT NULL DEFAULT (datetime('now')),
+    decided_by TEXT,
+    note TEXT,
+    PRIMARY KEY (property_id, month)
+);
+
 CREATE INDEX IF NOT EXISTS idx_document_events_doc ON document_events(document_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_property_date ON bookings(property_id, check_in);
 CREATE INDEX IF NOT EXISTS idx_transactions_property_date ON transactions(property_id, date);

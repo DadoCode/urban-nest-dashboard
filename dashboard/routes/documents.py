@@ -6,6 +6,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, s
 
 import db
 import services.ingest as ingest
+import services.reconcile as rc
 from services import runtime
 from services.audit import record, record_edits
 from services.common import CATEGORIES, get_properties, get_property
@@ -131,7 +132,7 @@ def index():
         return url_for("documents.index", **{k: v for k, v in args.items() if v is not None})
 
     return render_template(
-        "documents.html", active="documents", all_properties=get_properties(conn), active_property=None,
+        "documents.html", active="documents", all_properties=get_properties(conn), active_property=None, recon_needed=rc.needed_count(conn),
         docs=rows, counts=counts, total=total, doc_types=DOC_TYPE_LABELS, status_labels=ingest.STATUS_FILTER_LABELS,
         periods=periods, sort=sort, sort_href=sort_href, extraction_available=extraction_available(),
         prefill_property=prefill_property, prefill_type=prefill_type,
@@ -641,8 +642,11 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
     for (pid, ym), before in touched.items():
         y, m = map(int, ym.split("-"))
         after = kpis.revenue(conn, pid, *kpis.month_bounds(y, m))
-        flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: £{before:,.0f} → £{after:,.0f} "
-              f"({'+' if after >= before else '−'}£{abs(after - before):,.0f} from these reservations). Your Excel history for the month is kept as it was.", "info")
+        if abs(after - before) < 0.005:
+            flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: stored. Dashboard figures are unchanged (the Excel history is still in charge of this month). "
+                  f"Compare the two on the Reconciliation page.", "info")
+        else:
+            flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: £{before:,.0f} → £{after:,.0f} (no Excel history for this month, so these reservations now feed the dashboard).", "info")
     return redirect(url_for("documents.review", doc_id=doc_id))
 
 
@@ -723,10 +727,7 @@ def map_listing(doc_id):
         n = 0
         for it in conn.execute("SELECT id, check_in, check_out, reservation_id FROM document_items WHERE document_id=? AND item_kind='reservation' AND raw_description=? AND property_id IS NULL", (doc_id, listing)).fetchall():
             dup_id = find_duplicate_reservation(conn, choice, {"reservation_id": it["reservation_id"], "check_in": it["check_in"], "check_out": it["check_out"]})
-            if dup_id:
-                tick = ingest.duplicate_default(ingest.source_of(conn, "bookings", dup_id)) == "replace"
-            else:
-                tick = not ingest.excel_overlap(conn, choice, it["check_in"])
+            tick = (ingest.duplicate_default(ingest.source_of(conn, "bookings", dup_id)) == "replace") if dup_id else True
             conn.execute("UPDATE document_items SET property_id=?, include=? WHERE id=?", (choice, 1 if tick else 0, it["id"]))
             n += 1
         ingest.alias_remember(conn, listing, choice)
@@ -734,24 +735,4 @@ def map_listing(doc_id):
     ingest.log_event(conn, doc_id, "edited", f"Listing \u201c{listing}\u201d -> {'not tracked' if choice == '__ignore__' else get_property(conn, choice)['name']} ({n} line{'s' if n != 1 else ''})",
                      {"listing": listing, "choice": choice, "lines": n})
     conn.commit()
-    return redirect(url_for("documents.review", doc_id=doc_id))
-
-
-@bp.route("/documents/<int:doc_id>/excel-overlap", methods=["POST"])
-def excel_overlap_toggle(doc_id):
-    """Tick or untick every reservation line that falls in a month the Excel history already covers."""
-    conn = db.get_conn()
-    doc = conn.execute("SELECT status FROM documents WHERE id=?", (doc_id,)).fetchone()
-    if not doc or doc["status"] == "confirmed":
-        return redirect(url_for("documents.review", doc_id=doc_id))
-    tick = request.form.get("action") == "tick"
-    n = 0
-    for it in conn.execute("SELECT id, property_id, check_in, check_out, reservation_id FROM document_items WHERE document_id=? AND item_kind='reservation' AND property_id IS NOT NULL", (doc_id,)).fetchall():
-        if find_duplicate_reservation(conn, it["property_id"], {"reservation_id": it["reservation_id"], "check_in": it["check_in"], "check_out": it["check_out"]}):
-            continue
-        if ingest.excel_overlap(conn, it["property_id"], it["check_in"]):
-            conn.execute("UPDATE document_items SET include=? WHERE id=?", (1 if tick else 0, it["id"]))
-            n += 1
-    conn.commit()
-    flash(f"\u2713 {n} reservation{'s' if n != 1 else ''} in months Excel already covers {'ticked: they will be ADDED on top of the Excel figures' if tick else 'unticked'}.", "success")
     return redirect(url_for("documents.review", doc_id=doc_id))

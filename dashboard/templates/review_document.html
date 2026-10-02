@@ -123,11 +123,7 @@
   {% if overlap and overlap.lines and not confirmed %}
     <div class="card" style="margin-bottom:var(--s3)">
       <div style="font-weight:600">{{ overlap.lines }} reservation{{ 's' if overlap.lines != 1 }} fall in months your Excel history already covers</div>
-      <p class="note" style="margin:2px 0 var(--s3)">Excel is old data and is kept exactly as it is. It can't be matched stay by stay, so ticking these <strong>adds them on top</strong> of the Excel figures and may count a stay twice. {{ overlap.ticked }} of them {{ 'is' if overlap.ticked == 1 else 'are' }} currently ticked.</p>
-      <form method="post" action="{{ url_for('documents.excel_overlap_toggle', doc_id=doc.id) }}" style="margin:0">
-        {% if overlap.ticked %}<input type="hidden" name="action" value="untick"><button type="submit" class="secondary">Untick them</button>
-        {% else %}<input type="hidden" name="action" value="tick"><button type="submit" class="secondary">Tick them anyway (add on top)</button>{% endif %}
-      </form>
+      <p class="note" style="margin:2px 0 0">Confirming <strong>stores</strong> these but does <strong>not</strong> change those months' dashboard figures: Excel stays in charge of a month until you compare the two and choose, on the <a href="{{ url_for('reconcile.index') }}">Reconciliation page</a>. Months with no Excel history use these reservations automatically.</p>
     </div>
   {% endif %}
 
@@ -240,7 +236,7 @@
               <div class="rv-foot">
                 <span class="rv-flags"></span>
                 {% if v.orig.note %}<span class="note">{{ v.orig.note }}</span>{% endif %}
-                {% if v.excel_overlap %}<span class="note" style="color:var(--warn)">Excel already has £{{ '{:,.0f}'.format(v.excel_overlap) }} income for this property in {{ it.check_in[:7] }} — ticking adds on top</span>{% endif %}
+                {% if v.excel_overlap %}<span class="note" style="color:var(--warn)">Excel has {{ it.check_in[:7] }} for this property — stored, figures unchanged until reconciled</span>{% endif %}
                 {% if v.orig.status %}<span class="note">Source status: <strong>{{ v.orig.status }}</strong>{% if v.orig.status_note %} \u2014 left unticked{% endif %}</span>{% endif %}
                 {% if v.orig.po_note or v.orig.order_id %}<span class="note">{% if v.orig.order_id %}Order {{ v.orig.order_id }}{% endif %}{% if v.orig.po_note %} · {{ v.orig.po_note }}{% endif %}</span>{% endif %}
                 <span class="rv-foot-right">

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_head, empty_state %}
+{% from "_recon_macros.html" import fmt %}
+{% block title %}Figure audit — Urban Nest Estates{% endblock %}
+{% block content %}
+  {{ page_head("Figure audit", "Where did each number come from? One row per property and month: the active booking source, the figures, and how many source records sit behind them.") }}
+  <p class="note" style="margin:0 0 var(--s3)"><a href="{{ url_for('reconcile.index') }}">&larr; Reconciliation</a> · <a href="{{ csv_url }}">Download CSV</a></p>
+  <form method="get" class="filter-bar">
+    <select name="property" onchange="this.form.submit()"><option value="">All properties</option>{% for p in all_properties if p.type != 'overhead' %}<option value="{{ p.id }}" {{ 'selected' if pid == p.id }}>{{ p.name }}</option>{% endfor %}</select>
+    <input type="month" name="from" value="{{ first or '' }}"> <input type="month" name="to" value="{{ last or '' }}"><button type="submit" class="secondary">Show</button>
+  </form>
+  <div class="card flush">
+    {% if rows %}
+      <table style="font-size:12px">
+        <thead><tr>{% for k, label in cols %}<th {{ 'class=num' if k not in ('property','model','ym','active','explicit') }} style="white-space:normal">{{ label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for r in rows %}<tr>
+            {% for k, label in cols %}<td {{ 'class=num' if k not in ('property','model','ym','active','explicit') }}>
+              {%- if k == 'explicit' -%}{{ 'yes' if r[k] else 'default' }}
+              {%- elif k == 'active' -%}{{ 'Excel history' if r[k] == 'legacy_aggregate' else 'Detailed' }}
+              {%- elif k in ('gbr','un_revenue','fee','costs','profit','adr','revpar','legacy_tx_amount','uploaded_exp_amount') -%}{{ fmt(r[k], 'money') }}
+              {%- elif k == 'occupancy' -%}{{ fmt(r[k], 'pct') }}
+              {%- elif k in ('nights','reservations','legacy_tx','legacy_agg','legacy_agg_nights','uploaded_res','manual_res','synced_res','uploaded_exp') -%}{{ fmt(r[k], 'int') }}
+              {%- else -%}{{ r[k] }}{%- endif -%}</td>{% endfor %}</tr>{% endfor %}
+        </tbody>
+      </table>
+    {% else %}{{ empty_state("No data in this range", "Pick a different range.") }}{% endif %}
+  </div>
+{% endblock %}
