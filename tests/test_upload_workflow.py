@@ -393,6 +393,28 @@ for url in ["/", "/properties", "/expenses", "/documents", "/properties/alpha-ho
 check("demo: banner is shown", "sample data" in demo.get("/properties").get_data(as_text=True))
 del os.environ["UN_DEMO_MODE"]
 
+# ---------------------------------------------------------------- private token-gated share of real data
+os.environ["UN_SHARE_TOKEN"] = "tok-for-test-1234567890"
+shared = create_app().test_client()
+T = "/s/tok-for-test-1234567890"
+for bad in ["/", "/properties", "/s/", "/s/wrong-token/properties", "/s/tok-for-test-1234567890x/", "/static/style.css", "/documents/1/file"]:
+    rr = shared.get(bad)
+    check(f"share: {bad} without the token is a bare 404", rr.status_code == 404 and rr.get_data(as_text=True) == "Not found")
+home = shared.get(T + "/properties")
+body = home.get_data(as_text=True)
+check("share: the right token serves the app", home.status_code == 200 and "Properties" in body)
+check("share: every internal link and asset keeps the token prefix", f'href="{T}/' in body and f'{T}/static/style.css' in body and 'href="/properties' not in body and 'href="/documents' not in body)
+check("share: pages are marked noindex and send no referrer", home.headers.get("X-Robots-Tag", "").startswith("noindex") and home.headers.get("Referrer-Policy") == "no-referrer")
+check("share: banner says private read-only view (not 'sample data')", "Private read-only view" in body and "sample data" not in body)
+check("share: static assets load under the prefix", shared.get(T + "/static/style.css").status_code == 200)
+n_docs = q("SELECT COUNT(*) n FROM documents")[0]["n"]
+rr = shared.post(T + "/documents/upload", data={"document": (io.BytesIO(b"a,b\n1,2\n"), "x.csv"), "doc_type": "other"}, content_type="multipart/form-data", follow_redirects=True)
+check("share: writes are refused with the read-only message and store nothing",
+      "read-only view" in rr.get_data(as_text=True) and q("SELECT COUNT(*) n FROM documents")[0]["n"] == n_docs)
+check("share: a refused write redirects back inside the token prefix", shared.post(T + "/apartments", data={"name": "zzz"}).headers["Location"].startswith(T) or shared.post(T + "/apartments", data={"name": "zzz"}).headers["Location"].startswith("http"))
+check("share: tabs and drawers work under the prefix", shared.get(T + "/properties/alpha-house/bookings").status_code == 200 and shared.get(T + "/expenses").status_code == 200)
+del os.environ["UN_SHARE_TOKEN"]
+
 print()
 if failures:
     print(f"{len(failures)} check(s) FAILED:")

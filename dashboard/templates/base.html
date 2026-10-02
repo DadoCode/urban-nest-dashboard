@@ -53,7 +53,7 @@
     <div class="main-col">
       <main>
         {% if role == 'viewer' %}<div class="viewer-note">You're viewing in read-only mode. Everything is live, but nothing can be changed from this account.</div>{% endif %}
-        {% if demo_mode %}<div class="viewer-note">{{ demo_message }} What you see is sample data.</div>{% endif %}
+        {% if demo_mode %}<div class="viewer-note">{{ demo_banner }}</div>{% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% for category, m in messages %}<div class="flash {{ category if category in ('success', 'warning', 'error', 'info') else 'info' }}" role="status">{{ m }}</div>{% endfor %}
         {% endwith %}

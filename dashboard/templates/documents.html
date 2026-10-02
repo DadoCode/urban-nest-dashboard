@@ -12,7 +12,7 @@
   {% endif %}
   <div class="card">
     {% if demo_mode %}
-      <div class="empty" style="padding:var(--s4)"><div class="empty-title">Uploads are off in this demo</div><div class="empty-body" style="margin-bottom:0">{{ demo_message }} Browse the sample documents below to see how review works.</div></div>
+      <div class="empty" style="padding:var(--s4)"><div class="empty-title">Uploads are off in this demo</div><div class="empty-body" style="margin-bottom:0">{{ demo_message }}</div></div>
     {% else %}
     {% if not extraction_available %}
       <div class="flash info" style="margin-bottom:var(--s3)">Automatic extraction isn't configured. You can enter the extracted rows manually. Spreadsheets and CSV files are still read automatically.</div>

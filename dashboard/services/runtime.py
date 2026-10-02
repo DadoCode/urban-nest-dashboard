@@ -18,10 +18,30 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 DEMO_MESSAGE = "Demo mode — changes and uploads are disabled on this hosted preview."
 
 
+def share_token():
+    """UN_SHARE_TOKEN: when set, this deployment is a private read-only share
+    of real data -- reachable only under /s/<token>/ (see app.py)."""
+    return env.get("UN_SHARE_TOKEN") or None
+
+
+def refusal_message():
+    """Shown when a write is refused."""
+    if share_token():
+        return "This is a read-only view. Changes and uploads are disabled."
+    return DEMO_MESSAGE
+
+
+def banner_text():
+    if share_token():
+        return "Private read-only view. Changes and uploads are disabled."
+    return DEMO_MESSAGE + " What you see is sample data."
+
+
 def is_demo():
-    """True on Vercel (it always sets VERCEL) or when UN_DEMO_MODE is set,
-    so the read-only behaviour can also be exercised locally."""
-    if os.environ.get("VERCEL"):
+    """True on Vercel (it always sets VERCEL), when a share token is set, or
+    when UN_DEMO_MODE is set, so the read-only behaviour can also be
+    exercised locally."""
+    if os.environ.get("VERCEL") or share_token():
         return True
     return (env.get("UN_DEMO_MODE") or "").lower() in ("1", "true", "yes", "on")
 

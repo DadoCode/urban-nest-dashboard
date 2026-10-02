@@ -53,6 +53,27 @@ def _secret_key():
         return secrets.token_hex(32)
 
 
+def _token_gate(app, token):
+    """Serve the app only under /s/<token>/ ; every other path is a bare 404
+    that reveals nothing. The token becomes Flask's SCRIPT_NAME, so every
+    url_for() link and asset URL the pages produce keeps it automatically
+    (no cookies needed, so a browsing tool can follow links)."""
+    import hmac
+    prefix = f"/s/{token}"
+
+    def gated(environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        candidate = path[:len(prefix)]
+        if hmac.compare_digest(candidate.encode(), prefix.encode()) and path[len(prefix):len(prefix) + 1] in ("", "/"):
+            environ["SCRIPT_NAME"] = prefix
+            environ["PATH_INFO"] = path[len(prefix):] or "/"
+            return app(environ, start_response)
+        start_response("404 Not Found", [("Content-Type", "text/plain"), ("X-Robots-Tag", "noindex")])
+        return [b"Not found"]
+
+    return gated
+
+
 def create_app():
     flask_app = Flask(__name__)
     flask_app.secret_key = _secret_key()
@@ -63,6 +84,17 @@ def create_app():
     # behind a tunnel (ngrok/Cloudflare) the real scheme/client arrive in X-Forwarded-* headers
     from werkzeug.middleware.proxy_fix import ProxyFix
     flask_app.wsgi_app = ProxyFix(flask_app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    token = runtime.share_token()
+    if token:
+        flask_app.wsgi_app = _token_gate(flask_app.wsgi_app, token)
+
+        @flask_app.after_request
+        def _private_headers(response):
+            # No search indexing, and never send this URL (it carries the token) to the CDNs the pages load scripts from.
+            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
     @flask_app.before_request
     def _secure_cookie_over_https():
         flask_app.config["SESSION_COOKIE_SECURE"] = request.is_secure
@@ -79,7 +111,7 @@ def create_app():
 
     @flask_app.context_processor
     def _inject_runtime():
-        return {"demo_mode": demo, "demo_message": runtime.DEMO_MESSAGE,
+        return {"demo_mode": demo, "demo_message": runtime.refusal_message(), "demo_banner": runtime.banner_text(),
                 "max_upload_mb": round(runtime.max_upload_bytes() / 1024 / 1024)}
 
     def _back(default_endpoint):
@@ -94,8 +126,8 @@ def create_app():
         if not demo or request.method in ("GET", "HEAD", "OPTIONS") or request.endpoint == "auth.login":
             return None
         if request.headers.get("HX-Request"):
-            return f'<div class="note">{runtime.DEMO_MESSAGE}</div>', 200
-        flash(runtime.DEMO_MESSAGE, "warning")
+            return f'<div class="note">{runtime.refusal_message()}</div>', 200
+        flash(runtime.refusal_message(), "warning")
         return redirect(_back("overview.index"))
 
     @flask_app.errorhandler(413)
