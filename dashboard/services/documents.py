@@ -338,6 +338,6 @@ def save_upload(conn, file, doc_type, property_id, flash):
     attention = sum(1 for w in warnings if w["level"] == "warn")
     msg = f"\u2713 Read {len(items)} {noun}{'s' if len(items) != 1 else ''} from {original} — check them below, then confirm."
     if attention:
-        msg += f" {attention} thing{'s' if attention != 1 else ''} need checking."
+        msg += f" {attention} thing{'s need' if attention != 1 else ' needs'} checking."
     flash(msg, "warning" if attention else "success")
     return doc_id

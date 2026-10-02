@@ -76,7 +76,7 @@
   <div class="page-head" style="margin-bottom:var(--s4)">
     <div>
       <h1 style="font-size:22px">{{ doc.filename }}</h1>
-      <p class="subtitle">{{ doc_type_label }} · {{ prop.name if prop else 'Property not detected' }}{% if period_label %} · {{ period_label }}{% endif %} · uploaded {{ doc.uploaded_at[:10] }}</p>
+      <p class="subtitle">{{ doc_type_label }} · {{ strip.property or 'Property not detected' }}{% if period_label %} · {{ period_label }}{% endif %} · uploaded {{ doc.uploaded_at[:10] }}</p>
     </div>
     <div class="page-actions">
       {% if confirmed %}{{ pill(status_label, 'pos') }}{% elif doc.status == 'failed' %}{{ pill('Failed', 'neg') }}{% else %}{{ pill(status_label, 'warn') }}{% endif %}
