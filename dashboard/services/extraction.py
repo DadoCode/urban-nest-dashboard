@@ -160,6 +160,13 @@ def _num(value):
     return -n if neg else n
 
 
+def _h(text):
+    """A header or hint with every difference that doesn't matter removed:
+    case, tabs/newlines/non-breaking spaces, punctuation and hyphens
+    ("Arrival\t" == "arrival", "Check-in" == "check in")."""
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
 _RES_COLUMN_HINTS = {
     "reservation_id": ("confirmation code", "confirmation", "reservation number", "reservation id", "reservation", "booking number", "booking id", "book number"),
     "check_in": ("start date", "check-in", "check in", "checkin", "arrival", "arriving"),
@@ -173,15 +180,16 @@ _RES_COLUMN_HINTS = {
     "amount": ("amount",),
     "type": ("type",),
     "status": ("status",),
+    "currency": ("currency",),
 }
 
 
 def _guess_reservation_columns(header):
-    lower = [str(h or "").strip().lower() for h in header]
+    lower = [_h(h) for h in header]
     found = {}
     for field, hints in _RES_COLUMN_HINTS.items():
         for hint in hints:  # earlier hints are more specific -- try them first
-            idx = next((i for i, col in enumerate(lower) if hint in col and i not in found.values()), None)
+            idx = next((i for i, col in enumerate(lower) if _h(hint) in col and i not in found.values()), None)
             if idx is not None:
                 found[field] = idx
                 break
@@ -202,12 +210,15 @@ def _clean_code(value):
 
 def _platform_of(header):
     """Which booking platform an export is from, judged by its column names."""
-    lower = {str(h or "").strip().lower() for h in header}
+    lower = {_h(h) for h in header}
     if {"confirmation code", "gross earnings"} <= lower or "airbnb remitted tax" in lower:
         return "airbnb"
     if {"reservation number", "booker name"} <= lower or "genius booker" in lower:
         return "booking_com"
     return None
+
+
+_OK_STATUSES = {"ok", "confirmed", "booked", "completed", "complete", "checked in", "checked out", "stayed", "finished", "reservation", "accepted"}
 
 
 def _money(n):
@@ -234,6 +245,7 @@ def _rows_to_reservations(header, rows):
     items, notes = [], []
     left_out, left_out_amt = Counter(), defaultdict(float)
     cancelled = tried = bad_dates = night_mismatch = ambiguous = 0
+    odd_status, currencies, statuses = Counter(), Counter(), Counter()
     seen, dup_codes = set(), []
     for row_no, row in enumerate(rows, start=2):
         if not any(str(c or "").strip() for c in row):
@@ -245,10 +257,16 @@ def _rows_to_reservations(header, rows):
                 left_out[row_type] += 1
                 left_out_amt[row_type] += _num(raw(row, "amount")) or _num(raw(row, "net")) or 0
             continue
-        status = str(raw(row, "status") or "").lower()
-        if "cancel" in status or "no_show" in status or "no show" in status:
-            cancelled += 1
-            continue
+        status_raw = str(raw(row, "status") or "").strip()
+        status = _h(status_raw)
+        exclude_why = None
+        if status:
+            if "cancel" in status or "no show" in status or "noshow" in status:
+                exclude_why = f"status \u201c{status_raw}\u201d (cancelled / no-show)"
+                cancelled += 1
+            elif status not in _OK_STATUSES:
+                exclude_why = f"unrecognised status \u201c{status_raw}\u201d"
+                odd_status[status_raw] += 1
         tried += 1
         nights = _num(raw(row, "nights"))
         ci_raw, co_raw = raw(row, "check_in"), raw(row, "check_out")
@@ -289,7 +307,11 @@ def _rows_to_reservations(header, rows):
                 continue
             seen.add(code)
         listing, location = raw(row, "listing"), raw(row, "location")
-        items.append({"reservation_id": code,
+        if status_raw:
+            statuses[status_raw] += 1
+        if raw(row, "currency"):
+            currencies[str(raw(row, "currency")).strip().upper()] += 1
+        items.append({"status": status_raw or None, "_exclude": bool(exclude_why), "_status_note": exclude_why,"reservation_id": code,
                       "description": str(listing).strip() or None if listing else None,
                       "location": " ".join(str(location).split()) if location else None,
                       "check_in": check_in, "check_out": check_out,
@@ -302,8 +324,28 @@ def _rows_to_reservations(header, rows):
                       "message": f"{n} “{kind}” row{'s' if n != 1 else ''} {'were' if n != 1 else 'was'} left out — they aren't new reservations"
                                  + (f" but together change what you were paid by {_money(left_out_amt[kind])}" if left_out_amt[kind] else "")
                                  + ". If they relate to reservations you are importing, adjust those lines by hand."})
-    if cancelled:
-        notes.append({"code": "cancelled_left_out", "level": "info", "message": f"{cancelled} cancelled or no-show reservation{'s' if cancelled != 1 else ''} left out."})
+    if cancelled or odd_status:
+        bits = []
+        if cancelled:
+            bits.append(f"{cancelled} cancelled or no-show")
+        if odd_status:
+            bits.append(f"{sum(odd_status.values())} with an unrecognised status ({', '.join(odd_status)})")
+        notes.append({"code": "status_unticked", "level": "warn",
+                      "message": f"{' and '.join(bits)} reservation{'s' if cancelled + sum(odd_status.values()) != 1 else ''} are listed with their source status but start unticked. Tick one only if it should count as income."})
+    if currencies and set(currencies) != {"GBP"}:
+        notes.append({"code": "currency", "level": "warn",
+                      "message": f"This file has non-GBP amounts ({', '.join(f'{c} \u00d7{n}' for c, n in currencies.items())}). Amounts are imported as pounds without conversion."})
+    shown = ", ".join(f"{h.strip() or '?'} \u2192 {label}" for label, i in (
+        ("check-in", cols.get("check_in")), ("check-out", cols.get("check_out")), ("reservation ID", cols.get("reservation_id")),
+        ("listing", cols.get("listing")), ("address", cols.get("location")), ("Gross Booking Revenue", cols.get("gross")),
+        ("platform fee", cols.get("fees")), ("net", cols.get("net") if cols.get("net") is not None else cols.get("amount")),
+        ("status", cols.get("status"))) if i is not None for h in [str(header[i])])
+    gross_name = _h(header[cols["gross"]]) if "gross" in cols else ""
+    meaning = ""
+    if gross_name == "total payment" and "fees" in cols:
+        meaning = (" Booking.com's \u201cTotal payment\u201d is taken as the full guest booking value (Gross Booking Revenue) and \u201cCommission\u201d as Booking.com's fee, "
+                   "so you receive Total payment \u2212 Commission. Payment-service charges are not in this export; compare the first payout with your Booking.com statement.")
+    notes.append({"code": "column_mapping", "level": "info", "message": f"Columns used: {shown}.{meaning}"})
     if dup_codes:
         notes.append({"code": "duplicate_codes", "level": "warn",
                       "message": f"{len(dup_codes)} reservation code{'s' if len(dup_codes) != 1 else ''} appeared more than once in the file ({', '.join(dup_codes[:4])}{'…' if len(dup_codes) > 4 else ''}); only the first was kept."})
@@ -463,12 +505,12 @@ _NOT_AN_AMOUNT = ("subtotal", "vat", "tax", "fee", "quantity", "qty", "count", "
 
 
 def _guess_columns(header):
-    lower = [h.strip().lower() for h in header]
+    lower = [_h(h) for h in header]
     found = {}
     for field, hints in _COLUMN_HINTS.items():
         for hint in hints:  # earlier hints are the better evidence
             idx = next((i for i, col in enumerate(lower)
-                        if hint in col and i not in found.values()
+                        if _h(hint) in col and i not in found.values()
                         and not (field == "amount" and any(bad in col for bad in _NOT_AN_AMOUNT))), None)
             if idx is not None:
                 found[field] = idx
@@ -571,7 +613,7 @@ def _extract_xlsx(file_path, reservations=False, doc_type=None):
 
 
 def _is_amazon_business(header):
-    lower = {str(h or "").strip().lower() for h in header}
+    lower = {_h(h) for h in header}
     return {"order id", "asin"} <= lower and bool({"item net total", "item subtotal"} & lower)
 
 
@@ -582,7 +624,7 @@ def _rows_to_amazon_items(header, rows):
     Item Net Total (what was paid, VAT included) becomes one line.
     -> (items, notes, rows_tried)."""
     from collections import Counter
-    idx = {str(h or "").strip().lower(): i for i, h in enumerate(header)}
+    idx = {_h(h): i for i, h in enumerate(header)}
 
     def cell(row, name):
         i = idx.get(name)

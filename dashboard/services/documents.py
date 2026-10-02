@@ -247,7 +247,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
                        source_page, source_row)
                    VALUES (?,?,?,?,?,?,'income',?,'booking_income',0,?,?,?,'reservation',?,?,?,?,?,?,?,?,?)""",
                 (doc_id, i, item.get("description"), item.get("check_in"), platform, item.get("net"),
-                 item_property, item.get("confidence"), 0 if (duplicate_of or ignored) else 1, json.dumps(item),
+                 item_property, item.get("confidence"), 0 if (duplicate_of or ignored or item.get("_exclude")) else 1, json.dumps(item),
                  item.get("check_in"), item.get("check_out"), item.get("reservation_id"), platform,
                  item.get("gross"), item.get("fees"), item.get("net"), _int(item.get("page")), _int(item.get("row"))),
             )

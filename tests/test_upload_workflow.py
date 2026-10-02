@@ -455,10 +455,42 @@ ws.append(["Mystery Studio", "9 Nowhere Lane", "Q R", "Yes", "9 September 2026",
 buf = io.BytesIO(); wb.save(buf)
 upload("booking-export.xlsx", buf.getvalue(), "booking_statement", "")
 db_ = last_doc(); rb = items_of(db_)
-check("booking.com: 'Total payment' minus 'Commission' is the net; cancelled reservations left out", len(rb) == 2 and [round(r["net_revenue"], 2) for r in rb] == [322.59, 393.65], [(r["reservation_id"], r["net_revenue"]) for r in rb])
+check("booking.com: 'Total payment' minus 'Commission' is the net", [round(r["net_revenue"], 2) for r in rb] == [322.59, 191.5, 393.65], [(r["reservation_id"], r["net_revenue"]) for r in rb])
+check("booking.com: the cancelled reservation is listed with its status but starts unticked", [r["include"] for r in rb] == [1, 0, 1] and rb[1]["property_id"] == "beta-court")
 check("booking.com: reservation numbers cleaned of '.0'; text dates read; platform detected", rb[0]["reservation_id"] == "5200756724" and rb[0]["check_in"] == "2026-08-29" and {r["platform"] for r in rb} == {"booking_com"})
-check("booking.com: listing matched via its own name, unknown one left for you to choose", rb[0]["property_id"] == "beta-court" and rb[1]["property_id"] is None, [(r["raw_description"], r["property_id"]) for r in rb])
-check("booking.com: cancelled-left-out is noted", "cancelled_left_out" in warn_codes(db_))
+check("booking.com: listing matched via its own name, unknown one left for you to choose", rb[0]["property_id"] == "beta-court" and rb[2]["property_id"] is None, [(r["raw_description"], r["property_id"]) for r in rb])
+check("booking.com: cancelled rows are flagged in the warnings", "status_unticked" in warn_codes(db_))
+
+# ---- the exact Booking.com export headers (tab-padded, as seen in the real file), no AI key, several properties ----
+BK_HEADERS = ["Property name", "Arrival\t", "Departure\t", "Booked on", "Status", "Total payment", "Commission", "Currency", "Reservation number"]
+wb = openpyxl.Workbook(); ws = wb.active
+ws.append(BK_HEADERS)
+ws.append(["Alpha House - Lovely 1BR", "29 August 2026", "31 August 2026", "27 August 2026", "OK", 386.8, 64.2088, "GBP", 5200756724.0])
+ws.append(["Beta Court Annex studio", "1 September 2026", "7 September 2026", "29 August 2026", "OK", 1212.4, 201.2584, "GBP", 5992739306.0])
+ws.append(["Totally Unknown Place", "9 September 2026", "11 September 2026", "1 September 2026", "OK", 472.0, 78.35, "GBP", 5751069276.0])
+ws.append(["Alpha House - Lovely 1BR", "12 September 2026", "13 September 2026", "2 September 2026", "cancelled", 150.0, 0, "GBP", 6000000001.0])
+ws.append(["Beta Court Annex studio", "14 September 2026", "15 September 2026", "3 September 2026", "no_show", 120.0, 20.0, "GBP", 6000000002.0])
+ws.append(["Alpha House - Lovely 1BR", "16 September 2026", "17 September 2026", "4 September 2026", "pending", 100.0, 16.0, "EUR", 6000000003.0])
+buf = io.BytesIO(); wb.save(buf)
+upload("Reservations_exact.xlsx", buf.getvalue(), "booking_statement", "")
+dx = last_doc(); rx = items_of(dx)
+check("exact headers: parses without an AI key and without failing the whole document", dx["status"] == "extracted" and len(rx) == 6, (dx["status"], dx["failure_reason"]))
+check("exact headers: 'Arrival' is check-in and 'Departure' is check-out (tab-padded headers)", [(r["check_in"], r["check_out"]) for r in rx][:2] == [("2026-08-29", "2026-08-31"), ("2026-09-01", "2026-09-07")])
+check("exact headers: 'Reservation number' is the reservation ID", [r["reservation_id"] for r in rx][:3] == ["5200756724", "5992739306", "5751069276"])
+check("exact headers: 'Property name' is used per row (several properties in one file)", [r["property_id"] for r in rx][:3] == ["alpha-house", "beta-court-two", None], [r["property_id"] for r in rx])
+check("exact headers: Commission is captured as the platform fee", [round(r["platform_fees"], 4) for r in rx][:2] == [64.2088, 201.2584])
+check("exact headers: Total payment is Gross Booking Revenue and net = Total payment - Commission", [round(r["gross_revenue"], 2) for r in rx][:2] == [386.8, 1212.4] and [round(r["net_revenue"], 2) for r in rx][:2] == [322.59, 1011.14])
+check("exact headers: cancelled, no_show and unrecognised-status rows are listed but unticked; OK rows ticked", [r["include"] for r in rx] == [1, 1, 1, 0, 0, 0], [r["include"] for r in rx])
+check("exact headers: the unknown property flags that one row, not the document", "property_missing" in warn_codes(dx) and sum(1 for r in rx if r["property_id"] is None) == 1)
+check("exact headers: a non-GBP row is called out", "currency" in warn_codes(dx))
+check("exact headers: the column mapping and the meaning of Total payment are written down", any("Total payment" in w["message"] and "Gross Booking Revenue" in w["message"] and "Arrival" in w["message"]
+      for w in json.loads(dx["detection_json"])["warnings"] if w["code"] == "column_mapping"))
+page = client.get(f"/documents/{dx['id']}/review").get_data(as_text=True)
+check("exact headers: review shows the source status on each row and 'Multiple properties'", "Source status: <strong>cancelled</strong>" in page and "Source status: <strong>no_show</strong>" in page and "Multiple properties (2)" in page)
+check("exact headers: no 'extraction isn't configured' message for a spreadsheet", "Automatic extraction isn't configured" not in page)
+check("spreadsheet failure page doesn't blame the missing AI key either", "Automatic extraction isn't configured" not in client.get("/documents/%d/review" % q("SELECT id FROM documents WHERE filename='nocolumns.csv' ORDER BY id DESC LIMIT 1")[0]["id"]).get_data(as_text=True))
+check("the upload page only reveals the AI-key notice for non-spreadsheet files", 'id="ai-note" hidden' in client.get("/documents").get_data(as_text=True))
+check("header normalisation: tabs, newlines, hyphens and case are ignored everywhere", extraction._h("Arrival\t") == "arrival" and extraction._h("Check-in ") == "check in" and extraction._h("PO\nNumber") == "po number")
 
 # Property matching must not guess from a generic word or a substring
 props = [{"id": "campbell", "name": "7A Campbell Hill", "address": "7A Campbell Hill"}, {"id": "perry", "name": "11 Perryfield Way", "address": "11 Perryfield Way"},

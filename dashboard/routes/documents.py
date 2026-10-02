@@ -225,7 +225,7 @@ def _summary_strip(doc, prop, items, detection, names):
     return {
         "filename": doc["filename"], "size": _size_text(doc["file_size"]), "uploaded": doc["uploaded_at"],
         "doc_type": DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
-        "property": prop["name"] if prop else ("%d properties" % multi_props if multi_props > 1 else None),
+        "property": prop["name"] if prop else ("Multiple properties (%d)" % multi_props if multi_props > 1 else None),
         "property_how": prop_how if not (multi_props > 1 and not prop) else "matched line by line",
         "period": _period_text(doc), "period_how": (detection.get("period") or {}).get("source"),
         "rows": len(items), "included": sum(1 for i in items if i["include"]), "noun": "reservation" if res else "line",
@@ -265,7 +265,7 @@ def review(doc_id):
             include = it["dup_decision"] != "exclude"
         views.append({
             "row": row, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it),
-            "orig": {"po": orig.get("po"), "po_note": orig.get("_po_note"), "order_id": orig.get("order_id"),
+            "orig": {"status": orig.get("status"), "status_note": orig.get("_status_note"), "po": orig.get("po"), "po_note": orig.get("_po_note"), "order_id": orig.get("order_id"),
                      "vendor": orig.get("vendor"), "description": orig.get("description"), "amount": orig.get("amount"),
                      "category": orig.get("category"), "date": orig.get("date"),
                      "check_in": orig.get("check_in"), "check_out": orig.get("check_out"), "net": orig.get("net"),
@@ -319,6 +319,7 @@ def review(doc_id):
         strip=_summary_strip(doc, prop, items, detection, names), warnings=detection.get("warnings", []),
         events=events, kpi_changes=kpi_changes, created=created, dup_doc=dup_doc,
         extraction_available=extraction_available(),
+        needs_ai=not fname.endswith((".csv", ".tsv", ".xls", ".xlsx", ".xlsm")),
     )
 
 

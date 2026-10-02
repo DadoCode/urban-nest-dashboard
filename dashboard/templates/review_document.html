@@ -89,7 +89,7 @@
   </div>
 
   {% if doc.status == 'failed' %}
-    <div class="flash warning" style="margin-bottom:var(--s3)"><strong>Couldn't read this automatically.</strong> {{ doc.failure_reason or 'Nothing could be read from this file.' }}{% if not extraction_available %} (Automatic extraction isn't configured.){% endif %}</div>
+    <div class="flash warning" style="margin-bottom:var(--s3)"><strong>Couldn't read this automatically.</strong> {{ doc.failure_reason or 'Nothing could be read from this file.' }}{% if needs_ai and not extraction_available %} (Automatic extraction isn't configured, and this type of file needs it.){% endif %}</div>
   {% endif %}
   {% for w in warnings %}
     <div class="flash {{ 'warning' if w.level == 'warn' else 'info' }}" style="margin-bottom:var(--s2)">
@@ -224,6 +224,7 @@
 
               <div class="rv-foot">
                 <span class="rv-flags"></span>
+                {% if v.orig.status %}<span class="note">Source status: <strong>{{ v.orig.status }}</strong>{% if v.orig.status_note %} \u2014 left unticked{% endif %}</span>{% endif %}
                 {% if v.orig.po_note or v.orig.order_id %}<span class="note">{% if v.orig.order_id %}Order {{ v.orig.order_id }}{% endif %}{% if v.orig.po_note %} · {{ v.orig.po_note }}{% endif %}</span>{% endif %}
                 <span class="rv-foot-right">
                   {{ src_link(it) }}
@@ -255,7 +256,7 @@
 
       {% elif res_mode %}
         <div class="card">
-          <p class="note" style="margin:0 0 var(--s3)">{% if not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: type the reservations from the statement below; blank rows are ignored. Each is checked against what's already on file.</p>
+          <p class="note" style="margin:0 0 var(--s3)">{% if needs_ai and not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: type the reservations from the statement below; blank rows are ignored. Each is checked against what's already on file.</p>
           <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
             {% for i in range(6) %}
               <div class="rv-row" data-row>
@@ -281,7 +282,7 @@
 
       {% else %}
         <div class="card">
-          <p class="note" style="margin:0 0 var(--s3)">{% if not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: add the lines from the source below; rows without an amount are ignored. Each is checked against what's already on file.</p>
+          <p class="note" style="margin:0 0 var(--s3)">{% if needs_ai and not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: add the lines from the source below; rows without an amount are ignored. Each is checked against what's already on file.</p>
           <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
             {% for i in range(5) %}
               <div class="rv-row" data-row>

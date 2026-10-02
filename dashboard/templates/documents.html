@@ -15,7 +15,7 @@
       <div class="empty" style="padding:var(--s4)"><div class="empty-title">Uploads are off in this demo</div><div class="empty-body" style="margin-bottom:0">{{ demo_message }}</div></div>
     {% else %}
     {% if not extraction_available %}
-      <div class="flash info" style="margin-bottom:var(--s3)">Automatic extraction isn't configured. You can enter the extracted rows manually. Spreadsheets and CSV files are still read automatically.</div>
+      <div class="flash info" id="ai-note" hidden style="margin-bottom:var(--s3)">Automatic extraction isn't configured, so PDFs, photos and Word files can't be read automatically. You can enter the extracted rows manually. (Spreadsheets and CSV files don't need it.)</div>
     {% endif %}
     <form id="upload-form" class="upload-form" style="display:block" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
       <div id="dropzone" class="dropzone">
@@ -120,6 +120,9 @@
     function showFiles() {
       const names = Array.from(fileInput.files).map(f => f.name);
       fileList.textContent = names.length ? `${names.length} file(s): ${names.join(', ')}` : '';
+      // the "no extraction key" notice matters only for files that need AI; spreadsheets are read locally
+      const note = document.getElementById('ai-note');
+      if (note) note.hidden = !names.some(n => !/\.(csv|tsv|xls|xlsx|xlsm)$/i.test(n));
     }
     fileInput.addEventListener('change', showFiles);
     // Not an inline onclick: the file input is named "document", which inside a form's inline handler shadows the real `document`.

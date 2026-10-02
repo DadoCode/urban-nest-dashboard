@@ -12,7 +12,7 @@
   {% call section("Upload a document") %}
   <div class="card">
     <p class="note" style="margin-top:0">Amazon/Temu orders, cleaning invoices, booking-platform statements, bank statements, receipts — PDF or photo. Upload whatever came in, review the extracted lines, confirm, and this property's numbers update automatically.
-      {% if not extraction_available %}Automatic extraction isn't configured. You can enter the extracted rows manually. Spreadsheets and CSV files are still read automatically.{% else %}Claude will pull out the line items for you to review before anything's added to the ledger.{% endif %} Up to {{ max_upload_mb }} MB per file.</p>
+      {% if not extraction_available %}Spreadsheets and CSV files are read automatically. PDFs and photos need automatic extraction, which isn't configured, so for those you enter the rows manually.{% else %}Claude will pull out the line items for you to review before anything's added to the ledger.{% endif %} Up to {{ max_upload_mb }} MB per file.</p>
     <form class="upload-form" method="post" action="{{ url_for('documents.upload_property', property_id=prop.id) }}" enctype="multipart/form-data">
       <input type="file" name="document" required>
       <select name="doc_type">
