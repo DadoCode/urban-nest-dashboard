@@ -6,7 +6,7 @@
 <div class="card">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:var(--s3)">
     <a class="btn secondary" href="{{ prev_href }}">&larr; Prev</a>
-    <div style="text-align:center"><h2 style="margin:0">{{ month_label }}</h2><span class="note">Each day shows how many flats are booked that night. Click a day or a reservation for details.</span></div>
+    <div style="text-align:center"><h2 style="margin:0">{{ month_label }}</h2><span class="note">Each day shows how many properties are booked that night. Click a day or a reservation for details.</span></div>
     <a class="btn secondary" href="{{ next_href }}">Next &rarr;</a>
   </div>
   <div class="cal-grid cal-grid-head">
@@ -28,7 +28,7 @@
     <span class="chan"><i class="chan-airbnb"></i>Airbnb</span>
     <span class="chan"><i class="chan-booking"></i>Booking.com</span>
     <span class="chan"><i class="chan-direct"></i>Direct</span>
-    <span>Shading shows how many flats are booked; dots show which channels.</span>
+    <span>Shading shows how many properties are booked; dots show which channels.</span>
   </div>
 </div>
 
@@ -36,7 +36,7 @@
 <div class="card flush">
   {% if upcoming_rows %}
     <table>
-      <thead><tr><th>Flat</th><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th></tr></thead>
+      <thead><tr><th>Property</th><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th></tr></thead>
       <tbody>
         {% for b in upcoming_rows %}
           <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">

@@ -22,8 +22,8 @@ METRIC_INFO = {
     "revenue": "Revenue earned by Urban Nest in the selected period: full property revenue from operated properties plus management fees earned from managed properties.",
     "fee": "The management fee Urban Nest earns for managing a property, based on the agreed percentage of that property's booking revenue.",
     "net_profit": "Revenue minus this property's own costs. For a managed property, this equals Management Fee Earned, since Urban Nest's own income from it is just the fee.",
-    "adr": "Average nightly rate actually achieved on booked nights.",
-    "revpar": "Revenue per available night (occupancy × ADR) -- how effectively a property is generating revenue.",
+    "adr": "Average nightly rate achieved on booked nights.",
+    "revpar": "Revenue per available night (Occupancy × ADR).",
     # Targets' own calculation is NOT business-model-aware (see
     # routes/targets.py) -- it's gross booking revenue minus this
     # property's own costs for every property the same way, including a

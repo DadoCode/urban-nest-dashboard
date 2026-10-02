@@ -52,51 +52,66 @@
     const revparSeries = {{ revpar_json|safe }};
     const financial = {{ financial_json|safe }};
 
-    const financialDatasets = [
-      { type: 'bar', label: financial.series_a_label, data: financial.series_a, backgroundColor: UN.revenue, order: 2 },
-    ];
-    if (financial.costs) {
-      financialDatasets.push({ type: 'bar', label: 'Costs', data: financial.costs, backgroundColor: UN.costs, order: 2 });
+    const financialCanvas = document.getElementById('financialChart');
+    if (isAllEmpty(financial.series_a, financial.series_b, financial.costs)) {
+      chartEmptyState(financialCanvas, 'No historical data for this property yet.');
+    } else {
+      const financialDatasets = [
+        { type: 'bar', label: financial.series_a_label, data: financial.series_a, backgroundColor: UN.revenue, order: 2 },
+      ];
+      if (financial.costs) {
+        financialDatasets.push({ type: 'bar', label: 'Costs', data: financial.costs, backgroundColor: UN.costs, order: 2 });
+      }
+      financialDatasets.push({ type: 'line', label: financial.series_b_label, data: financial.series_b, backgroundColor: UN.profit, borderColor: UN.profit, tension: 0, pointHoverRadius: 5, order: 1 });
+
+      new Chart(financialCanvas, {
+        data: { labels: financial.months, datasets: financialDatasets },
+        options: {
+          interaction: { mode: 'index', intersect: false },
+          scales: quietScales(moneyShort),
+          plugins: { tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}` } } },
+        },
+      });
     }
-    financialDatasets.push({ type: 'line', label: financial.series_b_label, data: financial.series_b, backgroundColor: UN.profit, borderColor: UN.profit, tension: 0, pointHoverRadius: 5, order: 1 });
 
-    new Chart(document.getElementById('financialChart'), {
-      data: { labels: financial.months, datasets: financialDatasets },
-      options: {
-        interaction: { mode: 'index', intersect: false },
-        scales: quietScales(moneyShort),
-        plugins: { tooltip: { callbacks: { label: (item) => `${item.dataset.label}: ${moneyFull(item.parsed.y)}` } } },
-      },
-    });
+    const occCanvas = document.getElementById('occChart');
+    if (isAllEmpty(occ)) {
+      chartEmptyState(occCanvas, 'No historical data for this property yet.');
+    } else {
+      new Chart(occCanvas, {
+        type: 'line',
+        data: {
+          labels: months,
+          datasets: [
+            { label: 'This property', data: occ, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0, spanGaps: false },
+            { label: 'Portfolio avg', data: occPortfolio, borderColor: UN.costs, borderDash: [4, 4], fill: false, tension: 0, spanGaps: false, pointRadius: 0 },
+          ],
+        },
+        options: {
+          plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${pctShort(i.parsed.y)}` } } },
+          scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
+        },
+      });
+    }
 
-    new Chart(document.getElementById('occChart'), {
-      type: 'line',
-      data: {
-        labels: months,
-        datasets: [
-          { label: 'This property', data: occ, borderColor: UN.brand, backgroundColor: UN.brandSoft, fill: true, tension: 0, spanGaps: false },
-          { label: 'Portfolio avg', data: occPortfolio, borderColor: UN.costs, borderDash: [4, 4], fill: false, tension: 0, spanGaps: false, pointRadius: 0 },
-        ],
-      },
-      options: {
-        plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${pctShort(i.parsed.y)}` } } },
-        scales: quietScales(pctShort, { y: { beginAtZero: true, max: 100, grid: { color: UN.grid }, border: { display: false }, ticks: { callback: pctShort, maxTicksLimit: 6 } } }),
-      },
-    });
-
-    new Chart(document.getElementById('rateChart'), {
-      type: 'line',
-      data: {
-        labels: months,
-        datasets: [
-          { label: 'ADR', data: adrSeries, borderColor: UN.profit, backgroundColor: 'transparent', fill: false, tension: 0, spanGaps: false },
-          { label: 'RevPAR', data: revparSeries, borderColor: UN.brand, backgroundColor: 'transparent', fill: false, tension: 0, spanGaps: false, borderDash: [4, 4] },
-        ],
-      },
-      options: {
-        plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
-        scales: quietScales(moneyShort),
-      },
-    });
+    const rateCanvas = document.getElementById('rateChart');
+    if (isAllEmpty(adrSeries, revparSeries)) {
+      chartEmptyState(rateCanvas, 'No historical data for this property yet.');
+    } else {
+      new Chart(rateCanvas, {
+        type: 'line',
+        data: {
+          labels: months,
+          datasets: [
+            { label: 'ADR', data: adrSeries, borderColor: UN.profit, backgroundColor: 'transparent', fill: false, tension: 0, spanGaps: false },
+            { label: 'RevPAR', data: revparSeries, borderColor: UN.brand, backgroundColor: 'transparent', fill: false, tension: 0, spanGaps: false, borderDash: [4, 4] },
+          ],
+        },
+        options: {
+          plugins: { tooltip: { callbacks: { label: (i) => `${i.dataset.label}: ${moneyFull(i.parsed.y)}` } } },
+          scales: quietScales(moneyShort),
+        },
+      });
+    }
   </script>
 {% endblock %}

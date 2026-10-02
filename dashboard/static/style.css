@@ -364,6 +364,10 @@ button.pill.neutral { background: var(--neutral-dim); color: var(--ink-soft); }
 .empty .empty-title { font-weight: 600; font-size: var(--fs-body); }
 .empty .empty-body { color: var(--muted); font-size: var(--fs-table); margin: 2px 0 var(--s3); max-width: 60ch; }
 
+/* Compact in-place message for a chart whose series is entirely null --
+   replaces the canvas rather than letting Chart.js draw a nonsense axis. */
+.chart-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: var(--fs-table); text-align: center; padding: 0 var(--s4); }
+
 /* ---------- loading skeletons ---------- */
 
 @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: calc(200px + 100%) 0; } }

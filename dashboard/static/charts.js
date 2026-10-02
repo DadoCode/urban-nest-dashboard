@@ -69,6 +69,25 @@ function monthTicks() {
   return { callback: function (v) { return monthLabel(this.getLabelForValue(v)); }, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 };
 }
 
+/* True when every value across the given series is null/undefined --
+   i.e. there's genuinely no history to plot, as opposed to a series with
+   a real zero in it somewhere. */
+function isAllEmpty(...series) {
+  return series.every((arr) => !arr || arr.every((v) => v === null || v === undefined));
+}
+
+/* Hides the canvas and shows a compact message in its place, instead of
+   Chart.js auto-scaling a nonsense axis (e.g. repeated £1/£0 ticks) from
+   an all-null series. */
+function chartEmptyState(canvas, message) {
+  canvas.style.display = 'none';
+  const box = canvas.closest('.chart-box') || canvas.parentElement;
+  const div = document.createElement('div');
+  div.className = 'chart-empty';
+  div.textContent = message || 'No historical data for this property yet.';
+  box.appendChild(div);
+}
+
 function quietScales(yTickFormatter, extra) {
   return Object.assign({
     x: { grid: { display: false }, border: { display: false }, ticks: monthTicks() },
