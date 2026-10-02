@@ -179,6 +179,17 @@ CREATE TABLE IF NOT EXISTS document_events (
     timestamp TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Listing/location names a booking platform uses, remembered once you've said
+-- which property they are (or that they aren't one of yours), so the next
+-- statement is matched without being asked again.
+CREATE TABLE IF NOT EXISTS property_aliases (
+    alias TEXT PRIMARY KEY,            -- normalised listing text (lower-case letters and digits only)
+    label TEXT,                        -- the listing text as it was written
+    property_id TEXT,                  -- NULL when ignore=1
+    ignore INTEGER NOT NULL DEFAULT 0, -- 1 = "not one of my properties; leave these out"
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_document_events_doc ON document_events(document_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_property_date ON bookings(property_id, check_in);
 CREATE INDEX IF NOT EXISTS idx_transactions_property_date ON transactions(property_id, date);

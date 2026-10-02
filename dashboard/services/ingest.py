@@ -123,7 +123,7 @@ def detect_period(items, reservations, hint):
     hint_ym = hint if hint and re.match(r"^\d{4}-\d{2}$", hint) else None
     if not months and not hint_ym:
         warnings.append({"code": "period_missing", "level": "warn",
-                         "message": "No period could be detected -- the lines carry no usable dates. Check the date on each line before confirming."})
+                         "message": "No period could be detected — the lines carry no usable dates. Check the date on each line before confirming."})
         return None, warnings
     if not months:
         return {"from": hint_ym, "to": hint_ym, "source": "document", "ambiguous": False, "months": {}}, warnings
@@ -161,7 +161,7 @@ def find_duplicate_document(conn, doc_id, file_hash):
         return None
     return conn.execute(
         """SELECT id, filename, status, uploaded_at FROM documents
-           WHERE file_hash=? AND id != ? ORDER BY (status='confirmed') DESC, id DESC LIMIT 1""",
+           WHERE file_hash=? AND id != ? AND status != 'failed' ORDER BY (status='confirmed') DESC, id DESC LIMIT 1""",
         (file_hash, doc_id)).fetchone()
 
 
@@ -243,3 +243,25 @@ def provenance(conn, document_id, line=None):
         "line_index": line["line_index"] + 1 if line is not None else None,
         "line_id": line["id"] if line is not None else None,
     }
+
+
+# ---- remembered listing -> property matches ------------------------------
+
+def norm_alias(text):
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def alias_lookup(conn, text):
+    """{"property_id", "ignore"} for a listing name you've matched before, else None."""
+    key = norm_alias(text)
+    if not key:
+        return None
+    row = conn.execute("SELECT property_id, ignore FROM property_aliases WHERE alias=?", (key,)).fetchone()
+    return {"property_id": row["property_id"], "ignore": bool(row["ignore"])} if row else None
+
+
+def alias_remember(conn, text, property_id, ignore=False):
+    key = norm_alias(text)
+    if key and (property_id or ignore):
+        conn.execute("INSERT OR REPLACE INTO property_aliases (alias, label, property_id, ignore) VALUES (?,?,?,?)",
+                     (key, " ".join((text or "").split())[:200], None if ignore else property_id, 1 if ignore else 0))

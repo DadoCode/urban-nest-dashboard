@@ -34,6 +34,7 @@ for pid, name, addr in [("alpha-house", "Alpha House", "1 Alpha Road"), ("beta-c
 _c.execute("INSERT INTO properties (id, code, name, address, type) VALUES ('general-overheads','GEN','General','', 'overhead')")
 _c.commit(); _c.close()
 
+from datetime import date as datetime_date  # noqa: E402,F401
 from werkzeug.datastructures import MultiDict  # noqa: E402
 
 from app import create_app  # noqa: E402
@@ -374,6 +375,118 @@ for it in q("SELECT * FROM document_items WHERE document_id=? ORDER BY line_inde
              ("check_in", it["check_in"]), ("check_out", it["check_out"]), ("gross", it["gross_revenue"]), ("fees", it["platform_fees"]), ("net", it["net_revenue"])]
 client.post(f"/documents/{dd['id']}/confirm", data=MultiDict(form))
 check("re-uploaded statement cannot double-count reservations", q("SELECT COUNT(*) n FROM bookings")[0]["n"] == n)
+
+# ---------------------------------------------------------------- real-world export shapes (synthetic fixtures)
+def items_of(doc):
+    return q("SELECT * FROM document_items WHERE document_id=? ORDER BY line_index", doc["id"])
+
+def warn_codes(doc):
+    return {w["code"] for w in json.loads(doc["detection_json"] or "{}").get("warnings", [])}
+
+# Airbnb transaction report: US month/day dates, Payout/Adjustment/Resolution rows, amount in "Amount" not "Paid out"
+AIRBNB = ("Date,Arriving by date,Type,Confirmation Code,Booking date,Start date,End date,Nights,Guest,Listing,Details,Reference code,Currency,Amount,Paid out,Service fee,Fast Pay Fee,Cleaning fee,Gross earnings,Airbnb remitted tax,Earnings year\n"
+          "09/30/2026,10/07/2026,Payout,,,,,,,,Transfer,M-1,GBP,,500.00,,,,,,\n"
+          "09/30/2026,,Reservation,HMAAA1,09/01/2026,09/03/2026,09/09/2026,6,A Guest,Garden Flat | Quiet,,,GBP,500.00,,100.00,,20.00,600.00,0.00,2026\n"
+          "09/30/2026,,Reservation,HMBBB2,09/01/2026,09/10/2026,09/12/2026,2,B Guest,Garden Flat | Quiet,,,GBP,\"1,200.50\",,\"200.00\",,0.00,\"1,400.50\",0.00,2026\n"
+          "09/30/2026,,Adjustment,HMAAA1,09/01/2026,09/03/2026,09/09/2026,6,A Guest,Garden Flat | Quiet,,,GBP,-80.00,,-10.00,,0,,0.00,2026\n"
+          "09/30/2026,,Resolution Payout,HMBBB2,,09/10/2026,09/12/2026,2,B Guest,Garden Flat | Quiet,Resolution payout,,GBP,25.00,,,,,25.00,,2026\n"
+          "09/30/2026,,Reservation,HMAAA1,09/01/2026,09/03/2026,09/09/2026,6,A Guest,Garden Flat | Quiet,,,GBP,500.00,,100.00,,20.00,600.00,0.00,2026\n")
+upload("airbnb-us.csv", AIRBNB, "booking_statement", "")
+da = last_doc(); ra = items_of(da)
+check("airbnb: month/day dates read correctly (09/03 is 3 Sep, not 9 Mar)", [(r["check_in"], r["check_out"]) for r in ra] == [("2026-09-03", "2026-09-09"), ("2026-09-10", "2026-09-12")], [(r["check_in"], r["check_out"]) for r in ra])
+check("airbnb: net is the Amount column / gross minus fee, quoted thousands handled", [round(r["net_revenue"], 2) for r in ra] == [500.0, 1200.5] and ra[1]["gross_revenue"] == 1400.5)
+check("airbnb: platform detected from the columns", {r["platform"] for r in ra} == {"airbnb"})
+check("airbnb: adjustments/resolutions left out and said so; payouts silent; repeated code dropped", {"rows_left_out", "duplicate_codes", "dates_month_first"} <= warn_codes(da), warn_codes(da))
+check("airbnb: no false 'partial extraction' for rows that were deliberately left out", "partial_extraction" not in warn_codes(da), json.loads(da["detection_json"])["warnings"])
+
+UK = "Date,Vendor,Description,Amount\n13/03/2026,A,x,10\n02/04/2026,B,y,20\n"
+upload("uk-dates.csv", UK, "other", "alpha-house")
+check("generic CSV: a day>12 anywhere settles day/month order for the whole column", [r["date"] for r in items_of(last_doc())] == ["2026-03-13", "2026-04-02"])
+US = "Date,Vendor,Description,Amount\n03/13/2026,A,x,10\n04/02/2026,B,y,20\n"
+upload("us-dates.csv", US, "other", "alpha-house")
+check("generic CSV: month/day order detected from the column too", [r["date"] for r in items_of(last_doc())] == ["2026-03-13", "2026-04-02"])
+AMBIG = ("Confirmation Code,Start date,End date,Nights,Listing,Gross earnings,Service fee,Type\n"
+         "X1,09/03/2026,09/09/2026,6,Flat A,600,100,Reservation\nX2,03/09/2026,03/12/2026,3,Flat A,300,50,Reservation\n")
+upload("ambig.csv", AMBIG, "booking_statement", "alpha-house")
+rows = items_of(last_doc())
+check("ambiguous dates are settled by the Nights column, not guessed",
+      [(r["check_in"], r["check_out"]) for r in rows] == [("2026-09-03", "2026-09-09"), ("2026-03-09", "2026-03-12")], [(r["check_in"], r["check_out"]) for r in rows])
+check("...so nothing is left to warn about", "dates_ambiguous" not in warn_codes(last_doc()) and "nights_mismatch" not in warn_codes(last_doc()))
+NOHINT = "Confirmation Code,Start date,End date,Listing,Gross earnings,Service fee,Type\nZ1,09/03/2026,09/09/2026,Flat A,600,100,Reservation\n"
+upload("nohint.csv", NOHINT, "booking_statement", "alpha-house")
+check("dates nothing can settle are read day/month and flagged for checking", "dates_ambiguous" in warn_codes(last_doc()) and items_of(last_doc())[0]["check_in"] == "2026-03-09")
+
+# Amazon Business order history: one row per item, order totals repeated on every row, PO number = property
+AMZ_HEAD = "Order Date,Order ID,PO Number,Order Subtotal,Order Net Total,Order Status,ASIN,Title,Item Quantity,Item Net Total,Item Subtotal,Item VAT,Seller Name\n"
+AMZ = (AMZ_HEAD +
+       '25/09/2026,111-1,ALPHA-HOUSE,"30.00","36.00",Closed,B0TEST,"Towels, white",2,"12.00","10.00","2.00",Amazon EU\n'
+       '25/09/2026,111-1,ALPHA-HOUSE,"30.00","36.00",Closed,B0TEST,Soap,1,"24.00","20.00","4.00",Amazon EU\n'
+       '21/09/2026,111-2,personal,"5.00","6.00",Closed,B0TEST,Gift,1,"6.00","5.00","1.00",Amazon EU\n'
+       '20/09/2026,111-3,biz,"8.33","10.00",Closed,B0TEST,Printer ink,1,"10.00","8.33","1.67",Amazon EU\n'
+       '19/09/2026,111-4,all flats,"7.50","9.00",Closed,B0TEST,Bin bags,1,"9.00","7.50","1.50",Amazon EU\n'
+       '18/09/2026,111-5,"ALPHA-HOUSE, BETA-COURT","2.50","3.00",Closed,B0TEST,Sponges,1,"3.00","2.50","0.50",Amazon EU\n'
+       '17/09/2026,111-6,,"1.00","1.20",Closed,B0TEST,Pens,1,"1.20","1.00","0.20",Amazon EU\n'
+       '16/09/2026,111-7,BETA-COURT,"4.00","4.80",Cancelled,B0TEST,Cancelled thing,1,"4.80","4.00","0.80",Amazon EU\n')
+upload("amazon-orders.csv", AMZ, "amazon_order", "")
+dz = last_doc(); rz = items_of(dz)
+check("amazon: one line per item, using each item's own total (not the repeated order total)", [r["amount"] for r in rz] == [12.0, 24.0, 6.0, 10.0, 9.0, 3.0, 1.2], [r["amount"] for r in rz])
+check("amazon: cancelled orders left out", len(rz) == 7)
+byname = {r["raw_description"]: r for r in rz}
+check("amazon: PO matched to the property by its code", byname["Soap"]["property_id"] == "alpha-house" and byname["Towels, white ×2"]["property_id"] == "alpha-house")
+check("amazon: 'personal' lines are left unticked", byname["Gift"]["include"] == 0 and byname["Soap"]["include"] == 1)
+check("amazon: 'biz' goes to the business cost centre", byname["Printer ink"]["property_id"] == "general-overheads")
+check("amazon: 'all flats', several-property and blank POs are NOT guessed", all(byname[k]["property_id"] is None for k in ("Bin bags", "Sponges", "Pens")))
+check("amazon: dates are day/month (25/09 settles it)", byname["Soap"]["date"] == "2026-09-25")
+check("amazon: warnings explain the PO decisions", {"po_personal", "po_business", "po_unmatched", "amazon_amounts"} <= warn_codes(dz), warn_codes(dz))
+page = client.get(f"/documents/{dz['id']}/review").get_data(as_text=True)
+check("amazon review: strip says properties matched line by line; order and PO shown on each line", "line by line" in page and "Order 111-1" in page and "PO" in page)
+check("amazon review: business cost centre is selectable", "General" in page.split("Choose property")[1] if "Choose property" in page else False)
+upload("amazon-chosen.csv", AMZ, "amazon_order", "beta-court")
+check("amazon: a property chosen at upload wins over the POs", {r["property_id"] for r in items_of(last_doc())} == {"beta-court"})
+client.post(f"/documents/{last_doc()['id']}/reject")
+
+# Booking.com extranet export (xlsx stand-in for the .xls): text dates, status, float reservation numbers, Total payment - Commission
+import openpyxl  # noqa: E402
+wb = openpyxl.Workbook(); ws = wb.active
+ws.append(["Property name", "Location", "Booker name", "Genius booker", "Arrival", "Departure", "Booked on", "Status", "Total payment", "Commission", "Currency", "Reservation number"])
+ws.append(["Beta Court - Nice 1BR", "2 Beta Street, London", "X Y", "No", "29 August 2026", "31 August 2026", "27 August 2026", "OK", 386.8, 64.2088, "GBP", 5200756724.0])
+ws.append(["Beta Court - Nice 1BR", "2 Beta Street, London", "Z W", "No", "1 September 2026", "2 September 2026", "1 September 2026", "cancelled", 191.5, 0, "GBP", 5920286058.0])
+ws.append(["Mystery Studio", "9 Nowhere Lane", "Q R", "Yes", "9 September 2026", "11 September 2026", "1 September 2026", "OK", 472.0, 78.352, "GBP", 5751069276.0])
+buf = io.BytesIO(); wb.save(buf)
+upload("booking-export.xlsx", buf.getvalue(), "booking_statement", "")
+db_ = last_doc(); rb = items_of(db_)
+check("booking.com: 'Total payment' minus 'Commission' is the net; cancelled reservations left out", len(rb) == 2 and [round(r["net_revenue"], 2) for r in rb] == [322.59, 393.65], [(r["reservation_id"], r["net_revenue"]) for r in rb])
+check("booking.com: reservation numbers cleaned of '.0'; text dates read; platform detected", rb[0]["reservation_id"] == "5200756724" and rb[0]["check_in"] == "2026-08-29" and {r["platform"] for r in rb} == {"booking_com"})
+check("booking.com: listing matched via its own name, unknown one left for you to choose", rb[0]["property_id"] == "beta-court" and rb[1]["property_id"] is None, [(r["raw_description"], r["property_id"]) for r in rb])
+check("booking.com: cancelled-left-out is noted", "cancelled_left_out" in warn_codes(db_))
+
+# Property matching must not guess from a generic word or a substring
+props = [{"id": "campbell", "name": "7A Campbell Hill", "address": "7A Campbell Hill"}, {"id": "perry", "name": "11 Perryfield Way", "address": "11 Perryfield Way"},
+         {"id": "lw", "name": "602 Lascar Wharf", "address": "602 Lascar Wharf"}, {"id": "m170", "name": "170 Miles Building", "address": "170 Miles Building"},
+         {"id": "m175", "name": "175 Miles Building", "address": "175 Miles Building"}]
+rank = lambda text: [c["id"] for c in extraction.rank_properties(text, props)]
+check("matching: 'Notting Hill' is not 7A Campbell Hill (Hill alone identifies nothing)", rank("Notting Hill | 3-Min Tube | Portobello Market") == [])
+check("matching: 'Hideaway' is not 'Way'", rank("Notting Hill Hideaway | 3 Mins to Tube") == [])
+check("matching: 'Canary Wharf' is not 602 Lascar Wharf", rank("Near Center & Canary Wharf | Wraparound Balcony") == [])
+check("matching: a real name still matches", rank("Delivered to 602 Lascar Wharf, E14") == ["lw"] and rank("7A Campbell Hill, London") == ["campbell"])
+check("matching: confident_property refuses two equally good matches but takes a clear one",
+      extraction.confident_property("NW1 6RP Miles Building London", props) is None and extraction.confident_property("175 Miles Building", props) == "m175")
+check("matching: house numbers tell two buildings apart; the bare name is ambiguous", rank("175 Miles Building")[0] == "m175" and set(rank("Miles Building")) == {"m170", "m175"})
+
+# listings you match once are remembered; "not one of mine" leaves them out
+LIST = ("Confirmation Code,Start date,End date,Nights,Listing,Gross earnings,Service fee,Type\n"
+        "L1,09/03/2026,09/06/2026,3,Sunny Loft | Central,300,50,Reservation\nL2,09/10/2026,09/12/2026,2,Sunny Loft | Central,200,30,Reservation\n"
+        "L3,09/14/2026,09/15/2026,1,Other Owner's Flat,100,10,Reservation\n")
+upload("listings.csv", LIST, "booking_statement", ""); dl = last_doc()
+check("unmatched listings are offered as one decision per listing", "Match listings to your properties" in client.get(f"/documents/{dl['id']}/review").get_data(as_text=True))
+client.post(f"/documents/{dl['id']}/map-listing", data={"listing": "Sunny Loft | Central", "property_id": "alpha-house"})
+client.post(f"/documents/{dl['id']}/map-listing", data={"listing": "Other Owner's Flat", "property_id": "__ignore__"})
+rl = items_of(dl)
+check("map-listing assigns every line of that listing at once", [r["property_id"] for r in rl[:2]] == ["alpha-house", "alpha-house"])
+check("'not one of mine' leaves those lines out", rl[2]["include"] == 0 and rl[2]["property_id"] is None)
+upload("listings-next-month.csv", LIST.replace("L1", "N1").replace("L2", "N2").replace("L3", "N3"), "booking_statement", "")
+rn = items_of(last_doc())
+check("next statement: remembered listings matched automatically, ignored ones skipped", [r["property_id"] for r in rn[:2]] == ["alpha-house", "alpha-house"] and rn[2]["include"] == 0)
 
 # ---------------------------------------------------------------- demo mode (hosted preview)
 os.environ["UN_DEMO_MODE"] = "1"

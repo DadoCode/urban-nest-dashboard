@@ -48,11 +48,11 @@ Return ONLY a JSON object (no prose, no markdown fences) shaped like:
 {
   "document_hint": "any address, property name or nickname literally printed on \
 this document that might identify which flat it belongs to (e.g. a delivery \
-address, a listing name) -- null if nothing like that appears",
+address, a listing name) — null if nothing like that appears",
   "period_hint": "YYYY-MM for the month this document covers, or null if unclear",
   "items": [
     {"date": "YYYY-MM-DD or null if unclear", "vendor": "string", \
-"description": "short string", "amount": number, ALWAYS POSITIVE -- a plain \
+"description": "short string", "amount": number, ALWAYS POSITIVE — a plain \
 magnitude, never negative, "category": one of "booking_income" (money the \
 business received from a guest/booking platform), "purchase", "cleaning", \
 "utilities", "rent", "council_tax", "management_fee" (a cut paid to whoever \
@@ -94,9 +94,39 @@ One item per reservation -- skip payout-summary lines, adjustments without dates
 and totals. Never invent a date or amount that isn't printed. All amounts positive."""
 
 
-def _parse_date(value):
-    """Best-effort date -> 'YYYY-MM-DD'. Day-first for ambiguous d/m/y,
-    since this is a UK business exporting UK-locale statements."""
+_NUMERIC_DATE = re.compile(r"^\s*(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})\b")
+
+
+def _detect_day_first(values):
+    """Which order a column of numeric dates is written in: True = day/month,
+    False = month/day, None = can't tell. Decided by the evidence in the
+    whole column (any first part over 12 means day-first; any second part
+    over 12 means month-first) -- never by guessing one cell at a time, which
+    silently turns 09/03/2026 into 9 March in a US-format export."""
+    dmy = mdy = False
+    for v in values:
+        m = _NUMERIC_DATE.match(str(v or ""))
+        if not m:
+            continue
+        first, second = int(m.group(1)), int(m.group(2))
+        dmy = dmy or first > 12
+        mdy = mdy or second > 12
+    if dmy and not mdy:
+        return True
+    if mdy and not dmy:
+        return False
+    return None
+
+
+def _is_ambiguous_date(value):
+    m = _NUMERIC_DATE.match(str(value or ""))
+    return bool(m) and int(m.group(1)) <= 12 and int(m.group(2)) <= 12 and m.group(1) != m.group(2)
+
+
+def _parse_date(value, day_first=True):
+    """Best-effort date -> 'YYYY-MM-DD'. Ambiguous d/m/y defaults to
+    day-first (a UK business), unless the caller worked out from the whole
+    column that it is month-first."""
     import datetime
     if value is None:
         return None
@@ -105,7 +135,10 @@ def _parse_date(value):
     text = str(value).strip()
     if not text:
         return None
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y", "%m/%d/%Y"):
+    dmy = ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y")
+    mdy = ("%m/%d/%Y", "%m-%d-%Y", "%m.%d.%Y")
+    preferred, fallback = (dmy, mdy) if day_first else (mdy, dmy)
+    for fmt in ("%Y-%m-%d", *preferred, "%b %d, %Y", "%d %b %Y", "%B %d, %Y", "%d %B %Y", *fallback):
         try:
             return datetime.datetime.strptime(text[:20] if fmt != "%Y-%m-%d" else text[:10], fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -132,11 +165,14 @@ _RES_COLUMN_HINTS = {
     "check_in": ("start date", "check-in", "check in", "checkin", "arrival", "arriving"),
     "check_out": ("end date", "check-out", "check out", "checkout", "departure"),
     "nights": ("nights",),
-    "listing": ("listing", "property", "accommodation", "unit", "apartment"),
-    "gross": ("gross earnings", "gross", "total price", "price", "reservation amount"),
+    "listing": ("listing", "property name", "property", "accommodation", "unit", "apartment"),
+    "location": ("location", "address"),
+    "gross": ("gross earnings", "gross", "total payment", "total price", "price", "reservation amount"),
     "fees": ("service fee", "host fee", "commission", "platform fee", "fee"),
     "net": ("paid out", "net", "payout", "host earnings", "amount paid", "earnings"),
+    "amount": ("amount",),
     "type": ("type",),
+    "status": ("status",),
 }
 
 
@@ -152,40 +188,134 @@ def _guess_reservation_columns(header):
     return found
 
 
+def _clean_code(value):
+    """A reservation code as text: spreadsheets turn 5200756724 into 5200756724.0."""
+    if value is None:
+        return None
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    text = str(value).strip()
+    if re.fullmatch(r"\d+\.0", text):
+        text = text[:-2]
+    return text or None
+
+
+def _platform_of(header):
+    """Which booking platform an export is from, judged by its column names."""
+    lower = {str(h or "").strip().lower() for h in header}
+    if {"confirmation code", "gross earnings"} <= lower or "airbnb remitted tax" in lower:
+        return "airbnb"
+    if {"reservation number", "booker name"} <= lower or "genius booker" in lower:
+        return "booking_com"
+    return None
+
+
+def _money(n):
+    return f"{'-' if n < 0 else ''}£{abs(n):,.2f}"
+
+
 def _rows_to_reservations(header, rows):
+    """-> (items | None, notes, rows_tried). Reads real reservations only and
+    says what it left out, so a missing amount can be traced to a decision
+    rather than a mystery."""
     import datetime
+    from collections import Counter, defaultdict
     cols = _guess_reservation_columns(header)
-    if "check_in" not in cols or not ({"net", "gross"} & set(cols)):
-        return None  # can't be read as a reservation statement
-    items = []
+    if "check_in" not in cols or not ({"net", "gross", "amount"} & set(cols)):
+        return None, [], 0  # can't be read as a reservation statement
+
+    def raw(row, field):
+        i = cols.get(field)
+        return row[i] if i is not None and i < len(row) else None
+
+    # every date-like column votes (the statement's own Date and Booking date columns settle the order just as well as the stay dates)
+    date_cols = {cols["check_in"], *([cols["check_out"]] if "check_out" in cols else []), *(i for i, h in enumerate(header) if "date" in str(h or "").lower())}
+    day_first = _detect_day_first([r[i] for r in rows for i in date_cols if i < len(r)])
+    items, notes = [], []
+    left_out, left_out_amt = Counter(), defaultdict(float)
+    cancelled = tried = bad_dates = night_mismatch = ambiguous = 0
+    seen, dup_codes = set(), []
     for row_no, row in enumerate(rows, start=2):
-        def cell(field):
-            i = cols.get(field)
-            return row[i] if i is not None and i < len(row) else None
-        row_type = str(cell("type") or "").lower()
-        if row_type and "reserv" not in row_type and "booking" not in row_type:
-            continue  # payout / adjustment / tax lines
-        check_in = _parse_date(cell("check_in"))
-        if not check_in:
+        if not any(str(c or "").strip() for c in row):
             continue
-        check_out = _parse_date(cell("check_out"))
-        nights = _num(cell("nights"))
+        row_type = str(raw(row, "type") or "").strip()
+        low = row_type.lower()
+        if row_type and "reserv" not in low and "booking" not in low:
+            if low != "payout":  # bank transfers are not reservations or adjustments; stay silent about them
+                left_out[row_type] += 1
+                left_out_amt[row_type] += _num(raw(row, "amount")) or _num(raw(row, "net")) or 0
+            continue
+        status = str(raw(row, "status") or "").lower()
+        if "cancel" in status or "no_show" in status or "no show" in status:
+            cancelled += 1
+            continue
+        tried += 1
+        nights = _num(raw(row, "nights"))
+        ci_raw, co_raw = raw(row, "check_in"), raw(row, "check_out")
+        if day_first is not None:
+            check_in, check_out = _parse_date(ci_raw, day_first), _parse_date(co_raw, day_first)
+        else:
+            check_in, check_out = _parse_date(ci_raw, True), _parse_date(co_raw, True)
+            if _is_ambiguous_date(ci_raw) or _is_ambiguous_date(co_raw):
+                ambiguous += 1
+                if nights:  # the stay length can settle which way round the dates are
+                    for df in (True, False):
+                        a, b = _parse_date(ci_raw, df), _parse_date(co_raw, df)
+                        if a and b and (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days == int(nights):
+                            check_in, check_out, ambiguous = a, b, ambiguous - 1
+                            break
+        if not check_in:
+            bad_dates += 1
+            continue
         if not check_out and nights:
             check_out = (datetime.date.fromisoformat(check_in) + datetime.timedelta(days=int(nights))).isoformat()
         if not check_out:
+            bad_dates += 1
             continue
-        gross, fees, net = _num(cell("gross")), _num(cell("fees")), _num(cell("net"))
+        if nights and (datetime.date.fromisoformat(check_out) - datetime.date.fromisoformat(check_in)).days != int(nights):
+            night_mismatch += 1
+        gross, fees, net = _num(raw(row, "gross")), _num(raw(row, "fees")), _num(raw(row, "net"))
+        if net is None:
+            net = _num(raw(row, "amount"))
         if net is None and gross is not None:
             net = gross - abs(fees or 0)
         if net is None:
+            bad_dates += 1
             continue
-        items.append({"reservation_id": (str(cell("reservation_id")).strip() or None) if cell("reservation_id") else None,
-                      "description": (str(cell("listing")).strip() or None) if cell("listing") else None,
+        code = _clean_code(raw(row, "reservation_id"))
+        if code:
+            if code in seen:
+                dup_codes.append(code)
+                continue
+            seen.add(code)
+        listing, location = raw(row, "listing"), raw(row, "location")
+        items.append({"reservation_id": code,
+                      "description": str(listing).strip() or None if listing else None,
+                      "location": " ".join(str(location).split()) if location else None,
                       "check_in": check_in, "check_out": check_out,
                       "gross": abs(gross) if gross is not None else abs(net),
-                      "fees": abs(fees or 0), "net": abs(net), "confidence": 0.9 if (check_out and net is not None and cell("reservation_id")) else 0.7,
+                      "fees": abs(fees or 0), "net": abs(net), "confidence": 0.9 if code else 0.7,
                       "row": row_no})
-    return items
+
+    for kind, n in left_out.items():
+        notes.append({"code": "rows_left_out", "level": "warn",
+                      "message": f"{n} “{kind}” row{'s' if n != 1 else ''} {'were' if n != 1 else 'was'} left out — they aren't new reservations"
+                                 + (f" but together change what you were paid by {_money(left_out_amt[kind])}" if left_out_amt[kind] else "")
+                                 + ". If they relate to reservations you are importing, adjust those lines by hand."})
+    if cancelled:
+        notes.append({"code": "cancelled_left_out", "level": "info", "message": f"{cancelled} cancelled or no-show reservation{'s' if cancelled != 1 else ''} left out."})
+    if dup_codes:
+        notes.append({"code": "duplicate_codes", "level": "warn",
+                      "message": f"{len(dup_codes)} reservation code{'s' if len(dup_codes) != 1 else ''} appeared more than once in the file ({', '.join(dup_codes[:4])}{'…' if len(dup_codes) > 4 else ''}); only the first was kept."})
+    if ambiguous:
+        notes.append({"code": "dates_ambiguous", "level": "warn",
+                      "message": f"{ambiguous} date{'s' if ambiguous != 1 else ''} could be day/month or month/day and nothing in the file settles it; read as day/month (UK). Check the dates."})
+    if night_mismatch:
+        notes.append({"code": "nights_mismatch", "level": "warn",
+                      "message": f"{night_mismatch} reservation{'s' if night_mismatch != 1 else ''} where check-out minus check-in doesn't equal the file's own Nights column. Check those dates."})
+    if day_first is False:
+        notes.append({"code": "dates_month_first", "level": "info", "message": "Dates in this file are month/day (US style) and were read that way."})
+    return items, notes, tried - len(dup_codes)  # rows that should have become reservations; the caller reports any that didn't
 
 
 def _load_key():
@@ -200,14 +330,14 @@ def available():
 
 def extract_with_reason(file_path, mime_type=None, doc_type=None):
     """(result, failure): exactly one is None. `failure` is
-    {"code", "message"} in plain words. Never raises -- an upload that
+    {"code", "message"} in plain words. Never raises — an upload that
     can't be read automatically must fall through to "enter it by hand",
     never a crash, no matter how malformed the file turns out to be."""
     try:
         result = _extract(file_path, mime_type, doc_type)
     except ExtractionFailure as e:
         return None, {"code": e.code, "message": e.message}
-    except Exception as e:  # noqa: BLE001 -- anything else is still "couldn't read it"
+    except Exception as e:  # noqa: BLE001 — anything else is still "couldn't read it"
         log.warning("extraction crashed on %s: %s", Path(str(file_path)).name, type(e).__name__)
         return None, {"code": "unexpected", "message": "This file couldn't be read automatically. You can enter its rows manually."}
     if result is None:
@@ -327,17 +457,21 @@ _COLUMN_HINTS = {
     "date": ("date",),
     "vendor": ("vendor", "payee", "merchant", "description 1", "name"),
     "description": ("description", "memo", "details", "narrative"),
-    "amount": ("amount", "value", "total", "debit", "credit"),
+    "amount": ("amount", "net total", "total", "value", "debit", "credit"),
 }
+_NOT_AN_AMOUNT = ("subtotal", "vat", "tax", "fee", "quantity", "qty", "count", "balance")
 
 
 def _guess_columns(header):
     lower = [h.strip().lower() for h in header]
     found = {}
     for field, hints in _COLUMN_HINTS.items():
-        for i, col in enumerate(lower):
-            if any(h in col for h in hints):
-                found[field] = i
+        for hint in hints:  # earlier hints are the better evidence
+            idx = next((i for i, col in enumerate(lower)
+                        if hint in col and i not in found.values()
+                        and not (field == "amount" and any(bad in col for bad in _NOT_AN_AMOUNT))), None)
+            if idx is not None:
+                found[field] = idx
                 break
     return found
 
@@ -349,6 +483,7 @@ def _rows_to_items(header, rows, doc_type=None):
     cols = _guess_columns(header)
     if "amount" not in cols:
         return None  # can't make sense of this sheet without an amount column
+    day_first = _detect_day_first([row[cols["date"]] for row in rows if "date" in cols and cols["date"] < len(row)])
     items = []
     for row_no, row in enumerate(rows, start=2):
         if not row or cols["amount"] >= len(row):
@@ -364,7 +499,7 @@ def _rows_to_items(header, rows, doc_type=None):
             continue
         category = "booking_income" if amount > 0 and "date" not in cols else ("purchase" if amount < 0 else "other")
         items.append({
-            "date": _parse_date(row[cols["date"]]) if "date" in cols and cols["date"] < len(row) else None,
+            "date": _parse_date(row[cols["date"]], day_first is not False) if "date" in cols and cols["date"] < len(row) else None,
             "vendor": row[cols["vendor"]] if "vendor" in cols and cols["vendor"] < len(row) else None,
             "description": row[cols["description"]] if "description" in cols and cols["description"] < len(row) else None,
             "amount": abs(amount),
@@ -385,7 +520,7 @@ def _extract_csv(file_path, reservations=False, doc_type=None):
             delimiter = "\t" if str(file_path).lower().endswith(".tsv") else _sniff_delimiter(sample)
             rows = list(csv.reader(f, delimiter=delimiter))
     except (csv.Error, OSError):
-        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened -- it looks corrupted or isn't really a CSV. Re-export it, or enter the rows manually.")
+        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened — it looks corrupted or isn't really a CSV. Re-export it, or enter the rows manually.")
     return _sheet_result(rows, reservations, doc_type)
 
 
@@ -404,10 +539,21 @@ def _extract_xls(file_path, reservations=False, doc_type=None):
     except ImportError:
         raise ExtractionFailure("not_installed", "Old-format .xls files can't be read here. Save it as .xlsx or .csv and upload that, or enter the rows manually.")
     try:
-        ws = xlrd.open_workbook(file_path).sheet_by_index(0)
+        book = xlrd.open_workbook(file_path)
+        ws = book.sheet_by_index(0)
     except Exception:
-        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened -- it looks corrupted. Re-export it, or enter the rows manually.")
-    rows = [[ws.cell_value(r, c) for c in range(ws.ncols)] for r in range(ws.nrows)]
+        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened — it looks corrupted. Re-export it, or enter the rows manually.")
+
+    def value(r, c):
+        v = ws.cell_value(r, c)
+        if ws.cell_type(r, c) == xlrd.XL_CELL_DATE:  # a real Excel date, not text
+            try:
+                return xlrd.xldate_as_datetime(v, book.datemode).strftime("%Y-%m-%d")
+            except Exception:  # noqa: BLE001
+                return v
+        return v
+
+    rows = [[value(r, c) for c in range(ws.ncols)] for r in range(ws.nrows)]
     return _sheet_result(rows, reservations, doc_type)
 
 
@@ -420,60 +566,206 @@ def _extract_xlsx(file_path, reservations=False, doc_type=None):
         ws = openpyxl.load_workbook(file_path, data_only=True).active
         rows = [[c.value for c in row] for row in ws.iter_rows()]
     except Exception:
-        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened -- it looks corrupted or password-protected. Re-export it, or enter the rows manually.")
+        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened — it looks corrupted or password-protected. Re-export it, or enter the rows manually.")
     return _sheet_result(rows, reservations, doc_type)
+
+
+def _is_amazon_business(header):
+    lower = {str(h or "").strip().lower() for h in header}
+    return {"order id", "asin"} <= lower and bool({"item net total", "item subtotal"} & lower)
+
+
+def _rows_to_amazon_items(header, rows):
+    """Amazon Business order history: one row per ITEM, with the whole
+    order's totals repeated on every row of that order (so reading "Order
+    Subtotal" would count a ten-item order ten times). Each item's own
+    Item Net Total (what was paid, VAT included) becomes one line.
+    -> (items, notes, rows_tried)."""
+    from collections import Counter
+    idx = {str(h or "").strip().lower(): i for i, h in enumerate(header)}
+
+    def cell(row, name):
+        i = idx.get(name)
+        return row[i] if i is not None and i < len(row) else None
+
+    day_first = _detect_day_first([cell(r, "order date") for r in rows])
+    items, notes = [], []
+    cancelled = refunds = tried = 0
+    orders = set()
+    for row_no, row in enumerate(rows, start=2):
+        if not any(str(c or "").strip() for c in row):
+            continue
+        status = str(cell(row, "order status") or "").lower()
+        if "cancel" in status:
+            cancelled += 1
+            continue
+        tried += 1
+        net = _num(cell(row, "item net total"))
+        if net is None:
+            sub = _num(cell(row, "item subtotal"))
+            net = None if sub is None else sub + (_num(cell(row, "item vat")) or 0)
+        if net is None:
+            continue
+        if net <= 0:
+            refunds += 1
+            continue
+        qty = int(_num(cell(row, "item quantity")) or 1)
+        title = " ".join(str(cell(row, "title") or "").split())
+        order_id = str(cell(row, "order id") or "").strip()
+        orders.add(order_id)
+        items.append({"date": _parse_date(cell(row, "order date"), day_first is not False), "vendor": "Amazon",
+                      "description": (title[:110] + ("…" if len(title) > 110 else "")) + (f" ×{qty}" if qty > 1 else ""),
+                      "amount": round(net, 2), "category": "purchase", "confidence": 0.95, "row": row_no,
+                      "order_id": order_id, "po": str(cell(row, "po number") or "").strip(),
+                      "seller": str(cell(row, "seller name") or "").strip() or None})
+    notes.append({"code": "amazon_amounts", "level": "info",
+                  "message": f"Amazon Business order history: {len(items)} item line{'s' if len(items) != 1 else ''} from {len(orders)} order{'s' if len(orders) != 1 else ''}. Each amount is the item's own \u201cItem Net Total\u201d (what was paid, including VAT), not the repeated order total."})
+    if cancelled:
+        notes.append({"code": "cancelled_left_out", "level": "info", "message": f"{cancelled} item row{'s' if cancelled != 1 else ''} from cancelled orders left out."})
+    if refunds:
+        notes.append({"code": "refunds_left_out", "level": "warn", "message": f"{refunds} item row{'s' if refunds != 1 else ''} with a zero or negative total (returns?) were left out. Check them against your records."})
+    return items, notes, tried
+
+
+_PO_BUSINESS = {"biz", "business", "company", "office", "overhead", "overheads", "admin"}
+_PO_PERSONAL = {"personal", "private", "own", "me"}
+_PO_ALL = {"all flats", "all", "all properties", "every flat", "shared", "general"}
+
+
+def _alnum(text):
+    return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def resolve_po(po_text, properties, overhead_id=None):
+    """Read an Amazon PO Number as the property it was bought for.
+    -> (property_id | None, action, note), where action is one of
+    assign | business | exclude | shared | ambiguous | unknown | none.
+    A code is matched against each property's own code ("LW", "W8", "11PW"),
+    never guessed, and several properties in one PO is ambiguous, not split."""
+    text = (po_text or "").strip()
+    if not text:
+        return None, "none", "no PO number"
+    low = " ".join(text.lower().split())
+    if low in _PO_PERSONAL:
+        return None, "exclude", f"PO says \u201c{text}\u201d"
+    if low in _PO_BUSINESS:
+        return overhead_id, ("business" if overhead_id else "unknown"), f"PO says \u201c{text}\u201d (business cost)"
+    if low in _PO_ALL:
+        return None, "shared", f"PO says \u201c{text}\u201d — bought for several properties"
+    by_code = {}
+    for p in properties:
+        for key in (p.get("code"), p["id"], p["name"]):
+            if _alnum(key):
+                by_code.setdefault(_alnum(key), p)
+    tokens = [t for t in re.split(r"\s*(?:,|;|/|&|\band\b|\+)\s*", text, flags=re.I) if t.strip()]
+    matched, unmatched = {}, []
+    for t in tokens:
+        hit = by_code.get(_alnum(t))
+        if hit:
+            matched[hit["id"]] = hit
+        else:
+            unmatched.append(t.strip())
+    if len(matched) == 1 and not unmatched:
+        only = next(iter(matched.values()))
+        return only["id"], "assign", f"PO \u201c{text}\u201d = {only['name']}"
+    if matched:
+        names = ", ".join(p["name"] for p in matched.values())
+        return None, "ambiguous", f"PO \u201c{text}\u201d names several properties ({names}" + (f"; and \u201c{', '.join(unmatched)}\u201d isn't one" if unmatched else "") + ")"
+    return None, "unknown", f"PO \u201c{text}\u201d doesn't match a property in the dashboard"
 
 
 def _sheet_result(rows, reservations, doc_type=None):
     """One reader for csv/xls/xlsx. Raises a specific ExtractionFailure for
-    an empty sheet or unrecognised columns. `rows_seen` (non-blank data
-    rows) lets the caller report how many rows could not be read."""
+    an empty sheet or unrecognised columns. `rows_seen` is how many rows
+    should have become lines, so the caller can report any that didn't, and
+    `notes` is everything the reader deliberately left out or wasn't sure of."""
     if not rows or not any(str(c or "").strip() for c in rows[0]):
         raise ExtractionFailure("empty_file", "This file is empty (no header row). You can enter its rows manually.")
     header = [str(c) if c is not None else "" for c in rows[0]]
     data_rows = rows[1:]
     rows_seen = sum(1 for r in data_rows if any(str(c or "").strip() for c in r))
     if reservations:
-        items = _rows_to_reservations(header, data_rows)
+        items, notes, tried = _rows_to_reservations(header, data_rows)
         if items is None:
             raise ExtractionFailure("columns_not_recognised", "This doesn't look like a booking statement: no check-in date and payout/amount columns were found. Check the document type, or enter the reservations manually.")
-        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None, "rows_seen": rows_seen}
+        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": _platform_of(header),
+                "rows_seen": tried, "notes": notes}
+    if _is_amazon_business(header):
+        items, notes, tried = _rows_to_amazon_items(header, data_rows)
+        return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction", "rows_seen": tried, "notes": notes, "source_kind": "amazon_business"}
     items = _rows_to_items(header, data_rows, doc_type)
     if items is None:
         raise ExtractionFailure("columns_not_recognised", "No Amount column was found. Expected headers like Date, Vendor, Description and Amount. Rename the columns, or enter the rows manually.")
-    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction", "rows_seen": rows_seen}
+    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction", "rows_seen": rows_seen, "notes": []}
 
 
 _NON_WORD = re.compile(r"[^a-z0-9]+")
 
 
+# Words that appear in many addresses and so identify none of them.
+_GENERIC_WORDS = {"flat", "apartment", "apartments", "apt", "unit", "house", "court", "road", "rd", "street", "st", "way", "ave", "avenue",
+                  "building", "buildings", "wharf", "lane", "park", "place", "square", "hill", "gardens", "terrace", "close", "drive",
+                  "view", "lodge", "tower", "towers", "mansions", "mews", "the", "and", "london", "greater"}
+
+
+def _words(text):
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
+def _is_strong(word):
+    """A word that can identify a property on its own: starts with a letter,
+    isn't a throwaway like Hill/Way/Court, and isn't just a house number."""
+    return word[0].isalpha() and word not in _GENERIC_WORDS and (len(word) >= 3 or any(ch.isdigit() for ch in word))
+
+
+def _score_text(candidate, hint):
+    """(share of the property's words found, number found, strong words found)."""
+    words = [w for w in _words(candidate) if len(w) >= 2 and w not in ("the", "and")]
+    if not words:
+        return 0.0, 0, 0
+    hit_words = [w for w in words if w in hint]
+    return len(hit_words) / len(words), len(hit_words), sum(1 for w in hit_words if _is_strong(w))
+
+
 def rank_properties(hint_text, properties):
-    """Every property whose name/address matches the text well enough
-    (>= half its words), best first: [{"id", "name", "score"}]. Several
-    close scores means the text is ambiguous."""
-    if not hint_text:
+    """Every property whose name/address the text really names, best first:
+    [{"id", "name", "score", "hits"}]. Whole words only (so "Hideaway" is not
+    "way"), and at least one distinguishing word must match — "Hill" alone
+    never identifies a property. A wrong silent match is worse than none: an
+    unmatched line is simply asked about once and remembered. The name is
+    trusted before the address."""
+    hint = set(_words(hint_text))
+    if not hint:
         return []
-    hint = _NON_WORD.sub(" ", hint_text.lower())
     out = []
     for p in properties:
-        best, best_hits = 0.0, 0
+        score = None
         for candidate in (p["name"], p["address"] or ""):
-            words = [w for w in _NON_WORD.sub(" ", candidate.lower()).split() if len(w) > 2]
-            if not words:
-                continue
-            hits = sum(1 for w in words if w in hint)
-            if (hits / len(words), hits) > (best, best_hits):
-                best, best_hits = hits / len(words), hits
-        if best >= 0.5:
-            out.append({"id": p["id"], "name": p["name"], "score": round(best, 2), "hits": best_hits})
+            share, hits, strong = _score_text(candidate, hint)
+            if strong:
+                score = (share, hits)
+                break
+        if score and score[0] >= 0.5:
+            out.append({"id": p["id"], "name": p["name"], "score": round(score[0], 2), "hits": score[1]})
     # a longer name that matches in full is more specific than a shorter one inside it
     return sorted(out, key=lambda c: (-c["score"], -c["hits"]))
+
+
+def confident_property(hint_text, properties):
+    """The property id the text names, or None when it names none -- or names
+    two about equally well (e.g. "Miles Building" with no number)."""
+    ranked = rank_properties(hint_text, properties)
+    if not ranked:
+        return None
+    if len(ranked) > 1 and ranked[1]["score"] >= ranked[0]["score"] - 0.1 and ranked[1]["hits"] >= ranked[0]["hits"]:
+        return None
+    return ranked[0]["id"]
 
 
 def guess_property(hint_text, properties):
     """Fuzzy-matches free text (from document_hint, or a filename) against
     known property names/addresses. Returns (property_id, confidence) or
-    (None, 0) -- confidence is just "how much of the property's own name
+    (None, 0) — confidence is just "how much of the property's own name
     matched", not a calibrated probability."""
     ranked = rank_properties(hint_text, properties)
     return (ranked[0]["id"], ranked[0]["score"]) if ranked else (None, 0.0)

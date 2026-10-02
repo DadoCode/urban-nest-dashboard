@@ -6,6 +6,7 @@ import datetime
 import json
 import mimetypes
 import re
+from collections import Counter
 from pathlib import Path
 
 from werkzeug.utils import secure_filename
@@ -149,17 +150,51 @@ def save_upload(conn, file, doc_type, property_id, flash):
     items = result["items"]
     if not items:
         return _fail(conn, doc_id, original, "no_rows",
-                     "No lines could be read from this document. If it's a scan or photo it may be too blurry, cropped or empty -- try a clearer copy, or enter the rows manually.",
+                     "No lines could be read from this document. If it's a scan or photo it may be too blurry, cropped or empty — try a clearer copy, or enter the rows manually.",
                      flash, warnings, dup_doc)
 
     properties = [dict(p) for p in get_properties(conn, include_overhead=False)]
     names = {p["id"]: p["name"] for p in properties}
     is_reservations = result.get("kind") == "reservation"
+    overhead = conn.execute("SELECT id, name FROM properties WHERE type='overhead' LIMIT 1").fetchone()
+    names_all = {**names, **({overhead["id"]: overhead["name"]} if overhead else {})}
+    warnings += result.get("notes", [])
+
+    # ---- Amazon Business: the PO Number says which property each line was bought for ----
+    po_lines = {"business": 0, "exclude": 0}
+    po_problems = Counter()
+    if result.get("source_kind") == "amazon_business" and not property_id:  # a property chosen at upload wins over POs
+        for item in items:
+            pid, action, note = extraction.resolve_po(item.get("po"), properties, overhead["id"] if overhead else None)
+            item["_property_id"] = pid
+            item["_exclude"] = action == "exclude"
+            item["_po_note"] = note
+            if action in po_lines:
+                po_lines[action] += 1
+            elif action in ("ambiguous", "unknown", "shared", "none"):
+                po_problems[(action, item.get("po") or "")] += 1
+        if po_lines["exclude"]:
+            warnings.append({"code": "po_personal", "level": "info",
+                             "message": f"{po_lines['exclude']} line{'s' if po_lines['exclude'] != 1 else ''} have PO \u201cpersonal\u201d and were left unticked so they don't reach your figures. Tick them if they're business costs."})
+        if po_lines["business"]:
+            warnings.append({"code": "po_business", "level": "info",
+                             "message": f"{po_lines['business']} line{'s' if po_lines['business'] != 1 else ''} with PO \u201cbiz\u201d were assigned to {overhead['name']} (a Business Cost, not a property cost)."})
+        if po_problems:
+            total_problem = sum(po_problems.values())
+            examples = "; ".join(f"\u201c{po or '(blank)'}\u201d \u00d7{n}" for (_a, po), n in po_problems.most_common(4))
+            warnings.append({"code": "po_unmatched", "level": "warn",
+                             "message": f"{total_problem} line{'s' if total_problem != 1 else ''} have a PO Number that isn't one property of yours ({examples}). Choose the property on each (or exclude it)."})
 
     # ---- which property? (chosen by you > document text > file name; two near-equal matches = ambiguous) ----
     prop_info = {"source": "none", "id": None, "candidates": []}
     detected_property_id = property_id
-    if property_id:
+    if result.get("source_kind") == "amazon_business" and not property_id:
+        distinct = {i["_property_id"] for i in items}
+        prop_info["source"] = "PO number on each line"
+        if len(distinct) == 1 and None not in distinct:
+            detected_property_id = next(iter(distinct))
+            prop_info["id"] = detected_property_id
+    elif property_id:
         prop_info.update(source="selected by you", id=property_id)
     else:
         hint_text, source = result.get("document_hint"), "text on the document"
@@ -169,7 +204,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
         prop_info["candidates"] = ranked[:3]
         if ranked and ingest.rank_is_ambiguous(ranked):
             warnings.append({"code": "property_ambiguous", "level": "warn",
-                             "message": f"Could be {ranked[0]['name']} or {ranked[1]['name']} (the {source} matches both). No property was assigned -- choose one before confirming."})
+                             "message": f"Could be {ranked[0]['name']} or {ranked[1]['name']} (the {source} matches both). No property was assigned — choose one before confirming."})
         elif ranked:
             detected_property_id = ranked[0]["id"]
             prop_info.update(source=source, id=ranked[0]["id"], confidence=ranked[0]["score"])
@@ -181,15 +216,27 @@ def save_upload(conn, file, doc_type, property_id, flash):
     period, period_warnings = ingest.detect_period(items, is_reservations, result.get("period_hint"))
     warnings += period_warnings
 
-    dupes, no_property_lines = 0, 0
+    dupes, no_property_lines, ignored_lines = 0, 0, 0
     for i, item in enumerate(items):
         if is_reservations:
             # a statement covers several flats -- match each reservation to its own by listing name
-            item_property = property_id
-            if not item_property and item.get("description"):
-                item_property = extraction.guess_property(item["description"], properties)[0]
-            item_property = item_property or detected_property_id
-            no_property_lines += not item_property
+            item_property, ignored = property_id, False
+            if not item_property:
+                for text in (item.get("description"), item.get("location")):
+                    remembered = ingest.alias_lookup(conn, text)
+                    if remembered:
+                        item_property, ignored = remembered["property_id"], remembered["ignore"]
+                        break
+            if not item_property and not ignored:
+                for text in (item.get("description"), item.get("location")):
+                    guess = extraction.confident_property(text, properties) if text else None
+                    if guess:
+                        item_property = guess
+                        break
+            if not ignored:
+                item_property = item_property or detected_property_id
+            ignored_lines += ignored
+            no_property_lines += not item_property and not ignored
             duplicate_of = find_duplicate_reservation(conn, item_property, item)
             dupes += bool(duplicate_of)
             platform = item.get("platform") or result.get("platform")
@@ -200,25 +247,29 @@ def save_upload(conn, file, doc_type, property_id, flash):
                        source_page, source_row)
                    VALUES (?,?,?,?,?,?,'income',?,'booking_income',0,?,?,?,'reservation',?,?,?,?,?,?,?,?,?)""",
                 (doc_id, i, item.get("description"), item.get("check_in"), platform, item.get("net"),
-                 item_property, item.get("confidence"), 0 if duplicate_of else 1, json.dumps(item),
+                 item_property, item.get("confidence"), 0 if (duplicate_of or ignored) else 1, json.dumps(item),
                  item.get("check_in"), item.get("check_out"), item.get("reservation_id"), platform,
                  item.get("gross"), item.get("fees"), item.get("net"), _int(item.get("page")), _int(item.get("row"))),
             )
             continue
         item["possible_duplicate"] = None
-        duplicate_of = find_duplicate(conn, detected_property_id, item)
+        line_property = item["_property_id"] if "_property_id" in item else detected_property_id
+        duplicate_of = find_duplicate(conn, line_property, item)
         dupes += bool(duplicate_of)
         category = item.get("category") or "other"
         direction = "income" if category == "booking_income" else "expense"
         conn.execute(
             """INSERT INTO document_items (document_id, line_index, raw_description, date, vendor, amount,
                    direction, property_id, category, capex, confidence, duplicate_of, original_extracted_value,
-                   source_page, source_row)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   source_page, source_row, include)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (doc_id, i, item.get("description"), item.get("date"), item.get("vendor"), item.get("amount"),
-             direction, detected_property_id, category, 1 if category == "furniture" else 0, item.get("confidence"),
-             duplicate_of, json.dumps(item), _int(item.get("page")), _int(item.get("row"))),
+             direction, line_property, category, 1 if category == "furniture" else 0, item.get("confidence"),
+             duplicate_of, json.dumps(item), _int(item.get("page")), _int(item.get("row")), 0 if item.get("_exclude") else 1),
         )
+    if ignored_lines:
+        warnings.append({"code": "listings_ignored", "level": "info",
+                         "message": f"{ignored_lines} reservation{'s' if ignored_lines != 1 else ''} belong to listings you marked as not tracked; left unticked."})
     if is_reservations and no_property_lines:
         warnings.append({"code": "property_missing", "level": "warn",
                          "message": f"{no_property_lines} of {len(items)} reservations couldn't be matched to a property. Choose one on each before confirming."})

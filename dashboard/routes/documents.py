@@ -221,7 +221,7 @@ def _summary_strip(doc, prop, items, detection, names):
         prop_how = "unsure: " + " or ".join(c["name"] for c in prop_info["candidates"][:2])
     else:
         prop_how = "not detected"
-    multi_props = len({i["property_id"] for i in items if i["property_id"]}) if res else 0
+    multi_props = len({i["property_id"] for i in items if i["property_id"]})
     return {
         "filename": doc["filename"], "size": _size_text(doc["file_size"]), "uploaded": doc["uploaded_at"],
         "doc_type": DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
@@ -265,7 +265,8 @@ def review(doc_id):
             include = it["dup_decision"] != "exclude"
         views.append({
             "row": row, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it),
-            "orig": {"vendor": orig.get("vendor"), "description": orig.get("description"), "amount": orig.get("amount"),
+            "orig": {"po": orig.get("po"), "po_note": orig.get("_po_note"), "order_id": orig.get("order_id"),
+                     "vendor": orig.get("vendor"), "description": orig.get("description"), "amount": orig.get("amount"),
                      "category": orig.get("category"), "date": orig.get("date"),
                      "check_in": orig.get("check_in"), "check_out": orig.get("check_out"), "net": orig.get("net"),
                      "gross": orig.get("gross"), "fees": orig.get("fees")},
@@ -296,6 +297,13 @@ def review(doc_id):
 
     detection = ingest.detection_of(doc)
     names = {p["id"]: p["name"] for p in get_properties(conn)}
+    # reservation lines whose listing matches none of your properties yet: one decision per listing, remembered for next time
+    unmatched = []
+    if res_mode and not confirmed:
+        unmatched = [{"listing": r["raw_description"], "n": r["n"]} for r in conn.execute(
+            """SELECT raw_description, COUNT(*) n FROM document_items WHERE document_id=? AND item_kind='reservation'
+                 AND property_id IS NULL AND raw_description IS NOT NULL AND raw_description != ''
+               GROUP BY raw_description ORDER BY n DESC, raw_description""", (doc_id,))]
     events = ingest.events_for(conn, doc_id)
     kpi_changes = next((e["detail"].get("kpi_changes") for e in reversed(events)
                         if e["event"] == "confirmed" and e["detail"]), None)
@@ -304,7 +312,7 @@ def review(doc_id):
     return render_template(
         "review_document.html", active="documents", all_properties=get_properties(conn),
         active_property=doc["property_id"], prop=prop, doc=doc, items=views,
-        flats=get_properties(conn, include_overhead=False), year=year, month=month,
+        flats=get_properties(conn, include_overhead=not res_mode), year=year, month=month, unmatched=unmatched,
         categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image, res_mode=res_mode, confirmed=confirmed,
         summary=summary, preview=preview, focus=focus, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
         period_label=_period_text(doc), status_label=ingest.status_display(doc["status"])[0],
@@ -581,6 +589,9 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
                VALUES (?,?,?,?,?,?,?,0,?,'confirmed','upload',?)""",
             (pid, platform, code, check_in, check_out, gross if gross is not None else net, fees, net, doc_id))
         final_property_id = pid
+    if has_items:  # next statement: these listings are matched without being asked again
+        for it in conn.execute("SELECT raw_description, property_id FROM document_items WHERE document_id=? AND item_kind='reservation' AND include=1 AND property_id IS NOT NULL", (doc_id,)):
+            ingest.alias_remember(conn, it["raw_description"], it["property_id"])
     _log_confirmed(conn, doc_id, "reservation", len(ready), excluded, corrected, kpi_before, ingest.kpi_snapshot(conn, kpi_keys), manual=not has_items)
     _finish(conn, doc_id, final_property_id, len(ready), "reservation", excluded, corrected)
     names = {p["id"]: p["name"] for p in get_properties(conn)}
@@ -644,3 +655,34 @@ def reject(doc_id):
         pass  # the draft is gone from the app either way; a stray file on disk is harmless
     flash(f"\u2713 Deleted the draft \u201c{doc['filename']}\u201d. Nothing was added to your figures.", "success")
     return redirect(url_for("documents.index"))
+
+
+@bp.route("/documents/<int:doc_id>/map-listing", methods=["POST"])
+def map_listing(doc_id):
+    """One decision for every reservation line carrying the same listing name:
+    which of your properties it is, or that it isn't one of yours (left out).
+    Remembered, so the next statement is matched automatically."""
+    conn = db.get_conn()
+    doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+    listing = (request.form.get("listing") or "").strip()
+    choice = request.form.get("property_id") or ""
+    if not doc or doc["status"] == "confirmed" or not listing or not choice:
+        flash("Choose a property for that listing first.", "warning")
+        return redirect(url_for("documents.review", doc_id=doc_id))
+    if choice == "__ignore__":
+        n = conn.execute("UPDATE document_items SET include=0 WHERE document_id=? AND item_kind='reservation' AND raw_description=? AND property_id IS NULL",
+                         (doc_id, listing)).rowcount
+        ingest.alias_remember(conn, listing, None, ignore=True)
+        flash(f"\u2713 Left out {n} reservation{'s' if n != 1 else ''} for \u201c{listing}\u201d. It will be skipped on future statements too.", "success")
+    else:
+        if not get_property(conn, choice):
+            flash("That property doesn't exist.", "error")
+            return redirect(url_for("documents.review", doc_id=doc_id))
+        n = conn.execute("UPDATE document_items SET property_id=?, include=CASE WHEN duplicate_of IS NULL THEN 1 ELSE include END WHERE document_id=? AND item_kind='reservation' AND raw_description=? AND property_id IS NULL",
+                         (choice, doc_id, listing)).rowcount
+        ingest.alias_remember(conn, listing, choice)
+        flash(f"\u2713 Assigned {n} reservation{'s' if n != 1 else ''} for \u201c{listing}\u201d to {get_property(conn, choice)['name']}. Remembered for next time.", "success")
+    ingest.log_event(conn, doc_id, "edited", f"Listing \u201c{listing}\u201d -> {'not tracked' if choice == '__ignore__' else get_property(conn, choice)['name']} ({n} line{'s' if n != 1 else ''})",
+                     {"listing": listing, "choice": choice, "lines": n})
+    conn.commit()
+    return redirect(url_for("documents.review", doc_id=doc_id))
