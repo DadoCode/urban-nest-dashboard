@@ -10,6 +10,8 @@ import services.kpis as kpis
 from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta
 from services.completeness import completeness_for, health_for, health_state, seed_defaults
 from services.context import compare_bounds, link_params, range_params, request_context
+import services.ingest as ingest
+from services.audit import record
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("properties", __name__)
@@ -513,6 +515,7 @@ def settings_tab(property_id):
         **_ws(conn, ctx, prop, "settings", is_overhead=is_overhead),
         checklist=_checklist(conn, property_id, is_overhead, ctx["end_year"], ctx["end_month"]),
         fee_pct=prop["management_fee_pct"], your_income=None if is_overhead else kpis.business_income(conn, property_id, start, end),
+        aliases=[] if is_overhead else conn.execute("SELECT alias, label FROM property_aliases WHERE property_id=? AND ignore=0 ORDER BY label", (property_id,)).fetchall(),
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
@@ -563,6 +566,58 @@ def save_ownership(property_id):
         flash(f"\u2713 {prop['name']} is set as managed -- this business earns {fee:g}% of its revenue.", "success")
     else:
         flash(f"\u2713 {prop['name']} is set as fully owned -- this business earns its full net profit.", "success")
+    return redirect(url_for("properties.settings_tab", property_id=property_id))
+
+
+@bp.route("/properties/<property_id>/details", methods=["POST"])
+def save_details(property_id):
+    """Rename a property / change its address. The id and code never change
+    (everything is linked by them); only what people read does."""
+    conn = db.get_conn()
+    prop = get_property(conn, property_id)
+    if not prop or prop["type"] == "overhead":
+        flash("We couldn't find that property. Pick one from the Properties list.", "error")
+        return redirect(url_for("properties.index"))
+    name = " ".join((request.form.get("name") or "").split())[:120]
+    address = " ".join((request.form.get("address") or "").split())[:200] or name
+    if not name:
+        flash("A property needs a name.", "error")
+        return redirect(url_for("properties.settings_tab", property_id=property_id))
+    changed = [(f, o, n) for f, o, n in (("name", prop["name"], name), ("address", prop["address"], address)) if (o or "") != n]
+    if changed:
+        conn.execute("UPDATE properties SET name=?, address=? WHERE id=?", (name, address, property_id))
+        for field, old, new in changed:
+            record(conn, "property", property_id, "edit", field, old, new)
+        conn.commit()
+        flash(f"\u2713 Saved. {name} is now how this property is named everywhere (its web address and code are unchanged).", "success")
+    return redirect(url_for("properties.settings_tab", property_id=property_id))
+
+
+@bp.route("/properties/<property_id>/aliases", methods=["POST"])
+def add_alias(property_id):
+    """Teach the importer that a listing name used on Airbnb / Booking.com is this property."""
+    conn = db.get_conn()
+    prop = get_property(conn, property_id)
+    if not prop or prop["type"] == "overhead":
+        return redirect(url_for("properties.index"))
+    label = " ".join((request.form.get("label") or "").split())
+    if len(ingest.norm_alias(label)) < 3:
+        flash("Enter the listing name exactly as it appears on the booking platform.", "error")
+    else:
+        existing = conn.execute("SELECT property_id, ignore FROM property_aliases WHERE alias=?", (ingest.norm_alias(label),)).fetchone()
+        ingest.alias_remember(conn, label, property_id)
+        conn.commit()
+        moved = f" (it was previously matched to {get_property(conn, existing['property_id'])['name'] if existing['property_id'] and get_property(conn, existing['property_id']) else 'nothing'})" if existing else ""
+        flash(f"\u2713 \u201c{label}\u201d will now be matched to {prop['name']} on every future statement{moved}.", "success")
+    return redirect(url_for("properties.settings_tab", property_id=property_id))
+
+
+@bp.route("/properties/<property_id>/aliases/remove", methods=["POST"])
+def remove_alias(property_id):
+    conn = db.get_conn()
+    n = conn.execute("DELETE FROM property_aliases WHERE alias=? AND property_id=?", (request.form.get("alias") or "", property_id)).rowcount
+    conn.commit()
+    flash("\u2713 Removed. That listing name will be asked about again next time." if n else "That match was already gone.", "success" if n else "info")
     return redirect(url_for("properties.settings_tab", property_id=property_id))
 
 

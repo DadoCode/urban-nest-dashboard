@@ -520,6 +520,32 @@ upload("listings-next-month.csv", LIST.replace("L1", "N1").replace("L2", "N2").r
 rn = items_of(last_doc())
 check("next statement: remembered listings matched automatically, ignored ones skipped", [r["property_id"] for r in rn[:2]] == ["alpha-house", "alpha-house"] and rn[2]["include"] == 0)
 
+# ---------------------------------------------------------------- Settings: rename a property, manage platform listing names
+r = client.post("/properties/beta-court-two/details", data={"name": "Delta Heights", "address": "5 Delta Row"})
+row = q("SELECT id, code, name, address FROM properties WHERE id='beta-court-two'")[0]
+check("settings: renaming changes the name/address but never the id or code", (row["name"], row["address"], row["id"], row["code"]) == ("Delta Heights", "5 Delta Row", "beta-court-two", "BETA-COURT-TWO"))
+check("settings: the rename is written to the audit log", len(q("SELECT 1 FROM audit_log WHERE entity_type='property' AND entity_id='beta-court-two' AND field='name'")) == 1)
+client.post("/properties/beta-court-two/details", data={"name": "   ", "address": "x"})
+check("settings: an empty name is refused", q("SELECT name FROM properties WHERE id='beta-court-two'")[0]["name"] == "Delta Heights")
+DELTA = "Confirmation Code,Start date,End date,Nights,Listing,Gross earnings,Service fee,Type\nD1,09/03/2026,09/06/2026,3,Delta Heights - Cosy 2BR,300,50,Reservation\n"
+upload("delta.csv", DELTA, "booking_statement", "")
+check("a renamed property is matched by its new name on the next statement", items_of(last_doc())[0]["property_id"] == "beta-court-two")
+page = client.get("/properties/alpha-house/settings").get_data(as_text=True)
+check("settings page shows the name/address and platform-names sections", "Names on booking platforms" in page and "Name and address" in page and 'name="address"' in page)
+LBL = "Mystery Loft - Skyline Views Near Station"
+client.post("/properties/alpha-house/aliases", data={"label": LBL})
+check("settings: an added platform name is listed", LBL in client.get("/properties/alpha-house/settings").get_data(as_text=True))
+MYST = "Confirmation Code,Start date,End date,Nights,Listing,Gross earnings,Service fee,Type\nM1,09/03/2026,09/06/2026,3," + LBL + ",300,50,Reservation\n"
+upload("mystery.csv", MYST, "booking_statement", "")
+check("a platform name added in Settings is matched automatically on the next statement", items_of(last_doc())[0]["property_id"] == "alpha-house")
+import services.ingest as _ing  # noqa: E402
+client.post("/properties/alpha-house/aliases/remove", data={"alias": _ing.norm_alias(LBL)})
+check("settings: a removed platform name is no longer matched", LBL not in client.get("/properties/alpha-house/settings").get_data(as_text=True))
+upload("mystery2.csv", MYST.replace("M1", "M2"), "booking_statement", "")
+check("...and the listing is asked about again", items_of(last_doc())[0]["property_id"] is None)
+client.post("/properties/alpha-house/aliases", data={"label": "ab"})
+check("settings: a too-short platform name is refused", not q("SELECT 1 FROM property_aliases WHERE alias='ab'"))
+
 # ---------------------------------------------------------------- demo mode (hosted preview)
 os.environ["UN_DEMO_MODE"] = "1"
 demo = create_app().test_client()
@@ -527,7 +553,7 @@ n_docs = q("SELECT COUNT(*) n FROM documents")[0]["n"]
 r = demo.post("/documents/upload", data={"document": (io.BytesIO(b"a,b\n1,2\n"), "x.csv"), "doc_type": "other"}, content_type="multipart/form-data", follow_redirects=True)
 check("demo: upload is refused with the demo message, not a 500", r.status_code == 200 and "Demo mode — changes and uploads are disabled" in r.get_data(as_text=True))
 check("demo: nothing was written", q("SELECT COUNT(*) n FROM documents")[0]["n"] == n_docs)
-for method_url in ["/documents/1/confirm", "/documents/1/reject", "/expenses/transactions/1/delete", "/apartments", "/properties/alpha-house/ownership"]:
+for method_url in ["/documents/1/confirm", "/documents/1/reject", "/expenses/transactions/1/delete", "/apartments", "/properties/alpha-house/ownership", "/properties/alpha-house/details", "/properties/alpha-house/aliases", "/properties/alpha-house/aliases/remove"]:
     rr = demo.post(method_url, data={"name": "zzz"}, follow_redirects=True)
     check(f"demo: POST {method_url} fails gracefully", rr.status_code == 200 and "Demo mode" in rr.get_data(as_text=True))
 check("demo: no property was added", q("SELECT COUNT(*) n FROM properties WHERE name='zzz'")[0]["n"] == 0)

@@ -14,6 +14,38 @@
   {% endcall %}
 
   {% if not is_overhead %}
+  {% call section("Name and address", "How this property is named everywhere, and matched on booking statements") %}
+  <div class="card">
+    <form method="post" action="{{ url_for('properties.save_details', property_id=prop.id) }}" class="goal-form">
+      <label style="display:flex; flex-direction:column; gap:4px; flex:1 1 220px">Name <input name="name" value="{{ prop.name }}" required maxlength="120"></label>
+      <label style="display:flex; flex-direction:column; gap:4px; flex:1 1 280px">Address <input name="address" value="{{ prop.address or '' }}" maxlength="200"></label>
+      <button type="submit" class="secondary" style="align-self:flex-end">Save</button>
+    </form>
+    <p class="note" style="margin:var(--s2) 0 0">Booking statements are matched on the name and address, so make them match what Airbnb and Booking.com show (for example the street name and house number).</p>
+  </div>
+  {% endcall %}
+
+  {% call section("Names on booking platforms", "Listing names that mean this property") %}
+  <div class="card">
+    {% if aliases %}
+      <ul style="list-style:none; margin:0 0 var(--s3); padding:0; display:flex; flex-direction:column; gap:6px">
+        {% for a in aliases %}
+          <li style="display:flex; align-items:center; justify-content:space-between; gap:var(--s3)">
+            <span class="truncate" style="min-width:0" title="{{ a.label }}">{{ a.label }}</span>
+            <form method="post" action="{{ url_for('properties.remove_alias', property_id=prop.id) }}" style="margin:0"><input type="hidden" name="alias" value="{{ a.alias }}"><button type="submit" class="quiet">Remove</button></form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="note" style="margin:0 0 var(--s3)">None saved yet. They're added automatically whenever you match a listing on a statement you confirm, or you can add one now.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('properties.add_alias', property_id=prop.id) }}" class="goal-form">
+      <input name="label" placeholder="Listing name exactly as shown on Airbnb / Booking.com" required style="flex:1 1 320px">
+      <button type="submit" class="secondary">Add</button>
+    </form>
+  </div>
+  {% endcall %}
+
   {% call section("Model", "What this business actually earns from " ~ prop.name) %}
   <div class="card">
     {% if fee_pct %}
