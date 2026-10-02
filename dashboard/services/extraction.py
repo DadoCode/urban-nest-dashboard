@@ -244,6 +244,7 @@ def _rows_to_reservations(header, rows):
     day_first = _detect_day_first([r[i] for r in rows for i in date_cols if i < len(r)])
     items, notes = [], []
     left_out, left_out_amt = Counter(), defaultdict(float)
+    adj_rows, payout_total, payout_rows = [], 0.0, 0
     cancelled = tried = bad_dates = night_mismatch = ambiguous = 0
     odd_status, currencies, statuses = Counter(), Counter(), Counter()
     seen, dup_codes = set(), []
@@ -253,9 +254,18 @@ def _rows_to_reservations(header, rows):
         row_type = str(raw(row, "type") or "").strip()
         low = row_type.lower()
         if row_type and "reserv" not in low and "booking" not in low:
-            if low != "payout":  # bank transfers are not reservations or adjustments; stay silent about them
-                left_out[row_type] += 1
-                left_out_amt[row_type] += _num(raw(row, "amount")) or _num(raw(row, "net")) or 0
+            if low != "payout":
+                adj_code, adj_amt = _clean_code(raw(row, "reservation_id")), _num(raw(row, "amount"))
+                if adj_code and adj_amt is not None:
+                    adj_rows.append((adj_code, row_type, adj_amt))   # changes a reservation's payout: applied below
+                else:
+                    left_out[row_type] += 1
+                    left_out_amt[row_type] += _num(raw(row, "amount")) or _num(raw(row, "net")) or 0
+            else:  # a bank transfer: not income itself, but the file's own proof of what was really paid
+                paid = _num(raw(row, "net"))
+                if paid:
+                    payout_total += paid
+                    payout_rows += 1
             continue
         status_raw = str(raw(row, "status") or "").strip()
         status = _h(status_raw)
@@ -319,11 +329,49 @@ def _rows_to_reservations(header, rows):
                       "fees": abs(fees or 0), "net": abs(net), "confidence": 0.9 if code else 0.7,
                       "row": row_no})
 
+    # Adjustment / Resolution rows change what a reservation really paid (refunds, reversals, damage payouts):
+    # fold each into the reservation with the same code so the imported income is what Airbnb actually settled.
+    by_code = {it["reservation_id"]: it for it in items if it["reservation_id"]}
+    applied_total, applied_n, reversed_n = 0.0, 0, 0
+    unapplied_amt = 0.0
+    for code, kind, amt in adj_rows:
+        it = by_code.get(code)
+        if it is None:
+            left_out[kind] += 1
+            left_out_amt[kind] += amt
+            unapplied_amt += amt
+            continue
+        it.setdefault("net_before_adjustment", it["net"])
+        it["adjustment"] = round(it.get("adjustment", 0.0) + amt, 2)
+        applied_total += amt
+        applied_n += 1
+    for it in items:
+        if "adjustment" in it:
+            raw_net = round(it["net_before_adjustment"] + it["adjustment"], 2)
+            it["net"] = max(raw_net, 0.0)
+            it["_note"] = f"Airbnb adjustments {_money(it['adjustment'])} applied: net was {_money(it['net_before_adjustment'])}, now {_money(it['net'])}"
+            if raw_net <= 0.004:
+                it["_exclude"] = True
+                it["_note"] += " \u2014 fully reversed, left unticked"
+                reversed_n += 1
+    if applied_n:
+        notes.append({"code": "adjustments_applied", "level": "info",
+                      "message": f"{applied_n} Airbnb adjustment / resolution row{'s' if applied_n != 1 else ''} (together {_money(applied_total)}) {'were' if applied_n != 1 else 'was'} applied to the reservation{'s' if applied_n != 1 else ''} they belong to, so the net shown is what Airbnb actually settled."
+                                 + (f" {reversed_n} reservation{'s are' if reversed_n != 1 else ' is'} fully reversed: listed at \u00a30.00 and unticked." if reversed_n else "")})
+    if payout_rows:
+        settled = round(sum(it.get("net_before_adjustment", it["net"]) for it in items) + applied_total + unapplied_amt, 2)
+        diff = round(settled - payout_total, 2)
+        if abs(diff) < 0.015:
+            notes.append({"code": "payout_reconciled", "level": "info",
+                          "message": f"\u2713 Reconciles with the bank: reservations after adjustments ({_money(settled)}) equal this file's {payout_rows} payout transfers ({_money(payout_total)})."})
+        else:
+            notes.append({"code": "payout_mismatch", "level": "warn",
+                          "message": f"Doesn't reconcile with the bank: reservations after adjustments are {_money(settled)} but this file's {payout_rows} payout transfers total {_money(payout_total)} (difference {_money(diff)}). Payouts can include stays from another statement; check before confirming."})
     for kind, n in left_out.items():
         notes.append({"code": "rows_left_out", "level": "warn",
                       "message": f"{n} “{kind}” row{'s' if n != 1 else ''} {'were' if n != 1 else 'was'} left out — they aren't new reservations"
                                  + (f" but together change what you were paid by {_money(left_out_amt[kind])}" if left_out_amt[kind] else "")
-                                 + ". If they relate to reservations you are importing, adjust those lines by hand."})
+                                 + ". They match no reservation in this file (they probably belong to an earlier statement)."})
     if cancelled or odd_status:
         bits = []
         if cancelled:
@@ -338,7 +386,7 @@ def _rows_to_reservations(header, rows):
     shown = ", ".join(f"{h.strip() or '?'} \u2192 {label}" for label, i in (
         ("check-in", cols.get("check_in")), ("check-out", cols.get("check_out")), ("reservation ID", cols.get("reservation_id")),
         ("listing", cols.get("listing")), ("address", cols.get("location")), ("Gross Booking Revenue", cols.get("gross")),
-        ("platform fee", cols.get("fees")), ("net", cols.get("net") if cols.get("net") is not None else cols.get("amount")),
+        ("platform fee", cols.get("fees")), ("net", cols.get("amount") if cols.get("amount") is not None else cols.get("net")),
         ("status", cols.get("status"))) if i is not None for h in [str(header[i])])
     gross_name = _h(header[cols["gross"]]) if "gross" in cols else ""
     meaning = ""

@@ -283,7 +283,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
     skipped = (result.get("rows_seen") or 0) - len(items)
     if skipped > 0:
         gaps.append(f"{skipped} of {result['rows_seen']} rows in the file couldn't be read and were skipped")
-    missing = sum(1 for i in items if not i.get(amount_key))
+    missing = sum(1 for i in items if i.get(amount_key) is None and not i.get("_exclude"))
     if missing:
         gaps.append(f"{missing} line{'s' if missing != 1 else ''} without an amount")
     if not is_reservations:

@@ -224,6 +224,7 @@
 
               <div class="rv-foot">
                 <span class="rv-flags"></span>
+                {% if v.orig.note %}<span class="note">{{ v.orig.note }}</span>{% endif %}
                 {% if v.orig.status %}<span class="note">Source status: <strong>{{ v.orig.status }}</strong>{% if v.orig.status_note %} \u2014 left unticked{% endif %}</span>{% endif %}
                 {% if v.orig.po_note or v.orig.order_id %}<span class="note">{% if v.orig.order_id %}Order {{ v.orig.order_id }}{% endif %}{% if v.orig.po_note %} · {{ v.orig.po_note }}{% endif %}</span>{% endif %}
                 <span class="rv-foot-right">

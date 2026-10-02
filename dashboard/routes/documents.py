@@ -265,7 +265,7 @@ def review(doc_id):
             include = it["dup_decision"] != "exclude"
         views.append({
             "row": row, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it),
-            "orig": {"status": orig.get("status"), "status_note": orig.get("_status_note"), "po": orig.get("po"), "po_note": orig.get("_po_note"), "order_id": orig.get("order_id"),
+            "orig": {"note": orig.get("_note"), "status": orig.get("status"), "status_note": orig.get("_status_note"), "po": orig.get("po"), "po_note": orig.get("_po_note"), "order_id": orig.get("order_id"),
                      "vendor": orig.get("vendor"), "description": orig.get("description"), "amount": orig.get("amount"),
                      "category": orig.get("category"), "date": orig.get("date"),
                      "check_in": orig.get("check_in"), "check_out": orig.get("check_out"), "net": orig.get("net"),

@@ -394,10 +394,28 @@ AIRBNB = ("Date,Arriving by date,Type,Confirmation Code,Booking date,Start date,
 upload("airbnb-us.csv", AIRBNB, "booking_statement", "")
 da = last_doc(); ra = items_of(da)
 check("airbnb: month/day dates read correctly (09/03 is 3 Sep, not 9 Mar)", [(r["check_in"], r["check_out"]) for r in ra] == [("2026-09-03", "2026-09-09"), ("2026-09-10", "2026-09-12")], [(r["check_in"], r["check_out"]) for r in ra])
-check("airbnb: net is the Amount column / gross minus fee, quoted thousands handled", [round(r["net_revenue"], 2) for r in ra] == [500.0, 1200.5] and ra[1]["gross_revenue"] == 1400.5)
+check("airbnb: net is the Amount column with each adjustment/resolution applied to its own reservation (500-80, 1200.50+25), quoted thousands handled", [round(r["net_revenue"], 2) for r in ra] == [420.0, 1225.5] and ra[1]["gross_revenue"] == 1400.5, [r["net_revenue"] for r in ra])
 check("airbnb: platform detected from the columns", {r["platform"] for r in ra} == {"airbnb"})
-check("airbnb: adjustments/resolutions left out and said so; payouts silent; repeated code dropped", {"rows_left_out", "duplicate_codes", "dates_month_first"} <= warn_codes(da), warn_codes(da))
+check("airbnb: adjustments applied and said so; repeated code dropped; payouts that don't add up are flagged", {"adjustments_applied", "duplicate_codes", "dates_month_first", "payout_mismatch"} <= warn_codes(da), warn_codes(da))
 check("airbnb: no false 'partial extraction' for rows that were deliberately left out", "partial_extraction" not in warn_codes(da), json.loads(da["detection_json"])["warnings"])
+
+RECON = ("Date,Arriving by date,Type,Confirmation Code,Booking date,Start date,End date,Nights,Guest,Listing,Details,Reference code,Currency,Amount,Paid out,Service fee,Fast Pay Fee,Cleaning fee,Gross earnings,Airbnb remitted tax,Earnings year\n"
+         "09/30/2026,10/07/2026,Payout,,,,,,,,Transfer,M-1,GBP,,1645.50,,,,,,\n"
+         "09/30/2026,,Reservation,RA1,09/01/2026,09/03/2026,09/09/2026,6,A,Flat One,,,GBP,500.00,,100.00,,20.00,600.00,0.00,2026\n"
+         "09/30/2026,,Reservation,RB2,09/01/2026,09/10/2026,09/12/2026,2,B,Flat One,,,GBP,1200.50,,200.00,,0,1400.50,0.00,2026\n"
+         "09/30/2026,,Reservation,RC3,09/01/2026,09/14/2026,09/16/2026,2,C,Flat One,,,GBP,300.00,,50.00,,0,350.00,0.00,2026\n"
+         "09/30/2026,,Adjustment,RA1,09/01/2026,09/03/2026,09/09/2026,6,A,Flat One,,,GBP,-80.00,,-10.00,,0,,0.00,2026\n"
+         "09/30/2026,,Resolution Payout,RB2,,09/10/2026,09/12/2026,2,B,Flat One,Damage,,GBP,25.00,,,,,25.00,,2026\n"
+         "09/30/2026,,Adjustment,RC3,09/01/2026,09/14/2026,09/16/2026,2,C,Flat One,,,GBP,-300.00,,-50.00,,0,,0.00,2026\n"
+         "09/30/2026,,Adjustment,OLD9,09/01/2026,08/01/2026,08/03/2026,2,D,Flat One,,,GBP,-50.00,,0,,0,,0.00,2026\n")
+RECON_OK = RECON.replace("1645.50", "1595.50")   # the orphan adjustment (-50) also reduced what was paid
+upload("airbnb-recon.csv", RECON_OK, "booking_statement", "alpha-house"); dr_ = last_doc(); rr_ = items_of(dr_)
+check("airbnb reconciliation: nets after adjustments equal the file's payout transfers (verified against the bank rows)", "payout_reconciled" in warn_codes(dr_) and "payout_mismatch" not in warn_codes(dr_), warn_codes(dr_))
+check("airbnb: a reservation fully reversed by an adjustment is listed at 0 and unticked, and is not 'missing an amount'", [(round(r["net_revenue"], 2), r["include"]) for r in rr_] == [(420.0, 1), (1225.5, 1), (0.0, 0)] and "partial_extraction" not in warn_codes(dr_), [(r["net_revenue"], r["include"]) for r in rr_])
+check("airbnb: an adjustment for a reservation that isn't in this file is reported, not guessed onto another", "rows_left_out" in warn_codes(dr_))
+check("airbnb: each adjusted line says what it was and what it is now", "net was" in client.get(f"/documents/{dr_['id']}/review").get_data(as_text=True))
+upload("airbnb-recon-bad.csv", RECON, "booking_statement", "alpha-house")
+check("airbnb reconciliation: a payout total that doesn't match is flagged", "payout_mismatch" in warn_codes(last_doc()))
 
 UK = "Date,Vendor,Description,Amount\n13/03/2026,A,x,10\n02/04/2026,B,y,20\n"
 upload("uk-dates.csv", UK, "other", "alpha-house")
