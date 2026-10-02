@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, empty_state %}
+{% from "_components.html" import page_head, section, empty_state %}
 {% block title %}Properties — Urban Nest Estates{% endblock %}
 {% block content %}
   {% call page_head("Properties", total_count ~ " " ~ status ~ " propert" ~ ("y" if total_count == 1 else "ies") ~ " · " ~ current_month) %}
@@ -13,49 +13,89 @@
       <option value="inactive" {{ 'selected' if status == 'inactive' }}>Inactive</option>
       <option value="all" {{ 'selected' if status == 'all' }}>All</option>
     </select>
+    <input type="hidden" name="sort_op" value="{{ sort_op }}">
+    <input type="hidden" name="sort_mg" value="{{ sort_mg }}">
     <button type="submit" class="secondary">Search</button>
-    {% if q %}<a class="clear-link" href="{{ cx('properties.index') }}">Clear</a>{% endif %}
+    {% if q %}<a class="clear-link" href="{{ cx('properties.index', status=status) }}">Clear</a>{% endif %}
   </form>
 
-  <div class="card flush">
-    {% if rows %}
-      <table>
-        <thead>
-          <tr>
-            <th><a class="sort {{ 'on' if sort == 'name' }}" href="{{ cx('properties.index', sort='name', q=q or None, status=status) }}">Property</a></th>
-            {% set col_info = {
-              'revenue': "Revenue Urban Nest itself earns: full booking revenue for an operated property, or just its management fee for a managed one (the rest belongs to the owner).",
-              'profit': "Revenue minus this property's own costs -- for a managed property, the same figure as its Revenue, since Urban Nest never sees that property's own revenue or costs beyond the fee.",
-              'adr': 'Average nightly rate actually achieved on booked nights.',
-            } %}
-            {% for key, label in [('revenue', 'Urban Nest Revenue'), ('profit', 'Property profit'), ('occupancy', 'Occupancy'), ('adr', 'ADR')] %}
-              <th class="num"><a class="sort {{ 'on' if sort == key }}" href="{{ cx('properties.index', sort=key, q=q or None, status=status) }}" {% if col_info.get(key) %}title="{{ col_info[key] }}"{% endif %}>{{ label }}{% if sort == key %} ↓{% endif %}</a></th>
-            {% endfor %}
-            <th class="num" title="Revenue per available night (occupancy × ADR) -- how hard a property is working.">RevPAR</th>
-            <th>Model</th>
-            <th>Data health</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
+  {# Each section sorts on its own param (sort_op / sort_mg) so ranking one
+     business model never reshuffles the other. #}
+  {% macro sort_th(label, key, current, param, info=None, num=True, col='') -%}
+    <th class="{{ 'num' if num }} {{ col }}"><a class="sort {{ 'on' if current == key }}" {% if info %}title="{{ info }}"{% endif %}
+      href="{{ cx('properties.index', q=q or None, status=status, sort_op=(key if param == 'sort_op' else sort_op), sort_mg=(key if param == 'sort_mg' else sort_mg)) }}">{{ label }}{% if current == key and key != 'name' %} ↓{% endif %}</a></th>
+  {%- endmacro %}
+
+  {% macro health_btn(r) -%}
+    <button type="button" class="pill {{ r.health_kind }}" title="See exactly what is missing"
+            hx-get="{{ cx('properties.health_drawer', property_id=r.id) }}" hx-target="#drawer" hx-swap="innerHTML">{{ r.health_label }} ›</button>
+  {%- endmacro %}
+
+  {# Data Health is its own column on wide screens; below 560px the same
+     button sits under the property name instead (see .health-inline). #}
+  {% macro health_cell(r) -%}
+    <td class="health-cell">{{ health_btn(r) }}</td>
+  {%- endmacro %}
+
+  {% if operated %}
+    {% call section("Operated (rent-to-rent) · " ~ operated|length) %}
+      <div class="card flush">
+        <table class="prop-table">
+          <thead>
             <tr>
-              <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}</td>
-              <td class="num">{{ r.revenue|money }}</td>
-              <td class="num">{{ r.profit|money }}</td>
-              <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
-              <td class="num">{{ r.adr|money }}</td>
-              <td class="num">{{ r.revpar|money }}</td>
-              <td>{% if r.managed %}<span class="pill" title="This business earns {{ '%g'|format(r.fee) }}% of this property's revenue">Managed · {{ '%g'|format(r.fee) }}%</span>{% else %}<span class="pill pos">Operated</span>{% endif %}</td>
-              <td>
-                <button type="button" class="pill {{ r.health_kind }}" title="See exactly what is missing"
-                        hx-get="{{ cx('properties.health_drawer', property_id=r.id) }}" hx-target="#drawer" hx-swap="innerHTML">{{ r.health_label }} ›</button>
-              </td>
+              {{ sort_th('Property', 'name', sort_op, 'sort_op', num=False) }}
+              {{ sort_th('Urban Nest Revenue', 'revenue', sort_op, 'sort_op', info="Full revenue Urban Nest earns from an operated property.", col='c-metric') }}
+              {{ sort_th('Property Profit', 'profit', sort_op, 'sort_op', info="Urban Nest Revenue minus this property's own costs. Business Costs are not included.", col='c-metric c-secondary') }}
+              {{ sort_th('Occupancy', 'occupancy', sort_op, 'sort_op', col='c-occ') }}
+              <th class="c-health">Data Health</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      {{ empty_state('No properties match "' ~ q ~ '"', "Try a different name or address, or switch the status filter.") }}
-    {% endif %}
-  </div>
+          </thead>
+          <tbody>
+            {% for r in operated %}
+              <tr>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}<div class="health-inline">{{ health_btn(r) }}</div></td>
+                <td class="num">{{ r.revenue|money }}</td>
+                <td class="num c-secondary">{{ r.profit|money }}</td>
+                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                {{ health_cell(r) }}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endcall %}
+  {% endif %}
+
+  {% if managed %}
+    {% call section("Managed · " ~ managed|length) %}
+      <div class="card flush">
+        <table class="prop-table">
+          <thead>
+            <tr>
+              {{ sort_th('Property', 'name', sort_mg, 'sort_mg', num=False) }}
+              {{ sort_th('Management Fee Earned', 'revenue', sort_mg, 'sort_mg', info=METRIC_INFO.fee, col='c-metric') }}
+              {{ sort_th('Occupancy', 'occupancy', sort_mg, 'sort_mg', col='c-occ') }}
+              <th class="c-health">Data Health</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in managed %}
+              <tr>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %} <span class="note" title="Urban Nest earns {{ '%g'|format(r.fee) }}% of this property's booking revenue">· {{ '%g'|format(r.fee) }}% fee</span><div class="health-inline">{{ health_btn(r) }}</div></td>
+                <td class="num">{{ r.revenue|money }}</td>
+                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                {{ health_cell(r) }}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endcall %}
+  {% endif %}
+
+  {% if not operated and not managed %}
+    <div class="card flush">
+      {{ empty_state('No properties match "' ~ q ~ '"' if q else 'No ' ~ status ~ ' properties', "Try a different name or address, or switch the status filter.") }}
+    </div>
+  {% endif %}
 {% endblock %}

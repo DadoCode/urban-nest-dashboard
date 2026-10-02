@@ -39,9 +39,15 @@ def index():
 
     single = (ctx["start_year"], ctx["start_month"]) == (ctx["end_year"], ctx["end_month"])
     period_word = MONTH_NAMES[ctx["end_month"]] if single else ctx["display"]
-    sort = request.args.get("sort", "revenue")
-    if sort not in ("revenue", "profit", "occupancy", "adr", "name"):
-        sort = "revenue"
+    # Each business-model section sorts on its own param, so ranking
+    # operated properties by Urban Nest Revenue never reshuffles the
+    # managed table (and vice versa).
+    sort_op = request.args.get("sort_op", "revenue")
+    if sort_op not in ("revenue", "profit", "occupancy", "name"):
+        sort_op = "revenue"
+    sort_mg = request.args.get("sort_mg", "revenue")
+    if sort_mg not in ("revenue", "occupancy", "name"):
+        sort_mg = "revenue"
     rows = []
     for p in flats:
         # adjusted_kpi_snapshot(): Revenue/Net profit are what this business
@@ -54,15 +60,23 @@ def index():
         rows.append({
             "id": p["id"], "name": p["name"], "active": p["active"],
             "revenue": snap["revenue"], "profit": snap["net_profit"],
-            "occupancy": snap["occupancy"], "adr": snap["adr"], "revpar": snap["revpar"],
+            "occupancy": snap["occupancy"],
             "health_kind": kind, "health_label": label,
             "managed": bool(fee), "fee": fee,
         })
-    rows.sort(key=(lambda r: r["name"].lower()) if sort == "name" else (lambda r: r[sort]), reverse=(sort != "name"))
+
+    def _sorted(items, key):
+        if key == "name":
+            return sorted(items, key=lambda r: r["name"].lower())
+        return sorted(items, key=lambda r: r[key], reverse=True)
+
+    operated = _sorted([r for r in rows if not r["managed"]], sort_op)
+    managed = _sorted([r for r in rows if r["managed"]], sort_mg)
 
     return render_template(
         "properties.html", active="properties", all_properties=get_properties(conn), active_property=None,
-        rows=rows, q=q, status=status, sort=sort, current_month=ctx["display"], total_count=len(rows),
+        operated=operated, managed=managed, q=q, status=status, sort_op=sort_op, sort_mg=sort_mg,
+        current_month=ctx["display"], total_count=len(rows),
         context_bar=True, ctx=ctx, hide_property=True,
     )
 
