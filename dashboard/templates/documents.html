@@ -21,7 +21,7 @@
       <div id="dropzone" class="dropzone">
         <div class="dropzone-label">Drop statements, invoices or receipts here</div>
         <div class="note">PDF, JPG/PNG photo, Excel/CSV, Word or text · up to {{ max_upload_mb }} MB per upload — we read what we can, you check it, then confirm</div>
-        <div style="margin-top:var(--s3)"><button type="button" class="secondary" onclick="document.getElementById('file-input').click()">Choose files</button></div>
+        <div style="margin-top:var(--s3)"><button type="button" class="secondary" id="choose-files">Choose files</button></div>
         <input id="file-input" type="file" name="document" multiple required style="display:none">
         <div id="file-list" class="note" style="margin-top:var(--s2)"></div>
       </div>
@@ -122,6 +122,8 @@
       fileList.textContent = names.length ? `${names.length} file(s): ${names.join(', ')}` : '';
     }
     fileInput.addEventListener('change', showFiles);
+    // Not an inline onclick: the file input is named "document", which inside a form's inline handler shadows the real `document`.
+    document.getElementById('choose-files').addEventListener('click', () => fileInput.click());
 
     ['dragenter', 'dragover'].forEach(evt => dropzone.addEventListener(evt, (e) => {
       e.preventDefault(); dropzone.classList.add('drag-over');
