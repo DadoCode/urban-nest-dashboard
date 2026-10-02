@@ -101,7 +101,8 @@ def _counts(conn, property_id, ym):
 
 def figure_rows(conn, property_id=None, first=None, last=None):
     props = [p for p in get_properties(conn, include_overhead=False)] if not property_id else [get_property(conn, property_id)]
-    months = [m for m in kpis.months_with_data(conn, None) if (not first or m >= first) and (not last or m <= last)]
+    all_months = set(kpis.months_with_data(conn, None)) | {ym for _p, ym in rc.detailed_months(conn)}   # incl. months only reached by a stay that began earlier
+    months = [m for m in sorted(all_months) if (not first or m >= first) and (not last or m <= last)]
     rows = []
     for ym in months:
         s, e = rc.bounds(ym)
