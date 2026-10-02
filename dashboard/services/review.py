@@ -9,6 +9,8 @@ import re
 
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+PROTECTED = ("excel_import",)  # permanent history -- see services.ingest.PROTECTED_SOURCES
+
 # extracted-JSON key -> document_items column, for "manually corrected" counts
 _TX_FIELDS = {"vendor": "vendor", "description": "raw_description", "amount": "amount", "category": "category", "date": "date"}
 _RES_FIELDS = {"check_in": "check_in", "check_out": "check_out", "gross": "gross_revenue", "fees": "platform_fees",
@@ -72,7 +74,7 @@ def duplicate_info(conn, item, find_duplicate_reservation):
             return None
         return {"kind": "reservation", "id": b["id"], "property_id": b["property_id"],
                 "text": f"{b['platform'] or 'Reservation'} · {_short_date(b['check_in'])}–{_short_date(b['check_out'])} · £{b['net_revenue']:,.2f}",
-                "property": b["pname"]}
+                "property": b["pname"], "source": b["source"], "protected": b["source"] in PROTECTED, "default": "exclude" if b["source"] in PROTECTED else "replace"}
     if not item["duplicate_of"]:
         return None
     t = conn.execute("SELECT t.*, p.name pname FROM transactions t JOIN properties p ON p.id=t.property_id WHERE t.id=?", (item["duplicate_of"],)).fetchone()
@@ -80,7 +82,7 @@ def duplicate_info(conn, item, find_duplicate_reservation):
         return None
     return {"kind": "transaction", "id": t["id"], "property_id": t["property_id"],
             "text": f"{t['vendor'] or t['description'] or 'Transaction'} · £{t['amount']:,.2f} · {_short_date(t['date'])}",
-            "property": t["pname"]}
+            "property": t["pname"], "source": t["source"], "protected": t["source"] in PROTECTED, "default": "exclude" if t["source"] in PROTECTED else "replace"}
 
 
 def file_preview(path, limit=300, max_cols=14):

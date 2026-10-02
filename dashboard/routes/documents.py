@@ -7,7 +7,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, s
 import db
 import services.ingest as ingest
 from services import runtime
-from services.audit import record
+from services.audit import record, record_edits
 from services.common import CATEGORIES, get_properties, get_property
 import services.kpis as kpis
 from services.common import MONTH_NAMES
@@ -261,10 +261,11 @@ def review(doc_id):
             row = {**dict(it), "duplicate_of": _live_duplicate(conn, it)}
         dup = None if confirmed else review_helpers.duplicate_info(conn, row, find_duplicate_reservation)
         include = bool(it["include"])
-        if dup:  # a duplicate is undecided until the reviewer picks; only "exclude" leaves it out
-            include = it["dup_decision"] != "exclude"
+        if dup:  # a duplicate replaces the earlier upload (or is left out if it matches the Excel history) unless you choose otherwise
+            include = (it["dup_decision"] or dup["default"]) != "exclude"
+        overlap = ingest.excel_overlap(conn, it["property_id"], it["check_in"]) if (not confirmed and not dup and it["item_kind"] == "reservation") else 0.0
         views.append({
-            "row": row, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it),
+            "row": row, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it), "excel_overlap": overlap,
             "orig": {"note": orig.get("_note"), "status": orig.get("status"), "status_note": orig.get("_status_note"), "po": orig.get("po"), "po_note": orig.get("_po_note"), "order_id": orig.get("order_id"),
                      "vendor": orig.get("vendor"), "description": orig.get("description"), "amount": orig.get("amount"),
                      "category": orig.get("category"), "date": orig.get("date"),
@@ -304,6 +305,8 @@ def review(doc_id):
             """SELECT raw_description, COUNT(*) n FROM document_items WHERE document_id=? AND item_kind='reservation'
                  AND property_id IS NULL AND raw_description IS NOT NULL AND raw_description != ''
                GROUP BY raw_description ORDER BY n DESC, raw_description""", (doc_id,))]
+    overlap_lines = [v for v in views if v["excel_overlap"]]
+    overlap = {"lines": len(overlap_lines), "ticked": sum(1 for v in overlap_lines if v["include"])}
     events = ingest.events_for(conn, doc_id)
     kpi_changes = next((e["detail"].get("kpi_changes") for e in reversed(events)
                         if e["event"] == "confirmed" and e["detail"]), None)
@@ -317,7 +320,7 @@ def review(doc_id):
         summary=summary, preview=preview, focus=focus, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
         period_label=_period_text(doc), status_label=ingest.status_display(doc["status"])[0],
         strip=_summary_strip(doc, prop, items, detection, names), warnings=detection.get("warnings", []),
-        events=events, kpi_changes=kpi_changes, created=created, dup_doc=dup_doc,
+        events=events, kpi_changes=kpi_changes, created=created, dup_doc=dup_doc, overlap=overlap,
         extraction_available=extraction_available(),
         needs_ai=not fname.endswith((".csv", ".tsv", ".xls", ".xlsx", ".xlsm")),
     )
@@ -385,18 +388,18 @@ def _log_edits(conn, doc_id):
     ingest.log_event(conn, doc_id, "edited", f"{n} value{'s' if n != 1 else ''} changed on {len(detail)} line{'s' if len(detail) != 1 else ''}", detail)
 
 
-def _log_confirmed(conn, doc_id, noun, added, excluded, corrected, before, after, manual=False):
+def _log_confirmed(conn, doc_id, noun, added, excluded, corrected, before, after, manual=False, replaced=0):
     changes = ingest.kpi_changes(before, after, _names(conn))
-    parts = [f"{excluded} excluded" if excluded else "", f"{corrected} corrected" if corrected else "", "entered by hand" if manual else ""]
+    parts = [f"{replaced} replaced an earlier version" if replaced else "", f"{excluded} excluded" if excluded else "", f"{corrected} corrected" if corrected else "", "entered by hand" if manual else ""]
     extra = ", ".join(p for p in parts if p)
     ingest.log_event(conn, doc_id, "confirmed", f"{added} {noun}{'s' if added != 1 else ''} created" + (f" ({extra})" if extra else ""),
-                     {"added": added, "noun": noun, "excluded": excluded, "corrected": corrected, "manual": manual, "kpi_changes": changes})
+                     {"added": added, "replaced": replaced, "noun": noun, "excluded": excluded, "corrected": corrected, "manual": manual, "kpi_changes": changes})
 
 
-def _finish(conn, doc_id, final_property_id, added, noun, excluded, corrected):
+def _finish(conn, doc_id, final_property_id, added, noun, excluded, corrected, replaced=0):
     conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?", (final_property_id, doc_id))
     conn.commit()
-    extra = " · ".join(x for x in (f"{excluded} excluded" if excluded else "", f"{corrected} manually corrected" if corrected else "") if x)
+    extra = " · ".join(x for x in (f"{replaced} replaced an earlier version" if replaced else "", f"{excluded} excluded" if excluded else "", f"{corrected} manually corrected" if corrected else "") if x)
     flash(f"\u2713 {added} {noun}{'s' if added != 1 else ''} added" + (f" ({extra})" if extra else ""), "success")
 
 
@@ -423,7 +426,7 @@ def confirm(doc_id):
 
     # Nothing was auto-extracted -- the manual blank-row fallback, not backed by document_items.
     f = request.form
-    entries, dups = [], []
+    entries, left_out_excel = [], []
     for i, (pid, vendor, desc, amount_s, category, year_s, month_s) in enumerate(zip(
             f.getlist("property_id"), f.getlist("vendor"), f.getlist("description"), f.getlist("amount"),
             f.getlist("category"), f.getlist("year"), f.getlist("month"))):
@@ -431,25 +434,37 @@ def confirm(doc_id):
         if str(i) not in included or not amount or not pid:
             continue
         date = f"{int(year_s)}-{int(month_s):02d}-01"
-        entries.append((pid, vendor, desc, amount, category, date))
-        if find_duplicate(conn, pid, {"amount": amount, "date": date, "vendor": vendor, "description": desc}):
-            dups.append(f"{vendor or desc or 'a line'} £{amount:,.2f}")
-    if dups and not f.get("allow_dups"):
-        flash(f"Possible duplicate: {', '.join(dups)} {'is' if len(dups) == 1 else 'are'} already on file for that month. Nothing was added. "
-              "If these really are separate, tick \u201cAdd even if they look like duplicates\u201d and submit again.", "warning")
-        return redirect(url_for("documents.review", doc_id=doc_id))
-    touched = {(pid, *ingest.month_key(date)) for pid, _v, _d, _a, _c, date in entries}
+        dup_id = None if f.get("allow_dups") else find_duplicate(conn, pid, {"amount": amount, "date": date, "vendor": vendor, "description": desc})
+        dup_src = ingest.source_of(conn, "transactions", dup_id)
+        if dup_src in ingest.PROTECTED_SOURCES:      # already in the Excel history: kept untouched, not added again
+            left_out_excel.append(f"{vendor or desc or 'a line'} £{amount:,.2f}")
+            continue
+        entries.append((pid, vendor, desc, amount, category, date, dup_id))   # dup_id set = replaces that earlier upload
+    if left_out_excel:
+        flash(f"{', '.join(left_out_excel)} {'is' if len(left_out_excel) == 1 else 'are'} already in your Excel history, which is kept untouched, so {'it was' if len(left_out_excel) == 1 else 'they were'} not added again. "
+              "Tick \u201cAdd even if they look like duplicates\u201d to add anyway.", "info")
+    touched = {(e[0], *ingest.month_key(e[5])) for e in entries}
     before = ingest.kpi_snapshot(conn, touched)
     final_property_id = doc["property_id"]
-    for pid, vendor, desc, amount, category, date in entries:
+    replaced = 0
+    for pid, vendor, desc, amount, category, date, dup_id in entries:
         direction = "income" if category == "booking_income" else "expense"
-        conn.execute(
-            """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source, document_id)
-               VALUES (?,?,?,?,?,?,?,?,'upload',?)""",
-            (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, doc_id))
+        if dup_id:
+            old = conn.execute("SELECT * FROM transactions WHERE id=?", (dup_id,)).fetchone()
+            record_edits(conn, "transaction", dup_id, old, {"property_id": pid, "date": date, "vendor": vendor, "description": desc, "amount": amount, "category": category})
+            record(conn, "transaction", dup_id, "replace", field="document", old_value=old["document_id"], new_value=doc_id)
+            conn.execute("""UPDATE transactions SET property_id=?, date=?, vendor=?, vendor_id=?, description=?, amount=?, direction=?, category=?,
+                              source='upload', document_id=?, edited_at=datetime('now') WHERE id=?""",
+                         (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, doc_id, dup_id))
+            replaced += 1
+        else:
+            conn.execute(
+                """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source, document_id)
+                   VALUES (?,?,?,?,?,?,?,?,'upload',?)""",
+                (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, doc_id))
         final_property_id = pid
-    _log_confirmed(conn, doc_id, "transaction", len(entries), 0, 0, before, ingest.kpi_snapshot(conn, touched), manual=True)
-    _finish(conn, doc_id, final_property_id, len(entries), "transaction", 0, 0)
+    _log_confirmed(conn, doc_id, "transaction", len(entries) - replaced, 0, 0, before, ingest.kpi_snapshot(conn, touched), manual=True, replaced=replaced)
+    _finish(conn, doc_id, final_property_id, len(entries) - replaced, "transaction", 0, 0, replaced)
     return redirect(url_for("documents.review", doc_id=doc_id))
 
 
@@ -467,12 +482,14 @@ def _confirm_transactions(conn, doc, doc_id, included):
         category, date = cols["category"][idx], cols["date"][idx]
         amount = _num(cols["amount"][idx])
         capex = 1 if cols["type"][idx] == "capex" else 0
-        decision = f.get(f"dup_{item_id}") or None
-        is_dup = bool(item["duplicate_of"] and conn.execute("SELECT 1 FROM transactions WHERE id=?", (item["duplicate_of"],)).fetchone())
+        dup_src = ingest.source_of(conn, "transactions", item["duplicate_of"])
+        is_dup = dup_src is not None
+        decision = f.get(f"dup_{item_id}") or (ingest.duplicate_default(dup_src) if is_dup else None)
+        if is_dup and dup_src in ingest.PROTECTED_SOURCES and decision == "replace":
+            decision = "exclude"          # the Excel history is never overwritten
         include_row = item_id in included and not (is_dup and decision == "exclude")
+        replace_id = item["duplicate_of"] if (include_row and is_dup and decision == "replace") else None
         if include_row:
-            if is_dup and decision != "keep":
-                problems["duplicate"] += 1
             if not pid:
                 problems["property"] += 1
             if not amount:
@@ -491,7 +508,7 @@ def _confirm_transactions(conn, doc, doc_id, included):
         fresh = conn.execute("SELECT * FROM document_items WHERE id=?", (item_id,)).fetchone()
         corrected += 1 if review_helpers.changed_fields(fresh) else 0
         if include_row:
-            ready.append((item_id, pid, vendor, desc, amount, category, capex, date, direction))
+            ready.append((item_id, pid, vendor, desc, amount, category, capex, date, direction, replace_id))
 
     _log_edits(conn, doc_id)
     if any(problems.values()):
@@ -503,15 +520,28 @@ def _confirm_transactions(conn, doc, doc_id, included):
     final_property_id = doc["property_id"]
     touched = {(r[1], *ingest.month_key(r[7])) for r in ready}
     before = ingest.kpi_snapshot(conn, touched)
-    for item_id, pid, vendor, desc, amount, category, capex, date, direction in ready:
-        cur = conn.execute(
-            """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, capex, source, document_id)
-               VALUES (?,?,?,?,?,?,?,?,?,'upload',?)""",
-            (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, capex, doc_id))
-        conn.execute("UPDATE document_items SET duplicate_of=? WHERE id=? AND duplicate_of IS NULL", (cur.lastrowid, item_id))
+    replaced = 0
+    for item_id, pid, vendor, desc, amount, category, capex, date, direction, replace_id in ready:
+        if replace_id:   # the same line from an earlier upload: the new one takes its place (old values kept in the audit log)
+            old = conn.execute("SELECT * FROM transactions WHERE id=?", (replace_id,)).fetchone()
+            new_values = {"property_id": pid, "date": date, "vendor": vendor, "description": desc, "amount": amount, "category": category, "capex": capex}
+            record_edits(conn, "transaction", replace_id, old, new_values)
+            record(conn, "transaction", replace_id, "replace", field="document", old_value=old["document_id"], new_value=doc_id)
+            conn.execute(
+                """UPDATE transactions SET property_id=?, date=?, vendor=?, vendor_id=?, description=?, amount=?, direction=?, category=?, capex=?,
+                     source='upload', document_id=?, edited_at=datetime('now') WHERE id=?""",
+                (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, capex, doc_id, replace_id))
+            conn.execute("UPDATE document_items SET duplicate_of=? WHERE id=?", (replace_id, item_id))
+            replaced += 1
+        else:
+            cur = conn.execute(
+                """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, capex, source, document_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,'upload',?)""",
+                (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, capex, doc_id))
+            conn.execute("UPDATE document_items SET duplicate_of=? WHERE id=?", (cur.lastrowid, item_id))
         final_property_id = pid
-    _log_confirmed(conn, doc_id, "transaction", len(ready), excluded, corrected, before, ingest.kpi_snapshot(conn, touched))
-    _finish(conn, doc_id, final_property_id, len(ready), "transaction", excluded, corrected)
+    _log_confirmed(conn, doc_id, "transaction", len(ready) - replaced, excluded, corrected, before, ingest.kpi_snapshot(conn, touched), replaced=replaced)
+    _finish(conn, doc_id, final_property_id, len(ready) - replaced, "transaction", excluded, corrected, replaced)
     return redirect(url_for("documents.review", doc_id=doc_id))
 
 
@@ -535,21 +565,21 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
         code = f.getlist("reservation_id")[i].strip() or None
         decision = f.get(f"dup_{row_key}") or None
         include_row = row_key in included
-        is_dup = False
-        if has_items:
-            item = conn.execute("SELECT * FROM document_items WHERE id=?", (row_key,)).fetchone()
-            is_dup = bool(find_duplicate_reservation(conn, item["property_id"], {
-                "reservation_id": item["reservation_id"], "check_in": item["check_in"], "check_out": item["check_out"]}))
-            if is_dup and decision == "exclude":
-                include_row = False
-        elif include_row and pid:
-            # hand-entered row: no extraction snapshot, but it can still duplicate a reservation on file
-            is_dup = bool(find_duplicate_reservation(conn, pid, {"reservation_id": code, "check_in": check_in, "check_out": check_out}))
-            if is_dup and f.get("allow_dups"):
+        dup_id = None
+        if pid and (has_items or include_row):   # judged on the property chosen now, not the one read at upload
+            dup_id = find_duplicate_reservation(conn, pid, {"reservation_id": code, "check_in": check_in, "check_out": check_out})
+        dup_src = ingest.source_of(conn, "bookings", dup_id)
+        is_dup = dup_src is not None
+        if is_dup:
+            if not has_items and f.get("allow_dups"):
                 decision = "keep"
+            decision = decision or ingest.duplicate_default(dup_src)
+            if dup_src in ingest.PROTECTED_SOURCES and decision == "replace":
+                decision = "exclude"      # the Excel history is never overwritten
+            if decision == "exclude":
+                include_row = False
+        replace_id = dup_id if (include_row and is_dup and decision == "replace") else None
         if include_row:
-            if is_dup and decision != "keep":
-                problems["duplicate"] += 1
             if not pid:
                 problems["property"] += 1
             if net is None:
@@ -565,7 +595,7 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
                 (pid or None, platform, code, check_in, check_out, gross, fees, net, net, 1 if include_row else 0, decision, row_key))
             corrected += 1 if review_helpers.changed_fields(conn.execute("SELECT * FROM document_items WHERE id=?", (row_key,)).fetchone()) else 0
         if include_row:
-            ready.append((pid, platform, code, check_in, check_out, gross, fees, net))
+            ready.append((pid, platform, code, check_in, check_out, gross, fees, net, replace_id))
 
     if has_items:
         _log_edits(conn, doc_id)
@@ -578,30 +608,41 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
 
     kpi_keys = {(r[0], *ym) for r in ready for ym in _months_between(r[3], r[4])}
     kpi_before = ingest.kpi_snapshot(conn, kpi_keys)
-    touched, final_property_id = {}, doc["property_id"]
-    for pid, platform, code, check_in, check_out, gross, fees, net in ready:
+    touched, final_property_id, replaced = {}, doc["property_id"], 0
+    for pid, platform, code, check_in, check_out, gross, fees, net, replace_id in ready:
         key = (pid, check_in[:7])
         if key not in touched:
             y, m = map(int, key[1].split("-"))
             touched[key] = kpis.revenue(conn, pid, *kpis.month_bounds(y, m))
-        conn.execute(
-            """INSERT INTO bookings (property_id, platform, reservation_id, check_in, check_out, gross_revenue,
-                   platform_fees, cleaning_fee, net_revenue, status, source, document_id)
-               VALUES (?,?,?,?,?,?,?,0,?,'confirmed','upload',?)""",
-            (pid, platform, code, check_in, check_out, gross if gross is not None else net, fees, net, doc_id))
+        gross_v = gross if gross is not None else net
+        if replace_id:   # the same reservation from an earlier upload: this version takes its place (old values kept in the audit log)
+            old = conn.execute("SELECT * FROM bookings WHERE id=?", (replace_id,)).fetchone()
+            record_edits(conn, "booking", replace_id, old, {"property_id": pid, "platform": platform, "reservation_id": code, "check_in": check_in,
+                                                          "check_out": check_out, "gross_revenue": gross_v, "platform_fees": fees, "net_revenue": net})
+            record(conn, "booking", replace_id, "replace", field="document", old_value=old["document_id"], new_value=doc_id)
+            conn.execute(
+                """UPDATE bookings SET property_id=?, platform=?, reservation_id=?, check_in=?, check_out=?, gross_revenue=?, platform_fees=?,
+                     net_revenue=?, status='confirmed', source='upload', document_id=? WHERE id=?""",
+                (pid, platform, code, check_in, check_out, gross_v, fees, net, doc_id, replace_id))
+            replaced += 1
+        else:
+            conn.execute(
+                """INSERT INTO bookings (property_id, platform, reservation_id, check_in, check_out, gross_revenue,
+                       platform_fees, cleaning_fee, net_revenue, status, source, document_id)
+                   VALUES (?,?,?,?,?,?,?,0,?,'confirmed','upload',?)""",
+                (pid, platform, code, check_in, check_out, gross_v, fees, net, doc_id))
         final_property_id = pid
     if has_items:  # next statement: these listings are matched without being asked again
         for it in conn.execute("SELECT raw_description, property_id FROM document_items WHERE document_id=? AND item_kind='reservation' AND include=1 AND property_id IS NOT NULL", (doc_id,)):
             ingest.alias_remember(conn, it["raw_description"], it["property_id"])
-    _log_confirmed(conn, doc_id, "reservation", len(ready), excluded, corrected, kpi_before, ingest.kpi_snapshot(conn, kpi_keys), manual=not has_items)
-    _finish(conn, doc_id, final_property_id, len(ready), "reservation", excluded, corrected)
+    _log_confirmed(conn, doc_id, "reservation", len(ready) - replaced, excluded, corrected, kpi_before, ingest.kpi_snapshot(conn, kpi_keys), manual=not has_items, replaced=replaced)
+    _finish(conn, doc_id, final_property_id, len(ready) - replaced, "reservation", excluded, corrected, replaced)
     names = {p["id"]: p["name"] for p in get_properties(conn)}
     for (pid, ym), before in touched.items():
         y, m = map(int, ym.split("-"))
         after = kpis.revenue(conn, pid, *kpis.month_bounds(y, m))
-        flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y} is now based on the reservations on file: "
-              f"£{before:,.0f} before, £{after:,.0f} now. If that looks low, the statement may not cover every "
-              f"channel or reservation for the month -- upload the rest, or delete these to restore the Excel figure.", "info")
+        flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: £{before:,.0f} → £{after:,.0f} "
+              f"({'+' if after >= before else '−'}£{abs(after - before):,.0f} from these reservations). Your Excel history for the month is kept as it was.", "info")
     return redirect(url_for("documents.review", doc_id=doc_id))
 
 
@@ -626,7 +667,7 @@ def undo(doc_id):
                      {"transactions": n_tx, "reservations": n_bk})
     conn.commit()
     flash(f"\u2713 Import undone: removed {n_tx} transaction{'s' if n_tx != 1 else ''} and {n_bk} reservation{'s' if n_bk != 1 else ''}. "
-          f"Any month that was based on those reservations goes back to its earlier figures.", "success")
+          f"Your Excel history was never touched.", "success")
     return redirect(url_for("documents.review", doc_id=doc_id))
 
 
@@ -679,11 +720,38 @@ def map_listing(doc_id):
         if not get_property(conn, choice):
             flash("That property doesn't exist.", "error")
             return redirect(url_for("documents.review", doc_id=doc_id))
-        n = conn.execute("UPDATE document_items SET property_id=?, include=CASE WHEN duplicate_of IS NULL THEN 1 ELSE include END WHERE document_id=? AND item_kind='reservation' AND raw_description=? AND property_id IS NULL",
-                         (choice, doc_id, listing)).rowcount
+        n = 0
+        for it in conn.execute("SELECT id, check_in, check_out, reservation_id FROM document_items WHERE document_id=? AND item_kind='reservation' AND raw_description=? AND property_id IS NULL", (doc_id, listing)).fetchall():
+            dup_id = find_duplicate_reservation(conn, choice, {"reservation_id": it["reservation_id"], "check_in": it["check_in"], "check_out": it["check_out"]})
+            if dup_id:
+                tick = ingest.duplicate_default(ingest.source_of(conn, "bookings", dup_id)) == "replace"
+            else:
+                tick = not ingest.excel_overlap(conn, choice, it["check_in"])
+            conn.execute("UPDATE document_items SET property_id=?, include=? WHERE id=?", (choice, 1 if tick else 0, it["id"]))
+            n += 1
         ingest.alias_remember(conn, listing, choice)
         flash(f"\u2713 Assigned {n} reservation{'s' if n != 1 else ''} for \u201c{listing}\u201d to {get_property(conn, choice)['name']}. Remembered for next time.", "success")
     ingest.log_event(conn, doc_id, "edited", f"Listing \u201c{listing}\u201d -> {'not tracked' if choice == '__ignore__' else get_property(conn, choice)['name']} ({n} line{'s' if n != 1 else ''})",
                      {"listing": listing, "choice": choice, "lines": n})
     conn.commit()
+    return redirect(url_for("documents.review", doc_id=doc_id))
+
+
+@bp.route("/documents/<int:doc_id>/excel-overlap", methods=["POST"])
+def excel_overlap_toggle(doc_id):
+    """Tick or untick every reservation line that falls in a month the Excel history already covers."""
+    conn = db.get_conn()
+    doc = conn.execute("SELECT status FROM documents WHERE id=?", (doc_id,)).fetchone()
+    if not doc or doc["status"] == "confirmed":
+        return redirect(url_for("documents.review", doc_id=doc_id))
+    tick = request.form.get("action") == "tick"
+    n = 0
+    for it in conn.execute("SELECT id, property_id, check_in, check_out, reservation_id FROM document_items WHERE document_id=? AND item_kind='reservation' AND property_id IS NOT NULL", (doc_id,)).fetchall():
+        if find_duplicate_reservation(conn, it["property_id"], {"reservation_id": it["reservation_id"], "check_in": it["check_in"], "check_out": it["check_out"]}):
+            continue
+        if ingest.excel_overlap(conn, it["property_id"], it["check_in"]):
+            conn.execute("UPDATE document_items SET include=? WHERE id=?", (1 if tick else 0, it["id"]))
+            n += 1
+    conn.commit()
+    flash(f"\u2713 {n} reservation{'s' if n != 1 else ''} in months Excel already covers {'ticked: they will be ADDED on top of the Excel figures' if tick else 'unticked'}.", "success")
     return redirect(url_for("documents.review", doc_id=doc_id))

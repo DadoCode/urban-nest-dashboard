@@ -9,7 +9,7 @@
     <div class="tile"><div class="label" title="{{ METRIC_INFO.adr }}">ADR</div><div class="value">{{ adr|money }}</div></div>
   </div>
 
-  <p class="note" style="margin-top:var(--s3)">Reservations come from the booking statements you upload. <a href="{{ url_for('documents.index', property=prop.id, type='booking_statement') }}#upload">Upload a statement</a> and they replace the Excel-imported figures for those months.</p>
+  <p class="note" style="margin-top:var(--s3)">Reservations come from the booking statements you upload. <a href="{{ url_for('documents.index', property=prop.id, type='booking_statement') }}#upload">Upload a statement</a> and they are added to the figures already here (your Excel history is never replaced).</p>
 
   {% call section("Reservations", (total_rows ~ ' in this view') if total_rows else None) %}
     {# Filters only appear when there's something to choose between -- no

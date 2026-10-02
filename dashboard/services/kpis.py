@@ -61,23 +61,16 @@ def _prop_clause(property_id, column="property_id"):
 
 
 
-# Real reservations (uploaded from a booking statement, or entered by hand)
-# supersede the Excel import's monthly figures for that flat and month:
-# the import carries that month's income as lump booking_income entries plus a
-# synthetic "monthly-aggregate" booking row for its nights, so counting both
-# the lump and the real reservations would double the month. Derived on
-# read, nothing is deleted -- remove the reservations and the Excel figures
-# for that month come straight back.
-_REAL_RES = ("rb.status='confirmed' AND rb.reservation_id != 'monthly-aggregate' "
-             "AND rb.source IN ('upload','manual')")
-_TX_NOT_SUPERSEDED = (
-    "AND NOT (transactions.source='excel_import' AND transactions.direction='income' AND EXISTS ("
-    "SELECT 1 FROM bookings rb WHERE rb.property_id = transactions.property_id AND " + _REAL_RES +
-    " AND substr(rb.check_in,1,7) = substr(transactions.date,1,7)))")
-_BK_NOT_SUPERSEDED = (
-    "AND NOT (bookings.reservation_id='monthly-aggregate' AND EXISTS ("
-    "SELECT 1 FROM bookings rb WHERE rb.property_id = bookings.property_id AND " + _REAL_RES +
-    " AND substr(rb.check_in,1,7) = substr(bookings.check_in,1,7)))")
+# The Excel import is the permanent record of the old months and is NEVER
+# hidden or replaced: reservations and costs added later (statements, uploads,
+# hand entry) simply add to it. Overlap between an upload and what Excel
+# already holds can't be matched line by line (Excel carries one lump per
+# month), so the importer flags it at review instead -- see
+# services.ingest.excel_overlap. (These stay as empty clauses so every query
+# that interpolates them is unchanged.)
+_TX_NOT_SUPERSEDED = ""
+_BK_NOT_SUPERSEDED = ""
+
 
 def _booking_revenue(conn, clause, params, start, end):
     """Reservation income falling inside [start, end): a stay that straddles

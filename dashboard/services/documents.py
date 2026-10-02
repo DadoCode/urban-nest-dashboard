@@ -216,7 +216,9 @@ def save_upload(conn, file, doc_type, property_id, flash):
     period, period_warnings = ingest.detect_period(items, is_reservations, result.get("period_hint"))
     warnings += period_warnings
 
-    dupes, no_property_lines, ignored_lines = 0, 0, 0
+    dupes_replace = dupes_kept_excel = overlap_lines = 0
+    overlap_examples = {}
+    no_property_lines, ignored_lines = 0, 0
     for i, item in enumerate(items):
         if is_reservations:
             # a statement covers several flats -- match each reservation to its own by listing name
@@ -238,7 +240,15 @@ def save_upload(conn, file, doc_type, property_id, flash):
             ignored_lines += ignored
             no_property_lines += not item_property and not ignored
             duplicate_of = find_duplicate_reservation(conn, item_property, item)
-            dupes += bool(duplicate_of)
+            dup_default = ingest.duplicate_default(ingest.source_of(conn, "bookings", duplicate_of)) if duplicate_of else None
+            dupes_replace += dup_default == "replace"
+            dupes_kept_excel += dup_default == "exclude"
+            overlap = 0.0 if duplicate_of else ingest.excel_overlap(conn, item_property, item.get("check_in"))
+            if overlap:  # Excel already has income for this property and month: adding on top could count the stay twice
+                item["_excel_overlap"] = round(overlap, 2)
+                overlap_lines += 1
+                overlap_examples[(item_property, item["check_in"][:7])] = round(overlap, 2)
+            start_ticked = not (dup_default == "exclude" or ignored or item.get("_exclude") or overlap)
             platform = item.get("platform") or result.get("platform")
             conn.execute(
                 """INSERT INTO document_items (document_id, line_index, raw_description, date, vendor, amount,
@@ -247,7 +257,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
                        source_page, source_row)
                    VALUES (?,?,?,?,?,?,'income',?,'booking_income',0,?,?,?,'reservation',?,?,?,?,?,?,?,?,?)""",
                 (doc_id, i, item.get("description"), item.get("check_in"), platform, item.get("net"),
-                 item_property, item.get("confidence"), 0 if (duplicate_of or ignored or item.get("_exclude")) else 1, json.dumps(item),
+                 item_property, item.get("confidence"), 1 if start_ticked else 0, json.dumps(item),
                  item.get("check_in"), item.get("check_out"), item.get("reservation_id"), platform,
                  item.get("gross"), item.get("fees"), item.get("net"), _int(item.get("page")), _int(item.get("row"))),
             )
@@ -255,7 +265,9 @@ def save_upload(conn, file, doc_type, property_id, flash):
         item["possible_duplicate"] = None
         line_property = item["_property_id"] if "_property_id" in item else detected_property_id
         duplicate_of = find_duplicate(conn, line_property, item)
-        dupes += bool(duplicate_of)
+        dup_default = ingest.duplicate_default(ingest.source_of(conn, "transactions", duplicate_of)) if duplicate_of else None
+        dupes_replace += dup_default == "replace"
+        dupes_kept_excel += dup_default == "exclude"
         category = item.get("category") or "other"
         direction = "income" if category == "booking_income" else "expense"
         conn.execute(
@@ -265,7 +277,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (doc_id, i, item.get("description"), item.get("date"), item.get("vendor"), item.get("amount"),
              direction, line_property, category, 1 if category == "furniture" else 0, item.get("confidence"),
-             duplicate_of, json.dumps(item), _int(item.get("page")), _int(item.get("row")), 0 if item.get("_exclude") else 1),
+             duplicate_of, json.dumps(item), _int(item.get("page")), _int(item.get("row")), 0 if (item.get("_exclude") or dup_default == "exclude") else 1),
         )
     if ignored_lines:
         warnings.append({"code": "listings_ignored", "level": "info",
@@ -312,9 +324,17 @@ def save_upload(conn, file, doc_type, property_id, flash):
         warnings.append({"code": "duplicate_content", "level": "warn",
                          "message": f"Possible duplicate: \u201c{similar['filename']}\u201d (uploaded {similar['uploaded_at'][:10]}) is the same kind of document for the same property and period with the same number of lines and total.",
                          "document_id": similar["id"]})
-    if dupes:
+    noun_dup = "reservation" if is_reservations else "line"
+    if dupes_replace:
         warnings.append({"code": "duplicate_rows", "level": "warn",
-                         "message": f"{dupes} {'reservation' if is_reservations else 'line'}{'s' if dupes != 1 else ''} look like they're already on file. Decide on each before confirming."})
+                         "message": f"{dupes_replace} {noun_dup}{'s' if dupes_replace != 1 else ''} already exist from an earlier upload and will REPLACE that earlier version when you confirm. Change a line to \u201cKeep both\u201d if it is genuinely separate."})
+    if dupes_kept_excel:
+        warnings.append({"code": "duplicate_excel", "level": "info",
+                         "message": f"{dupes_kept_excel} {noun_dup}{'s' if dupes_kept_excel != 1 else ''} match records from your Excel history. Excel is kept untouched, so these are left out (unticked)."})
+    if overlap_lines:
+        shown = "; ".join(f"{names_all.get(p, p)} {ingest.MONTH_ABBR[int(ym[5:])]} {ym[:4]} (Excel £{amt:,.0f})" for (p, ym), amt in list(overlap_examples.items())[:3])
+        warnings.append({"code": "excel_overlap", "level": "warn",
+                         "message": f"{overlap_lines} reservation{'s' if overlap_lines != 1 else ''} fall in months where your Excel history already has income ({shown}{'…' if len(overlap_examples) > 3 else ''}). Excel is kept as it is, and it can't be matched stay by stay, so ticking these ADDS them on top and may count a stay twice. They start unticked; tick the ones that are genuinely new."})
 
     detection = {"property": prop_info, "period": period, "warnings": warnings,
                  "method": "spreadsheet parser" if ext in SPREADSHEET_EXTS else "AI extraction",

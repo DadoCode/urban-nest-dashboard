@@ -125,14 +125,14 @@ tx = q("SELECT id FROM transactions WHERE document_id=? LIMIT 1", d1["id"])[0]["
 drawer = client.get(f"/expenses/transactions/{tx}").get_data(as_text=True)
 check("transaction drawer traces back to the source document", "march.csv" in drawer and "Cleaning invoice" in drawer and "Mar 2026" in drawer and "Confirmed" in drawer)
 
-n_before = q("SELECT COUNT(*) n FROM transactions")[0]["n"]
-r = confirm(d2["id"])
-check("duplicate document cannot silently double the ledger", q("SELECT COUNT(*) n FROM transactions")[0]["n"] == n_before)
 page2 = client.get(f"/documents/{d2['id']}/review").get_data(as_text=True)
-check("its lines are flagged Possible duplicate (live check)", page2.count("Possible duplicate") >= 2)
-decide = [(f"dup_{it['id']}", "exclude") for it in q("SELECT id FROM document_items WHERE document_id=?", d2["id"])]
-confirm(d2["id"], decide)
-check("after excluding the duplicates nothing new is added", q("SELECT COUNT(*) n FROM transactions")[0]["n"] == n_before)
+check("its lines are flagged Possible duplicate (live check), with 'Replace the earlier one' as the default", page2.count("Possible duplicate") >= 2 and page2.count('value="replace" checked') == 2, (page2.count("Possible duplicate"), page2.count('value="replace" checked')))
+n_before = q("SELECT COUNT(*) n FROM transactions")[0]["n"]
+confirm(d2["id"])
+check("confirming the twin REPLACES the earlier rows -- the ledger is not doubled", q("SELECT COUNT(*) n FROM transactions")[0]["n"] == n_before)
+check("the replaced rows now belong to the new document", q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", d2["id"])[0]["n"] == 2 and q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", d1["id"])[0]["n"] == 0)
+check("each replacement is written to the audit log", len(q("SELECT 1 FROM audit_log WHERE action='replace' AND entity_type='transaction'")) == 2)
+check("the trail says some lines replaced an earlier version", any("replaced" in (e["summary"] or "") for e in q("SELECT summary FROM document_events WHERE document_id=? AND event='confirmed'", d2["id"])))
 
 # ---------------------------------------------------------------- uploaded twice BEFORE confirming either
 CSV_B = "Date,Vendor,Description,Amount\n2026-04-02,FixIt,Repair,60.00\n"
@@ -200,9 +200,14 @@ check("manual entry is recorded in the trail", any("by hand" in (e["summary"] or
 upload("scan3.png", b"\x89PNG\r\n\x1a\n" + b"2" * 40, "other", "alpha-house")
 dm2 = last_doc()
 client.post(f"/documents/{dm2['id']}/confirm", data=MultiDict(manual))
-check("manual duplicate is blocked unless explicitly allowed", q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", dm2["id"])[0]["n"] == 0)
-client.post(f"/documents/{dm2['id']}/confirm", data=MultiDict(manual + [("allow_dups", "1")]))
-check("'Add even if they look like duplicates' lets it through", q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", dm2["id"])[0]["n"] == 1)
+n_manual = q("SELECT COUNT(*) n FROM transactions")[0]["n"]
+client.post(f"/documents/{dm2['id']}/confirm", data=MultiDict(manual))
+check("manual duplicate REPLACES the earlier manual entry instead of adding a second", q("SELECT COUNT(*) n FROM transactions")[0]["n"] == n_manual
+      and q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", dm2["id"])[0]["n"] == 1 and q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", dm["id"])[0]["n"] == 0)
+upload("scan4.png", b"\x89PNG\r\n\x1a\n" + b"3" * 40, "other", "alpha-house")
+dm3 = last_doc()
+client.post(f"/documents/{dm3['id']}/confirm", data=MultiDict(manual + [("allow_dups", "1")]))
+check("'Add even if they look like duplicates' keeps both", q("SELECT COUNT(*) n FROM transactions")[0]["n"] == n_manual + 1 and q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", dm3["id"])[0]["n"] == 1)
 
 # ---------------------------------------------------------------- edits are traced
 upload("edit.csv", "Date,Vendor,Description,Amount\n2026-07-01,EditCo,Item,100\n", "other", "alpha-house")
@@ -563,6 +568,62 @@ upload("mystery2.csv", MYST.replace("M1", "M2"), "booking_statement", "")
 check("...and the listing is asked about again", items_of(last_doc())[0]["property_id"] is None)
 client.post("/properties/alpha-house/aliases", data={"label": "ab"})
 check("settings: a too-short platform name is refused", not q("SELECT 1 FROM property_aliases WHERE alias='ab'"))
+
+# ---------------------------------------------------------------- Excel history is permanent; uploads add; duplicates replace
+import services.kpis as kpis  # noqa: E402
+conn = db.get_conn()
+conn.execute("INSERT INTO transactions (property_id,date,vendor,description,amount,direction,category,source) VALUES ('alpha-house','2026-08-01','Excel lump','August income',1000,'income','booking_income','excel_import')")
+conn.execute("INSERT INTO bookings (property_id,platform,reservation_id,check_in,check_out,gross_revenue,net_revenue,status,source) VALUES ('alpha-house','airbnb','monthly-aggregate','2026-08-01','2026-08-11',1000,0,'confirmed','excel_import')")
+conn.execute("INSERT INTO transactions (property_id,date,vendor,description,amount,direction,category,source) VALUES ('alpha-house','2026-08-15','Excel cost','Boiler service',77.5,'expense','maintenance','excel_import')")
+conn.commit(); conn.close()
+AUG = ("Confirmation Code,Start date,End date,Nights,Listing,Gross earnings,Service fee,Type\n"
+       "AUG1,08/28/2026,08/31/2026,3,Alpha Flat,300,50,Reservation\nSEP1,09/05/2026,09/08/2026,3,Alpha Flat,600,100,Reservation\n")
+upload("aug.csv", AUG, "booking_statement", "alpha-house"); da = last_doc(); ra = items_of(da)
+check("excel overlap: a stay in a month Excel already covers starts unticked and is flagged; a stay in a fresh month is ticked",
+      [(r["reservation_id"], r["include"]) for r in ra] == [("AUG1", 0), ("SEP1", 1)] and "excel_overlap" in warn_codes(da), [(r["reservation_id"], r["include"]) for r in ra])
+page = client.get(f"/documents/{da['id']}/review").get_data(as_text=True)
+check("excel overlap: the review explains it and offers a one-click tick", "already covers" in page and "Tick them anyway" in page and "ticking adds on top" in page)
+client.post(f"/documents/{da['id']}/excel-overlap", data={"action": "tick"})
+check("excel overlap: 'tick them anyway' ticks the overlapping stay", [r["include"] for r in items_of(da)] == [1, 1])
+s_, e_ = kpis.month_bounds(2026, 8)
+rev_before = kpis.revenue(conn := db.get_conn(), "alpha-house", s_, e_); conn.close()
+form = []
+for it in items_of(da):
+    form += [("item_id", it["id"]), ("include", it["id"]), ("property_id", "alpha-house"), ("platform", "airbnb"), ("reservation_id", it["reservation_id"]), ("check_in", it["check_in"]), ("check_out", it["check_out"]), ("gross", it["gross_revenue"]), ("fees", it["platform_fees"]), ("net", it["net_revenue"])]
+client.post(f"/documents/{da['id']}/confirm", data=MultiDict(form))
+conn = db.get_conn(); rev_after = kpis.revenue(conn, "alpha-house", s_, e_)
+check("Excel is never switched off: August = the Excel lump PLUS the new reservation (additive)", abs(rev_before - 1000) < 0.01 and abs(rev_after - (1000 + 250)) < 0.01, (rev_before, rev_after))
+check("Excel rows are untouched by the import", conn.execute("SELECT COUNT(*) FROM transactions WHERE source='excel_import' AND property_id='alpha-house'").fetchone()[0] == 2 and conn.execute("SELECT COUNT(*) FROM bookings WHERE source='excel_import' AND property_id='alpha-house'").fetchone()[0] == 1)
+nights_after = kpis.booked_nights(conn, "alpha-house", s_, e_); conn.close()
+check("Excel's nights are kept too (aggregate 10 nights + 3 from the stay)", nights_after == 13, nights_after)
+
+# a corrected re-upload of the same reservation replaces it
+V2 = AUG.replace("SEP1,09/05/2026,09/08/2026,3,Alpha Flat,600,100", "SEP1,09/05/2026,09/08/2026,3,Alpha Flat,700,100")
+upload("aug-v2.csv", V2, "booking_statement", "alpha-house"); dv = last_doc(); rv = items_of(dv)
+check("replace: both stays are recognised as already uploaded and default to 'replace'", all(r["include"] == 1 for r in rv) and "duplicate_rows" in warn_codes(dv))
+n_bk = q("SELECT COUNT(*) n FROM bookings")[0]["n"]
+form = []
+for it in rv:
+    form += [("item_id", it["id"]), ("include", it["id"]), ("property_id", "alpha-house"), ("platform", "airbnb"), ("reservation_id", it["reservation_id"]), ("check_in", it["check_in"]), ("check_out", it["check_out"]), ("gross", it["gross_revenue"]), ("fees", it["platform_fees"]), ("net", it["net_revenue"])]
+client.post(f"/documents/{dv['id']}/confirm", data=MultiDict(form))
+sep = q("SELECT net_revenue, document_id FROM bookings WHERE reservation_id='SEP1'")
+check("replace: the reservation count is unchanged and the new version's numbers are in place", q("SELECT COUNT(*) n FROM bookings")[0]["n"] == n_bk and len(sep) == 1 and abs(sep[0]["net_revenue"] - 600.0) < 0.01 and sep[0]["document_id"] == dv["id"], [dict(r) for r in sep])
+sep_id = q("SELECT id FROM bookings WHERE reservation_id='SEP1'")[0]["id"]
+aud = [(r["action"], r["field"], r["old_value"], r["new_value"]) for r in q("SELECT action, field, old_value, new_value FROM audit_log WHERE entity_type='booking' AND entity_id=?", sep_id)]
+check("replace: the old values are kept in the audit log (gross 600 -> 700, net 500 -> 600, old document -> new)",
+      ("edit", "gross_revenue", "600.0", "700.0") in aud and ("edit", "net_revenue", "500.0", "600.0") in aud and any(a[0] == "replace" for a in aud), aud)
+
+# a line that duplicates an Excel cost is left out; Excel is never overwritten
+XL = "Date,Vendor,Description,Amount\n2026-08-15,Excel cost,Boiler service,77.50\n2026-08-16,NewCo,New thing,12.00\n"
+upload("xl-dup.csv", XL, "other", "alpha-house"); dx_ = last_doc(); rx_ = items_of(dx_)
+check("a line identical to an Excel cost starts unticked ('Excel is kept'); a new line is ticked", [r["include"] for r in rx_] == [0, 1] and "duplicate_excel" in warn_codes(dx_), [r["include"] for r in rx_])
+page = client.get(f"/documents/{dx_['id']}/review").get_data(as_text=True)
+check("...and the review says it matches the Excel history, with no 'replace' option", "from your Excel history" in page and page.count('value="replace"') == 0)
+confirm(dx_["id"])
+xl = q("SELECT source, document_id, amount FROM transactions WHERE vendor='Excel cost'")
+check("Excel's own row is untouched after confirming; only the new line was added", len(xl) == 1 and xl[0]["source"] == "excel_import" and xl[0]["document_id"] is None and q("SELECT COUNT(*) n FROM transactions WHERE document_id=?", dx_["id"])[0]["n"] == 1)
+client.post(f"/documents/{dx_['id']}/undo")
+check("undoing an import never touches the Excel history", q("SELECT COUNT(*) n FROM transactions WHERE source='excel_import' AND property_id='alpha-house'")[0]["n"] == 2)
 
 # ---------------------------------------------------------------- demo mode (hosted preview)
 os.environ["UN_DEMO_MODE"] = "1"

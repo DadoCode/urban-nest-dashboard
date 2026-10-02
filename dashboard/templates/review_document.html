@@ -53,8 +53,9 @@
 
 {% macro dup_box(v, it) %}
   {% if v.dup %}
+    {% set chosen = it.dup_decision or v.dup.default %}
     <div class="rv-dup">
-      <div class="rv-dup-head"><strong>Possible duplicate</strong> — a similar {{ 'reservation' if v.dup.kind == 'reservation' else 'transaction' }} is already on file</div>
+      <div class="rv-dup-head"><strong>Possible duplicate</strong> — a similar {{ 'reservation' if v.dup.kind == 'reservation' else 'transaction' }} is already on file{% if v.dup.protected %} <span class="note">(from your Excel history, which is kept untouched)</span>{% endif %}</div>
       <div class="rv-dup-cmp">
         <div><span class="note">This line</span><br>{% if it.item_kind == 'reservation' %}{{ it.platform or 'Reservation' }} · {{ it.check_in }}–{{ it.check_out }} · {{ (it.net_revenue or 0)|money2 }}{% else %}{{ it.vendor or it.description or 'Line' }} · {{ (it.amount or 0)|money2 }} · {{ it.date or '' }}{% endif %}</div>
         <div><span class="note">Already on file{% if v.dup.property %} ({{ v.dup.property }}){% endif %}</span><br>{{ v.dup.text }}</div>
@@ -65,8 +66,11 @@
         {% else %}
           <a href="{{ cx('properties.bookings', property_id=v.dup.property_id) }}" target="_blank">View existing</a>
         {% endif %}
-        <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="keep" {{ 'checked' if it.dup_decision == 'keep' }}> Keep both</label>
-        <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="exclude" {{ 'checked' if it.dup_decision == 'exclude' }}> Exclude new</label>
+        {% if not v.dup.protected %}
+          <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="replace" {{ 'checked' if chosen == 'replace' }}> Replace the earlier one</label>
+        {% endif %}
+        <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="keep" {{ 'checked' if chosen == 'keep' }}> {{ 'Add anyway' if v.dup.protected else 'Keep both' }}</label>
+        <label><input type="radio" class="dup-choice" name="dup_{{ it.id }}" value="exclude" {{ 'checked' if chosen == 'exclude' }}> {{ 'Leave out (Excel is kept)' if v.dup.protected else 'Exclude new' }}</label>
       </div>
     </div>
   {% endif %}
@@ -113,6 +117,17 @@
           <button type="submit" class="secondary">Apply</button>
         </form>
       {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if overlap and overlap.lines and not confirmed %}
+    <div class="card" style="margin-bottom:var(--s3)">
+      <div style="font-weight:600">{{ overlap.lines }} reservation{{ 's' if overlap.lines != 1 }} fall in months your Excel history already covers</div>
+      <p class="note" style="margin:2px 0 var(--s3)">Excel is old data and is kept exactly as it is. It can't be matched stay by stay, so ticking these <strong>adds them on top</strong> of the Excel figures and may count a stay twice. {{ overlap.ticked }} of them {{ 'is' if overlap.ticked == 1 else 'are' }} currently ticked.</p>
+      <form method="post" action="{{ url_for('documents.excel_overlap_toggle', doc_id=doc.id) }}" style="margin:0">
+        {% if overlap.ticked %}<input type="hidden" name="action" value="untick"><button type="submit" class="secondary">Untick them</button>
+        {% else %}<input type="hidden" name="action" value="tick"><button type="submit" class="secondary">Tick them anyway (add on top)</button>{% endif %}
+      </form>
     </div>
   {% endif %}
 
@@ -225,6 +240,7 @@
               <div class="rv-foot">
                 <span class="rv-flags"></span>
                 {% if v.orig.note %}<span class="note">{{ v.orig.note }}</span>{% endif %}
+                {% if v.excel_overlap %}<span class="note" style="color:var(--warn)">Excel already has £{{ '{:,.0f}'.format(v.excel_overlap) }} income for this property in {{ it.check_in[:7] }} — ticking adds on top</span>{% endif %}
                 {% if v.orig.status %}<span class="note">Source status: <strong>{{ v.orig.status }}</strong>{% if v.orig.status_note %} \u2014 left unticked{% endif %}</span>{% endif %}
                 {% if v.orig.po_note or v.orig.order_id %}<span class="note">{% if v.orig.order_id %}Order {{ v.orig.order_id }}{% endif %}{% if v.orig.po_note %} · {{ v.orig.po_note }}{% endif %}</span>{% endif %}
                 <span class="rv-foot-right">

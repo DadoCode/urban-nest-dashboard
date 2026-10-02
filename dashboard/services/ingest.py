@@ -265,3 +265,39 @@ def alias_remember(conn, text, property_id, ignore=False):
     if key and (property_id or ignore):
         conn.execute("INSERT OR REPLACE INTO property_aliases (alias, label, property_id, ignore) VALUES (?,?,?,?)",
                      (key, " ".join((text or "").split())[:200], None if ignore else property_id, 1 if ignore else 0))
+
+
+# ---- old data is permanent; new data adds to it ---------------------------
+
+# Records from these sources are the permanent history: an upload never
+# replaces, edits or removes them (a line that duplicates one is left out).
+PROTECTED_SOURCES = ("excel_import",)
+
+
+def source_of(conn, table, record_id):
+    """The 'source' of an existing transaction/booking, or None."""
+    if table not in ("transactions", "bookings") or not record_id:
+        return None
+    row = conn.execute(f"SELECT source FROM {table} WHERE id=?", (record_id,)).fetchone()
+    return row["source"] if row else None
+
+
+def duplicate_default(source):
+    """What a new line that duplicates an existing record does unless told otherwise:
+    replace an earlier upload; leave alone anything from the Excel history."""
+    return "exclude" if source in PROTECTED_SOURCES else "replace"
+
+
+def excel_overlap(conn, property_id, date_text):
+    """Income the Excel history already holds for this property in the month of
+    `date_text`, or 0. A stay in such a month may already be inside that lump, so
+    adding it on top could count it twice -- the review flags it."""
+    ym = _ym(date_text)
+    if not (property_id and ym):
+        return 0.0
+    y, m = map(int, ym.split("-"))
+    s, e = kpis.month_bounds(y, m)
+    return float(conn.execute(
+        """SELECT COALESCE(SUM(amount),0) FROM transactions
+           WHERE property_id=? AND source IN ('excel_import') AND direction='income' AND date>=? AND date<?""",
+        (property_id, s, e)).fetchone()[0])
