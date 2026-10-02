@@ -1,24 +1,33 @@
 import datetime
 import json
+from pathlib import Path
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, url_for
 
 import db
+import services.ingest as ingest
+from services import runtime
 from services.audit import record
 from services.common import CATEGORIES, get_properties, get_property
 import services.kpis as kpis
 from services.common import MONTH_NAMES
 import services.review as review_helpers
-from services.documents import find_duplicate_reservation, save_upload
+from services.documents import find_duplicate, find_duplicate_reservation, save_upload
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("documents", __name__)
 
-DOC_TYPE_LABELS = {
-    "amazon_order": "Amazon / Temu order", "cleaning_invoice": "Cleaning invoice",
-    "booking_statement": "Booking / Airbnb statement", "bank_statement": "Bank statement",
-    "utility_bill": "Utility bill", "other": "Other",
-}
+DOC_TYPE_LABELS = ingest.DOC_TYPE_NAMES
+
+
+def _period_text(doc):
+    """'Feb 2026' / 'Jan–Mar 2026' for a document, or None when undetected."""
+    period = ingest.detection_of(doc).get("period")
+    if period:
+        return ingest.period_label(period)
+    if doc["detected_year"] and doc["detected_month"]:
+        return f"{MONTH_NAMES[doc['detected_month']][:3]} {doc['detected_year']}"
+    return None
 
 
 @bp.route("/documents/<int:doc_id>/drawer")
@@ -29,10 +38,11 @@ def drawer(doc_id):
         return "<p class='note'>Document not found.</p>", 404
     prop = get_property(conn, doc["property_id"])
     stats = conn.execute("SELECT COUNT(*) n, COALESCE(SUM(amount),0) amt, SUM(include) inc FROM document_items WHERE document_id=?", (doc_id,)).fetchone()
+    label, kind = ingest.status_display(doc["status"])
     return render_template(
-        "partials/document_drawer.html", doc=doc, prop=prop, stats=stats,
+        "partials/document_drawer.html", doc=doc, prop=prop, stats=stats, status_label=label, status_kind=kind,
         type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
-        period=f"{MONTH_NAMES[doc['detected_month']]} {doc['detected_year']}" if doc["detected_year"] and doc["detected_month"] else None,
+        period=_period_text(doc), warnings=ingest.detection_of(doc).get("warnings", []),
     )
 
 
@@ -41,7 +51,19 @@ def file(doc_id):
     doc = db.get_conn().execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if not doc:
         abort(404)
+    if not Path(doc["stored_path"]).is_file():
+        return "The original file is no longer on disk (it may have been moved or deleted).", 404
     return send_file(doc["stored_path"], download_name=doc["filename"])
+
+
+# Sort keys for the Documents list: stored as "<column>_<direction>".
+_DOC_SORTS = {
+    "uploaded_desc": "d.uploaded_at DESC, d.id DESC",
+    "uploaded_asc": "d.uploaded_at ASC, d.id ASC",
+    # documents with no detected period always sink to the bottom, either way
+    "period_desc": "(d.detected_year IS NULL), d.detected_year DESC, d.detected_month DESC, d.uploaded_at DESC",
+    "period_asc": "(d.detected_year IS NULL), d.detected_year ASC, d.detected_month ASC, d.uploaded_at DESC",
+}
 
 
 @bp.route("/documents")
@@ -51,37 +73,37 @@ def index():
     prefill_type = request.args.get("type") if request.args.get("type") in DOC_TYPE_LABELS else ""
     f_property = request.args.get("d_property") or prefill_property
     f_type = request.args.get("d_type") or ""
-    counts = conn.execute(
-        """SELECT
-             SUM(CASE WHEN status IN ('pending','extracted') THEN 1 ELSE 0 END) needs_review,
-             SUM(CASE WHEN status='confirmed' THEN 1 ELSE 0 END) complete,
-             SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,
-             COUNT(*) total
-           FROM documents"""
-    ).fetchone()
+    f_period = request.args.get("d_period") or ""
+    sort = request.args.get("d_sort") if request.args.get("d_sort") in _DOC_SORTS else "uploaded_desc"
+
+    by_status = {r["status"]: r["n"] for r in conn.execute("SELECT status, COUNT(*) n FROM documents GROUP BY status")}
+    counts = {key: sum(by_status.get(st, 0) for st in stored) for key, stored in ingest.STATUS_FILTERS.items()}
+    total = sum(by_status.values())
+
     if "d_status" in request.args:
-        f_status = request.args.get("d_status") or ""
+        f_status = ingest.STATUS_FILTER_ALIASES.get(request.args.get("d_status") or "", request.args.get("d_status") or "")
     else:
         # arriving scoped to a property (e.g. from a "missing source" upload) shows all of its documents
-        f_status = "review" if counts["needs_review"] and not prefill_property else ""
+        f_status = "review" if counts["review"] and not prefill_property else ""
+    if f_status not in ingest.STATUS_FILTERS:
+        f_status = ""
     f_q = (request.args.get("d_q") or "").strip()
 
     clauses, params = ["1=1"], []
     if f_property:
-        clauses.append("property_id=?"); params.append(f_property)
+        clauses.append("d.property_id=?"); params.append(f_property)
     if f_type:
-        clauses.append("doc_type=?"); params.append(f_type)
-    if f_status == "review":
-        clauses.append("status IN ('pending','extracted')")
-    elif f_status == "complete":
-        clauses.append("status='confirmed'")
-    elif f_status:
-        clauses.append("status=?"); params.append(f_status)
+        clauses.append("d.doc_type=?"); params.append(f_type)
+    if f_status:
+        stored = ingest.STATUS_FILTERS[f_status]
+        clauses.append(f"d.status IN ({','.join('?' * len(stored))})"); params += list(stored)
+    if f_period and len(f_period) == 7 and f_period[:4].isdigit() and f_period[5:].isdigit():
+        clauses.append("d.detected_year=? AND d.detected_month=?"); params += [int(f_period[:4]), int(f_period[5:])]
     if f_q:
-        clauses.append("filename LIKE ?"); params.append(f"%{f_q}%")
+        clauses.append("d.filename LIKE ?"); params.append(f"%{f_q}%")
 
     docs = conn.execute(
-        f"SELECT * FROM documents WHERE {' AND '.join(clauses)} ORDER BY uploaded_at DESC LIMIT 200", params
+        f"SELECT d.* FROM documents d WHERE {' AND '.join(clauses)} ORDER BY {_DOC_SORTS[sort]} LIMIT 200", params
     ).fetchall()
     property_names = {p["id"]: p["name"] for p in get_properties(conn)}
     rows = []
@@ -90,18 +112,37 @@ def index():
             "SELECT COUNT(*) n, COALESCE(SUM(amount),0) amt FROM document_items WHERE document_id=? AND include=1",
             (d["id"],),
         ).fetchone()
+        label, kind = ingest.status_display(d["status"])
         rows.append({**dict(d), "property_name": property_names.get(d["property_id"], "Unassigned"),
                      "doc_type_label": DOC_TYPE_LABELS.get(d["doc_type"], d["doc_type"] or "—"),
                      "item_count": item_stats["n"], "item_amount": item_stats["amt"],
-                     "period": f"{MONTH_NAMES[d['detected_month']][:3]} {d['detected_year']}" if d["detected_year"] and d["detected_month"] else "—"})
+                     "period": _period_text(d) or "—", "status_label": label, "status_kind": kind,
+                     "possible_duplicate": bool(d["duplicate_of_document"])})
+
+    periods = [{"value": f"{r['detected_year']}-{r['detected_month']:02d}", "label": f"{MONTH_NAMES[r['detected_month']][:3]} {r['detected_year']}"}
+               for r in conn.execute("SELECT DISTINCT detected_year, detected_month FROM documents WHERE detected_year IS NOT NULL AND detected_month IS NOT NULL ORDER BY 1 DESC, 2 DESC")]
+
+    def sort_href(column):
+        """Clicking a header sorts by it; clicking the active one flips direction."""
+        cur_col, cur_dir = sort.rsplit("_", 1)
+        direction = ("asc" if cur_dir == "desc" else "desc") if cur_col == column else "desc"
+        args = {"d_status": f_status, "d_property": f_property or None, "d_type": f_type or None,
+                "d_period": f_period or None, "d_q": f_q or None, "d_sort": f"{column}_{direction}"}
+        return url_for("documents.index", **{k: v for k, v in args.items() if v is not None})
 
     return render_template(
         "documents.html", active="documents", all_properties=get_properties(conn), active_property=None,
-        docs=rows, counts=counts, doc_types=DOC_TYPE_LABELS,
+        docs=rows, counts=counts, total=total, doc_types=DOC_TYPE_LABELS, status_labels=ingest.STATUS_FILTER_LABELS,
+        periods=periods, sort=sort, sort_href=sort_href, extraction_available=extraction_available(),
         prefill_property=prefill_property, prefill_type=prefill_type,
         prefill_property_name=property_names.get(prefill_property) if prefill_property else None,
-        f_property=f_property, f_type=f_type, f_status=f_status, f_q=f_q,
+        f_property=f_property, f_type=f_type, f_status=f_status, f_period=f_period, f_q=f_q,
     )
+
+
+def extraction_available():
+    import services.extraction as extraction
+    return extraction.available()
 
 
 @bp.route("/documents/upload", methods=["POST"])
@@ -117,7 +158,7 @@ def upload():
     last_doc_id = None
     for file in files:
         last_doc_id = save_upload(conn, file, doc_type, property_id, flash)
-    if len(files) == 1:
+    if len(files) == 1 and last_doc_id:
         return redirect(url_for("documents.review", doc_id=last_doc_id))
     return redirect(url_for("documents.index"))
 
@@ -130,7 +171,69 @@ def upload_property(property_id):
         flash("Choose a file before uploading.", "warning")
         return redirect(url_for("properties.detail", property_id=property_id))
     doc_id = save_upload(conn, file, request.form.get("doc_type", "other"), property_id, flash)
+    if not doc_id:
+        return redirect(url_for("properties.documents_tab", property_id=property_id))
     return redirect(url_for("documents.review", doc_id=doc_id))
+
+
+def _live_duplicate(conn, row):
+    """What a transaction line duplicates in the ledger *right now* -- the
+    stored duplicate_of is only a snapshot from extraction time and goes
+    stale if a twin document is confirmed in between."""
+    return find_duplicate(conn, row["property_id"], {"amount": row["amount"], "date": row["date"],
+                                                     "vendor": row["vendor"], "description": row["raw_description"]})
+
+
+def _refresh_duplicates(conn, doc_id):
+    """Persist current duplicate flags on an unconfirmed document's lines
+    (so uploading the same file twice, then confirming the first, flags the second)."""
+    for it in conn.execute("SELECT * FROM document_items WHERE document_id=? AND item_kind='transaction'", (doc_id,)).fetchall():
+        live = _live_duplicate(conn, it)
+        if live != it["duplicate_of"]:
+            conn.execute("UPDATE document_items SET duplicate_of=? WHERE id=?", (live, it["id"]))
+
+
+def _size_text(n):
+    if not n:
+        return None
+    return f"{n / 1024 / 1024:.1f} MB" if n >= 1024 * 1024 else f"{max(n / 1024, 1):.0f} KB"
+
+
+def _summary_strip(doc, prop, items, detection, names):
+    """Everything a reviewer needs to judge the parse before confirming:
+    what the file was taken to be, which property/period was chosen and
+    how, what was read, and how sure the parser was."""
+    res = bool(items and items[0]["item_kind"] == "reservation")
+    amount_of = (lambda i: i["net_revenue"]) if res else (lambda i: i["amount"])
+    vals = [(i, abs(amount_of(i) or 0)) for i in items]
+    extracted_total = detection.get("total")
+    if extracted_total is None:
+        extracted_total = round(sum(v for _, v in vals), 2)
+    included_total = round(sum(v for i, v in vals if i["include"]), 2)
+    income = round(sum(v for i, v in vals if not res and i["direction"] == "income"), 2)
+    expense = round(sum(v for i, v in vals if not res and i["direction"] != "income"), 2)
+    prop_info = detection.get("property") or {}
+    confs = [i["confidence"] for i in items if i["confidence"] is not None]
+    low = sum(1 for c in confs if c < 0.7)
+    if prop:
+        prop_how = prop_info.get("source") or "selected"
+    elif prop_info.get("candidates"):
+        prop_how = "unsure: " + " or ".join(c["name"] for c in prop_info["candidates"][:2])
+    else:
+        prop_how = "not detected"
+    multi_props = len({i["property_id"] for i in items if i["property_id"]}) if res else 0
+    return {
+        "filename": doc["filename"], "size": _size_text(doc["file_size"]), "uploaded": doc["uploaded_at"],
+        "doc_type": DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
+        "property": prop["name"] if prop else ("%d properties" % multi_props if multi_props > 1 else None),
+        "property_how": prop_how if not (multi_props > 1 and not prop) else "matched line by line",
+        "period": _period_text(doc), "period_how": (detection.get("period") or {}).get("source"),
+        "rows": len(items), "included": sum(1 for i in items if i["include"]), "noun": "reservation" if res else "line",
+        "extracted_total": extracted_total, "included_total": included_total, "income": income, "expense": expense,
+        "edited_total": abs(included_total - extracted_total) > 0.004 and doc["status"] != "confirmed",
+        "confidence": round(sum(confs) / len(confs) * 100) if confs else None, "low_confidence": low,
+        "method": detection.get("method"),
+    }
 
 
 @bp.route("/documents/<int:doc_id>/review")
@@ -153,12 +256,15 @@ def review(doc_id):
     views = []
     for it in items:
         orig = review_helpers.original_of(it)
-        dup = None if confirmed else review_helpers.duplicate_info(conn, it, find_duplicate_reservation)
+        row = it
+        if not confirmed and it["item_kind"] == "transaction":
+            row = {**dict(it), "duplicate_of": _live_duplicate(conn, it)}
+        dup = None if confirmed else review_helpers.duplicate_info(conn, row, find_duplicate_reservation)
         include = bool(it["include"])
         if dup:  # a duplicate is undecided until the reviewer picks; only "exclude" leaves it out
             include = it["dup_decision"] != "exclude"
         views.append({
-            "row": it, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it),
+            "row": row, "dup": dup, "include": include, "changed": review_helpers.changed_fields(it),
             "orig": {"vendor": orig.get("vendor"), "description": orig.get("description"), "amount": orig.get("amount"),
                      "category": orig.get("category"), "date": orig.get("date"),
                      "check_in": orig.get("check_in"), "check_out": orig.get("check_out"), "net": orig.get("net"),
@@ -166,9 +272,15 @@ def review(doc_id):
         })
 
     summary = None
+    created = {"transactions": [], "bookings": []}
     if confirmed:
-        added = conn.execute("SELECT COUNT(*) FROM transactions WHERE document_id=?", (doc_id,)).fetchone()[0] \
-            + conn.execute("SELECT COUNT(*) FROM bookings WHERE document_id=?", (doc_id,)).fetchone()[0]
+        created["transactions"] = conn.execute(
+            """SELECT t.id, t.date, t.vendor, t.description, t.amount, t.category, p.name AS property_name
+               FROM transactions t JOIN properties p ON p.id=t.property_id WHERE t.document_id=? ORDER BY t.date, t.id""", (doc_id,)).fetchall()
+        created["bookings"] = conn.execute(
+            """SELECT b.id, b.check_in, b.check_out, b.platform, b.net_revenue, p.name AS property_name
+               FROM bookings b JOIN properties p ON p.id=b.property_id WHERE b.document_id=? ORDER BY b.check_in, b.id""", (doc_id,)).fetchall()
+        added = len(created["transactions"]) + len(created["bookings"])
         month_src = [(v["row"]["check_in"] if v["row"]["item_kind"] == "reservation" else v["row"]["date"]) for v in views if v["row"]["include"]]
         month_src = sorted(m[:7] for m in month_src if m and len(m) >= 7)
         summary = {"month": month_src[0] if month_src else None, "added": added, "excluded": sum(1 for v in views if not v["row"]["include"]),
@@ -181,13 +293,24 @@ def review(doc_id):
     is_pdf = fname.endswith(".pdf")
     is_image = fname.endswith((".png", ".jpg", ".jpeg", ".webp"))
     preview = review_helpers.file_preview(doc["stored_path"]) if not (is_pdf or is_image) else None
+
+    detection = ingest.detection_of(doc)
+    names = {p["id"]: p["name"] for p in get_properties(conn)}
+    events = ingest.events_for(conn, doc_id)
+    kpi_changes = next((e["detail"].get("kpi_changes") for e in reversed(events)
+                        if e["event"] == "confirmed" and e["detail"]), None)
+    dup_doc = conn.execute("SELECT id, filename, status, uploaded_at FROM documents WHERE id=?", (doc["duplicate_of_document"],)).fetchone() \
+        if doc["duplicate_of_document"] else None
     return render_template(
         "review_document.html", active="documents", all_properties=get_properties(conn),
         active_property=doc["property_id"], prop=prop, doc=doc, items=views,
         flats=get_properties(conn, include_overhead=False), year=year, month=month,
         categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image, res_mode=res_mode, confirmed=confirmed,
         summary=summary, preview=preview, focus=focus, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
-        period_label=f"{MONTH_NAMES[doc['detected_month']]} {doc['detected_year']}" if doc["detected_year"] and doc["detected_month"] else None,
+        period_label=_period_text(doc), status_label=ingest.status_display(doc["status"])[0],
+        strip=_summary_strip(doc, prop, items, detection, names), warnings=detection.get("warnings", []),
+        events=events, kpi_changes=kpi_changes, created=created, dup_doc=dup_doc,
+        extraction_available=extraction_available(),
     )
 
 
@@ -219,6 +342,48 @@ def _problem_message(problems, noun):
     return f"Nothing was added yet. Still needed before confirming: {', '.join(parts)}. Your edits are saved."
 
 
+def _names(conn):
+    return {p["id"]: p["name"] for p in get_properties(conn)}
+
+
+def _months_between(check_in, check_out):
+    """Every (year, month) a stay touches (check-out day itself excluded)."""
+    try:
+        a, b = datetime.date.fromisoformat(check_in), datetime.date.fromisoformat(check_out) - datetime.timedelta(days=1)
+    except ValueError:
+        return []
+    out, y, m = [], a.year, a.month
+    while (y, m) <= (b.year, b.month):
+        out.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def _log_edits(conn, doc_id):
+    """Record what the reviewer changed relative to what the parser read --
+    once per distinct set of edits, not on every blocked confirm attempt."""
+    detail = []
+    for it in conn.execute("SELECT * FROM document_items WHERE document_id=? ORDER BY line_index", (doc_id,)):
+        changes = review_helpers.field_changes(it)
+        if changes:
+            detail.append({"line": it["vendor"] or it["raw_description"] or f"line {it['line_index'] + 1}", "changes": changes})
+    if not detail:
+        return
+    last = conn.execute("SELECT detail FROM document_events WHERE document_id=? AND event='edited' ORDER BY id DESC LIMIT 1", (doc_id,)).fetchone()
+    if last and json.loads(last["detail"] or "null") == json.loads(json.dumps(detail)):
+        return
+    n = sum(len(d["changes"]) for d in detail)
+    ingest.log_event(conn, doc_id, "edited", f"{n} value{'s' if n != 1 else ''} changed on {len(detail)} line{'s' if len(detail) != 1 else ''}", detail)
+
+
+def _log_confirmed(conn, doc_id, noun, added, excluded, corrected, before, after, manual=False):
+    changes = ingest.kpi_changes(before, after, _names(conn))
+    parts = [f"{excluded} excluded" if excluded else "", f"{corrected} corrected" if corrected else "", "entered by hand" if manual else ""]
+    extra = ", ".join(p for p in parts if p)
+    ingest.log_event(conn, doc_id, "confirmed", f"{added} {noun}{'s' if added != 1 else ''} created" + (f" ({extra})" if extra else ""),
+                     {"added": added, "noun": noun, "excluded": excluded, "corrected": corrected, "manual": manual, "kpi_changes": changes})
+
+
 def _finish(conn, doc_id, final_property_id, added, noun, excluded, corrected):
     conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?", (final_property_id, doc_id))
     conn.commit()
@@ -237,6 +402,7 @@ def confirm(doc_id):
         flash("This document was already confirmed, so its lines are already in your records.", "info")
         return redirect(url_for("documents.review", doc_id=doc_id))
 
+    _refresh_duplicates(conn, doc_id)
     has_items = conn.execute("SELECT 1 FROM document_items WHERE document_id=? LIMIT 1", (doc_id,)).fetchone()
     included = set(request.form.getlist("include"))
 
@@ -248,22 +414,33 @@ def confirm(doc_id):
 
     # Nothing was auto-extracted -- the manual blank-row fallback, not backed by document_items.
     f = request.form
-    added, final_property_id = 0, doc["property_id"]
+    entries, dups = [], []
     for i, (pid, vendor, desc, amount_s, category, year_s, month_s) in enumerate(zip(
             f.getlist("property_id"), f.getlist("vendor"), f.getlist("description"), f.getlist("amount"),
             f.getlist("category"), f.getlist("year"), f.getlist("month"))):
         amount = _num(amount_s)
         if str(i) not in included or not amount or not pid:
             continue
-        year, month = int(year_s), int(month_s)
+        date = f"{int(year_s)}-{int(month_s):02d}-01"
+        entries.append((pid, vendor, desc, amount, category, date))
+        if find_duplicate(conn, pid, {"amount": amount, "date": date, "vendor": vendor, "description": desc}):
+            dups.append(f"{vendor or desc or 'a line'} £{amount:,.2f}")
+    if dups and not f.get("allow_dups"):
+        flash(f"Possible duplicate: {', '.join(dups)} {'is' if len(dups) == 1 else 'are'} already on file for that month. Nothing was added. "
+              "If these really are separate, tick \u201cAdd even if they look like duplicates\u201d and submit again.", "warning")
+        return redirect(url_for("documents.review", doc_id=doc_id))
+    touched = {(pid, *ingest.month_key(date)) for pid, _v, _d, _a, _c, date in entries}
+    before = ingest.kpi_snapshot(conn, touched)
+    final_property_id = doc["property_id"]
+    for pid, vendor, desc, amount, category, date in entries:
         direction = "income" if category == "booking_income" else "expense"
         conn.execute(
             """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source, document_id)
                VALUES (?,?,?,?,?,?,?,?,'upload',?)""",
-            (pid, f"{year}-{month:02d}-01", vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, doc_id))
-        added += 1
+            (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, doc_id))
         final_property_id = pid
-    _finish(conn, doc_id, final_property_id, added, "transaction", 0, 0)
+    _log_confirmed(conn, doc_id, "transaction", len(entries), 0, 0, before, ingest.kpi_snapshot(conn, touched), manual=True)
+    _finish(conn, doc_id, final_property_id, len(entries), "transaction", 0, 0)
     return redirect(url_for("documents.review", doc_id=doc_id))
 
 
@@ -307,6 +484,7 @@ def _confirm_transactions(conn, doc, doc_id, included):
         if include_row:
             ready.append((item_id, pid, vendor, desc, amount, category, capex, date, direction))
 
+    _log_edits(conn, doc_id)
     if any(problems.values()):
         conn.execute("UPDATE document_items SET reviewed=0 WHERE document_id=?", (doc_id,))
         conn.commit()
@@ -314,6 +492,8 @@ def _confirm_transactions(conn, doc, doc_id, included):
         return redirect(url_for("documents.review", doc_id=doc_id))
 
     final_property_id = doc["property_id"]
+    touched = {(r[1], *ingest.month_key(r[7])) for r in ready}
+    before = ingest.kpi_snapshot(conn, touched)
     for item_id, pid, vendor, desc, amount, category, capex, date, direction in ready:
         cur = conn.execute(
             """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, capex, source, document_id)
@@ -321,6 +501,7 @@ def _confirm_transactions(conn, doc, doc_id, included):
             (pid, date, vendor, get_or_create_vendor(conn, vendor), desc, amount, direction, category, capex, doc_id))
         conn.execute("UPDATE document_items SET duplicate_of=? WHERE id=? AND duplicate_of IS NULL", (cur.lastrowid, item_id))
         final_property_id = pid
+    _log_confirmed(conn, doc_id, "transaction", len(ready), excluded, corrected, before, ingest.kpi_snapshot(conn, touched))
     _finish(conn, doc_id, final_property_id, len(ready), "transaction", excluded, corrected)
     return redirect(url_for("documents.review", doc_id=doc_id))
 
@@ -352,6 +533,11 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
                 "reservation_id": item["reservation_id"], "check_in": item["check_in"], "check_out": item["check_out"]}))
             if is_dup and decision == "exclude":
                 include_row = False
+        elif include_row and pid:
+            # hand-entered row: no extraction snapshot, but it can still duplicate a reservation on file
+            is_dup = bool(find_duplicate_reservation(conn, pid, {"reservation_id": code, "check_in": check_in, "check_out": check_out}))
+            if is_dup and f.get("allow_dups"):
+                decision = "keep"
         if include_row:
             if is_dup and decision != "keep":
                 problems["duplicate"] += 1
@@ -372,13 +558,17 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
         if include_row:
             ready.append((pid, platform, code, check_in, check_out, gross, fees, net))
 
+    if has_items:
+        _log_edits(conn, doc_id)
     if any(problems.values()):
         if has_items:
             conn.execute("UPDATE document_items SET reviewed=0 WHERE document_id=?", (doc_id,))
         conn.commit()
-        flash(_problem_message(problems, "reservation"), "warning")
+        flash(_problem_message(problems, "reservation") + ("" if has_items else " To add a hand-entered reservation that looks like one already on file, tick \u201cAdd even if they look like duplicates\u201d."), "warning")
         return redirect(url_for("documents.review", doc_id=doc_id))
 
+    kpi_keys = {(r[0], *ym) for r in ready for ym in _months_between(r[3], r[4])}
+    kpi_before = ingest.kpi_snapshot(conn, kpi_keys)
     touched, final_property_id = {}, doc["property_id"]
     for pid, platform, code, check_in, check_out, gross, fees, net in ready:
         key = (pid, check_in[:7])
@@ -391,6 +581,7 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
                VALUES (?,?,?,?,?,?,?,0,?,'confirmed','upload',?)""",
             (pid, platform, code, check_in, check_out, gross if gross is not None else net, fees, net, doc_id))
         final_property_id = pid
+    _log_confirmed(conn, doc_id, "reservation", len(ready), excluded, corrected, kpi_before, ingest.kpi_snapshot(conn, kpi_keys), manual=not has_items)
     _finish(conn, doc_id, final_property_id, len(ready), "reservation", excluded, corrected)
     names = {p["id"]: p["name"] for p in get_properties(conn)}
     for (pid, ym), before in touched.items():
@@ -419,7 +610,37 @@ def undo(doc_id):
     n_bk = conn.execute("DELETE FROM bookings WHERE document_id=? AND source='upload'", (doc_id,)).rowcount
     conn.execute("UPDATE documents SET status='extracted', reviewed=0 WHERE id=?", (doc_id,))
     record(conn, "document", doc_id, "delete", field="import", old_value=f"{n_tx} transactions, {n_bk} reservations")
+    ingest.log_event(conn, doc_id, "undone", f"Import undone: removed {n_tx} transaction{'s' if n_tx != 1 else ''} and {n_bk} reservation{'s' if n_bk != 1 else ''}",
+                     {"transactions": n_tx, "reservations": n_bk})
     conn.commit()
     flash(f"\u2713 Import undone: removed {n_tx} transaction{'s' if n_tx != 1 else ''} and {n_bk} reservation{'s' if n_bk != 1 else ''}. "
           f"Any month that was based on those reservations goes back to its earlier figures.", "success")
     return redirect(url_for("documents.review", doc_id=doc_id))
+
+
+@bp.route("/documents/<int:doc_id>/reject", methods=["POST"])
+def reject(doc_id):
+    """Throw away an unconfirmed draft: its extracted lines and the stored
+    file. Nothing was ever in the ledger, so no figure moves. A confirmed
+    import must be undone first."""
+    conn = db.get_conn()
+    doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+    if not doc:
+        flash("That document is already gone.", "info")
+        return redirect(url_for("documents.index"))
+    if doc["status"] == "confirmed":
+        flash("This import is confirmed and its records are in your figures. Undo the import first, then you can delete the draft.", "warning")
+        return redirect(url_for("documents.review", doc_id=doc_id))
+    n_items = conn.execute("DELETE FROM document_items WHERE document_id=?", (doc_id,)).rowcount
+    conn.execute("DELETE FROM document_events WHERE document_id=?", (doc_id,))
+    conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
+    record(conn, "document", doc_id, "delete", field="draft", old_value=f"{doc['filename']} ({n_items} extracted lines)")
+    conn.commit()
+    try:
+        stored = Path(doc["stored_path"]).resolve()
+        if stored.is_file() and runtime.uploads_dir().resolve() in stored.parents:
+            stored.unlink()
+    except OSError:
+        pass  # the draft is gone from the app either way; a stray file on disk is harmless
+    flash(f"\u2713 Deleted the draft \u201c{doc['filename']}\u201d. Nothing was added to your figures.", "success")
+    return redirect(url_for("documents.index"))

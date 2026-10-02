@@ -11,10 +11,16 @@
     </div>
   {% endif %}
   <div class="card">
+    {% if demo_mode %}
+      <div class="empty" style="padding:var(--s4)"><div class="empty-title">Uploads are off in this demo</div><div class="empty-body" style="margin-bottom:0">{{ demo_message }} Browse the sample documents below to see how review works.</div></div>
+    {% else %}
+    {% if not extraction_available %}
+      <div class="flash info" style="margin-bottom:var(--s3)">Automatic extraction isn't configured. You can enter the extracted rows manually. Spreadsheets and CSV files are still read automatically.</div>
+    {% endif %}
     <form id="upload-form" class="upload-form" style="display:block" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
       <div id="dropzone" class="dropzone">
         <div class="dropzone-label">Drop statements, invoices or receipts here</div>
-        <div class="note">Any file: PDF, Excel, CSV, Word, text, photos… — we read what we can, you check it, then confirm</div>
+        <div class="note">PDF, JPG/PNG photo, Excel/CSV, Word or text · up to {{ max_upload_mb }} MB per upload — we read what we can, you check it, then confirm</div>
         <div style="margin-top:var(--s3)"><button type="button" class="secondary" onclick="document.getElementById('file-input').click()">Choose files</button></div>
         <input id="file-input" type="file" name="document" multiple required style="display:none">
         <div id="file-list" class="note" style="margin-top:var(--s2)"></div>
@@ -30,17 +36,26 @@
         <button type="submit">Upload and extract</button>
       </div>
     </form>
+    {% endif %}
   </div>
 
+  {% macro status_tab(key, label) %}
+    {% if counts[key] or f_status == key %}
+      <a href="?d_status={{ key }}" class="tab {{ 'active' if f_status == key }}">{{ label }}<span class="count">{{ counts[key] }}</span></a>
+    {% endif %}
+  {% endmacro %}
   <nav class="tabs" style="margin-top:var(--s5)">
-    <a href="?d_status=review" class="tab {{ 'active' if f_status == 'review' }}">Needs review<span class="count">{{ counts.needs_review or 0 }}</span></a>
-    <a href="?d_status=failed" class="tab {{ 'active' if f_status == 'failed' }}">Failed<span class="count">{{ counts.failed or 0 }}</span></a>
-    <a href="?d_status=complete" class="tab {{ 'active' if f_status == 'complete' }}">Complete<span class="count">{{ counts.complete or 0 }}</span></a>
-    <a href="?d_status=" class="tab {{ 'active' if not f_status }}">All<span class="count">{{ counts.total or 0 }}</span></a>
+    {{ status_tab('review', 'Needs review') }}
+    {{ status_tab('uploaded', 'Uploaded') }}
+    {{ status_tab('processing', 'Processing') }}
+    {{ status_tab('failed', 'Failed') }}
+    {{ status_tab('confirmed', 'Confirmed') }}
+    <a href="?d_status=" class="tab {{ 'active' if not f_status }}">All<span class="count">{{ total }}</span></a>
   </nav>
 
   <form method="get" class="filter-bar">
     <input type="hidden" name="d_status" value="{{ f_status }}">
+    <input type="hidden" name="d_sort" value="{{ sort }}">
     <input type="text" name="d_q" value="{{ f_q }}" placeholder="Search filename…">
     <select name="d_property" onchange="this.form.submit()">
       <option value="">All properties</option>
@@ -50,36 +65,46 @@
       <option value="">All types</option>
       {% for key, label in doc_types.items() %}<option value="{{ key }}" {{ 'selected' if f_type == key }}>{{ label }}</option>{% endfor %}
     </select>
-    {% if f_q or f_property or f_type %}<a class="clear-link" href="?d_status={{ f_status }}">Clear filters</a>{% endif %}
+    {% if periods %}
+      <select name="d_period" onchange="this.form.submit()">
+        <option value="">Any detected period</option>
+        {% for p in periods %}<option value="{{ p.value }}" {{ 'selected' if f_period == p.value }}>{{ p.label }}</option>{% endfor %}
+      </select>
+    {% endif %}
+    {% if f_q or f_property or f_type or f_period %}<a class="clear-link" href="?d_status={{ f_status }}&d_sort={{ sort }}">Clear filters</a>{% endif %}
   </form>
 
   <div class="card flush">
     {% if docs %}
       <table>
-        <thead><tr><th>Document</th><th>Type</th><th>Property</th><th>Period</th><th class="num">Transactions</th><th>Status</th><th></th></tr></thead>
+        <thead><tr>
+          <th>Document</th><th>Type</th><th>Property</th>
+          <th><a class="sort {{ 'on' if sort.startswith('period') }}" href="{{ sort_href('period') }}">Detected period{% if sort == 'period_desc' %} ↓{% elif sort == 'period_asc' %} ↑{% endif %}</a></th>
+          <th><a class="sort {{ 'on' if sort.startswith('uploaded') }}" href="{{ sort_href('uploaded') }}">Uploaded{% if sort == 'uploaded_desc' %} ↓{% elif sort == 'uploaded_asc' %} ↑{% endif %}</a></th>
+          <th class="num">Lines</th><th>Status</th><th></th>
+        </tr></thead>
         <tbody>
           {% for d in docs %}
             <tr class="clickable" hx-get="{{ url_for('documents.drawer', doc_id=d.id) }}" hx-target="#drawer" hx-swap="innerHTML">
-              <td class="truncate">{{ d.filename }}<div class="note">Uploaded {{ d.uploaded_at[:10] }}</div></td>
+              <td class="truncate" title="{{ d.filename }}">{{ d.filename }}</td>
               <td>{{ d.doc_type_label }}</td>
               <td>{% if d.property_name == 'Unassigned' %}<span class="pill warn">Property needed</span>{% else %}{{ d.property_name }}{% endif %}</td>
               <td>{{ d.period }}</td>
+              <td class="note">{{ d.uploaded_at[:16] }}</td>
               <td class="num">{{ d.item_count }}</td>
-              <td>
-                {% if d.status == 'confirmed' %}<span class="pill pos">Confirmed</span>
-                {% elif d.status == 'failed' %}<span class="pill neg">Failed</span>
-                {% else %}<span class="pill warn">Needs review</span>{% endif %}
-              </td>
+              <td><span style="display:inline-flex; gap:4px; flex-wrap:wrap"><span class="pill {{ d.status_kind }}" {% if d.status == 'failed' and d.failure_reason %}title="{{ d.failure_reason }}"{% endif %}>{{ d.status_label }}</span>{% if d.possible_duplicate %}<span class="pill warn" title="Looks like a document that was already uploaded">Possible duplicate</span>{% endif %}</span></td>
               <td class="num"><a class="btn {{ 'secondary' if d.status == 'confirmed' else '' }}" onclick="event.stopPropagation()" href="{{ url_for('documents.review', doc_id=d.id) }}" style="color:{{ 'var(--ink)' if d.status == 'confirmed' else '#fff' }}; font-weight:500">{{ 'View' if d.status == 'confirmed' else 'Review' }}</a></td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     {% else %}
-      {% if f_status == 'review' %}
+      {% if f_status == 'review' and not (f_q or f_property or f_type or f_period) %}
         {{ empty_state("Nothing waiting for review", "Every uploaded document has been confirmed. Upload more when new statements or invoices arrive.") }}
-      {% elif f_status == 'failed' %}
+      {% elif f_status == 'failed' and not (f_q or f_property or f_type or f_period) %}
         {{ empty_state("No failed documents", "Anything we couldn't read would show up here so you can enter it by hand.") }}
+      {% elif total %}
+        {{ empty_state("No documents match", "Nothing fits these filters. Clear a filter or pick another status.") }}
       {% else %}
         {{ empty_state("No documents yet", "Upload booking statements, invoices or bank statements to start building your records.") }}
       {% endif %}
@@ -90,6 +115,7 @@
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('file-input');
     const fileList = document.getElementById('file-list');
+    if (dropzone && fileInput) {
 
     function showFiles() {
       const names = Array.from(fileInput.files).map(f => f.name);
@@ -109,5 +135,6 @@
         showFiles();
       }
     });
+    }
   </script>
 {% endblock %}

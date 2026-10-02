@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 import db
+import services.ingest as ingest
 import services.kpis as kpis
 from services.audit import record, record_edits
 from services.common import CATEGORIES, MONTH_NAMES, get_properties, get_property, pct_delta
@@ -105,6 +106,8 @@ def _ledger_where(ctx, start, end, args):
         clauses.append("t.capex=1")
     if args.get("t_vendor"):
         clauses.append("t.vendor_id=?"); params.append(int(args["t_vendor"]))
+    if args.get("t_source"):
+        clauses.append("t.source=?"); params.append(args["t_source"])
     q = (args.get("t_q") or "").strip()
     if q:
         clauses.append("(t.vendor LIKE ? OR t.description LIKE ?)"); params += [f"%{q}%", f"%{q}%"]
@@ -283,20 +286,27 @@ def index():
     # ---- ledger, on this page, driven by the shared context + its own filters ----
     clauses, params, f_month, f_scope, f_t_scope = _ledger_where(ctx, start, end, request.args)
     where = " AND ".join(clauses)
+    # Default: newest first. Date and Amount are the two sortable columns;
+    # id is the stable tiebreaker so equal dates/amounts never shuffle.
+    t_sort = request.args.get("t_sort") if request.args.get("t_sort") in ("date", "amount") else "date"
+    t_dir = request.args.get("t_dir") if request.args.get("t_dir") in ("asc", "desc") else "desc"
+    order = f"t.{t_sort} {t_dir.upper()}, t.id {t_dir.upper()}"
     ledger = conn.execute(
         f"""SELECT t.*, p.name AS property_name, p.type AS property_type FROM transactions t
             JOIN properties p ON p.id = t.property_id
-            WHERE {where} ORDER BY t.date DESC, t.id DESC LIMIT 200""", params).fetchall()
+            WHERE {where} ORDER BY {order} LIMIT 200""", params).fetchall()
     ledger_total = conn.execute(
         f"SELECT COUNT(*) n, COALESCE(SUM(t.amount),0) amt FROM transactions t JOIN properties p ON p.id=t.property_id WHERE {where}",
         params).fetchone()
 
-    f = {k: request.args.get(k) or "" for k in ("t_category", "t_type", "t_vendor", "t_q", "t_scope")}
+    f = {k: request.args.get(k) or "" for k in ("t_category", "t_type", "t_vendor", "t_q", "t_scope", "t_source")}
     f["t_month"] = f_month
     chips = []
     base = range_params(ctx)
     def chip(label, drop):
         keep = {k: v for k, v in f.items() if v and k != drop}
+        if (t_sort, t_dir) != ("date", "desc"):
+            keep.update(t_sort=t_sort, t_dir=t_dir)
         chips.append({"label": label, "href": url_for("expenses.index", **{**base, **({"scope": scope} if scope else {}), **keep}) + "#ledger"})
     if f_month:
         y, m = map(int, f_month.split("-")); chip(f"{MONTH_NAMES[m]} {y}", "t_month")
@@ -310,8 +320,20 @@ def index():
     if f["t_vendor"]:
         vname = conn.execute("SELECT name FROM vendors WHERE id=?", (f["t_vendor"],)).fetchone()
         chip(vname["name"] if vname else "Vendor", "t_vendor")
+    if f["t_source"]:
+        chip(f["t_source"].replace("_", " ").title(), "t_source")
     if f["t_q"]:
         chip(f'"{f["t_q"]}"', "t_q")
+
+    def sort_href(column):
+        """Header link: sort by this column; clicking the active one flips
+        direction. Keeps the period, scope and every filter."""
+        direction = ("asc" if t_dir == "desc" else "desc") if t_sort == column else "desc"
+        keep = {k: v for k, v in f.items() if v}
+        return url_for("expenses.index", **{**base, **({"scope": scope} if scope else {}), **keep,
+                                           "t_sort": column, "t_dir": direction}) + "#ledger"
+
+    sources = [r["source"] for r in conn.execute("SELECT DISTINCT source FROM transactions WHERE source IS NOT NULL ORDER BY source")]
 
     return render_template(
         "expenses.html", active="expenses", all_properties=get_properties(conn), active_property=None,
@@ -319,7 +341,7 @@ def index():
         summary_tiles=summary_tiles, property_rows=property_rows,
         property_categories=property_categories, business_categories=business_categories,
         vendor_rows=vendors, vendorless_total=vendorless_total, ledger=ledger, ledger_total=ledger_total,
-        f=f, chips=chips, ledger_base=urlencode({**base, **({"scope": scope} if scope else {})}), base_params=base,
+        f=f, chips=chips, t_sort=t_sort, t_dir=t_dir, sort_href=sort_href, sources=sources, ledger_base=urlencode({**base, **({"scope": scope} if scope else {})}), base_params=base,
         all_vendors=conn.execute("SELECT id, name FROM vendors ORDER BY name").fetchall(),
         categories=CATEGORIES,
         months_json=json.dumps(months), chart_series_json=json.dumps(chart_series),
@@ -348,6 +370,7 @@ def transaction_drawer(tx_id):
             or conn.execute("SELECT * FROM document_items WHERE document_id=? AND ABS(amount-?)<0.01 AND include=1 LIMIT 1", (doc["id"], tx["amount"])).fetchone()
     return render_template(
         "partials/transaction_drawer.html", tx=tx, history=history, doc=doc, line=line,
+        prov=ingest.provenance(conn, tx["document_id"], line),
         flats=get_properties(conn, include_overhead=True), categories=CATEGORIES,
     )
 

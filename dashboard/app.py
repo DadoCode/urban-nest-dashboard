@@ -15,14 +15,15 @@ Run with:  python3 dashboard/app.py
 import os
 from pathlib import Path
 
-from flask import Flask, request
+from flask import Flask, flash, redirect, request, url_for
 
 import db
 from routes import register_blueprints
+from services import runtime
 from services.completeness import seed_defaults
 
 ROOT = Path(__file__).resolve().parent.parent
-UPLOADS = Path(os.environ["DASHBOARD_UPLOADS_PATH"]) if os.environ.get("DASHBOARD_UPLOADS_PATH") else ROOT / "data" / "uploads"
+UPLOADS = runtime.uploads_dir()
 
 RECENT_COOKIE = "recent_properties"
 RECENT_MAX = 5
@@ -35,6 +36,10 @@ def _secret_key():
     from services.env import get
     if get("UN_SECRET_KEY"):
         return get("UN_SECRET_KEY")
+    if runtime.is_demo():
+        # The hosted demo has no login and no durable disk; a per-instance random key
+        # would make a flash message set on one serverless instance vanish on the next.
+        return "urban-nest-read-only-demo"
     path = ROOT / "data" / ".secret_key"
     try:
         if path.exists():
@@ -51,6 +56,8 @@ def _secret_key():
 def create_app():
     flask_app = Flask(__name__)
     flask_app.secret_key = _secret_key()
+    flask_app.config["MAX_CONTENT_LENGTH"] = runtime.max_upload_bytes()
+    demo = runtime.is_demo()
     flask_app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                             PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30)
     # behind a tunnel (ngrok/Cloudflare) the real scheme/client arrive in X-Forwarded-* headers
@@ -60,12 +67,45 @@ def create_app():
     def _secure_cookie_over_https():
         flask_app.config["SESSION_COOKIE_SECURE"] = request.is_secure
 
-    db.ensure_schema()
-    conn = db.get_conn()
-    for p in conn.execute("SELECT id FROM properties WHERE type='flat'"):
-        seed_defaults(conn, p["id"])
-    conn.commit()
-    conn.close()
+    # The demo database ships already migrated and its filesystem is
+    # read-only, so it must never try to alter or seed anything.
+    if not demo:
+        db.ensure_schema()
+        conn = db.get_conn()
+        for p in conn.execute("SELECT id FROM properties WHERE type='flat'"):
+            seed_defaults(conn, p["id"])
+        conn.commit()
+        conn.close()
+
+    @flask_app.context_processor
+    def _inject_runtime():
+        return {"demo_mode": demo, "demo_message": runtime.DEMO_MESSAGE,
+                "max_upload_mb": round(runtime.max_upload_bytes() / 1024 / 1024)}
+
+    def _back(default_endpoint):
+        ref = request.referrer or ""
+        return ref if ref.startswith(request.host_url) else url_for(default_endpoint)
+
+    @flask_app.before_request
+    def _demo_read_only():
+        """Refuse every write on the hosted preview before it can touch the
+        (read-only, non-durable) filesystem -- a calm explanation, never a
+        500, and never a half-saved record that would later vanish."""
+        if not demo or request.method in ("GET", "HEAD", "OPTIONS") or request.endpoint == "auth.login":
+            return None
+        if request.headers.get("HX-Request"):
+            return f'<div class="note">{runtime.DEMO_MESSAGE}</div>', 200
+        flash(runtime.DEMO_MESSAGE, "warning")
+        return redirect(_back("overview.index"))
+
+    @flask_app.errorhandler(413)
+    def _too_large(_err):
+        limit = round(runtime.max_upload_bytes() / 1024 / 1024)
+        msg = f"That upload is larger than the {limit} MB limit, so nothing was saved. Upload a smaller file, or split a long PDF into parts."
+        if request.headers.get("HX-Request"):
+            return f'<div class="note">{msg}</div>', 413
+        flash(msg, "error")
+        return redirect(_back("documents.index"))
 
     @flask_app.context_processor
     def _inject_auth():
@@ -95,6 +135,8 @@ def create_app():
 
     @flask_app.before_request
     def _setup():
+        if demo:
+            return
         db.ensure_schema()
         UPLOADS.mkdir(parents=True, exist_ok=True)
 

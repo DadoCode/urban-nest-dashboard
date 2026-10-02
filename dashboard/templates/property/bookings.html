@@ -11,11 +11,53 @@
 
   <p class="note" style="margin-top:var(--s3)">Reservations come from the booking statements you upload. <a href="{{ url_for('documents.index', property=prop.id, type='booking_statement') }}#upload">Upload a statement</a> and they replace the Excel-imported figures for those months.</p>
 
-  {% call section("Reservations") %}
+  {% call section("Reservations", (total_rows ~ ' in this view') if total_rows else None) %}
+    {# Filters only appear when there's something to choose between -- no
+       empty dropdowns for a property with one channel and one source. #}
+    {% if has_future or platforms|length > 1 or sources|length > 1 or has_cancelled %}
+      <form method="get" class="filter-bar">
+        {% for k, v in ctx_params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        <input type="hidden" name="b_sort" value="{{ b_sort }}"><input type="hidden" name="b_dir" value="{{ b_dir }}">
+        {% if has_future %}
+          <select name="b_when" onchange="this.form.submit()">
+            <option value="">All stays in period</option>
+            <option value="upcoming" {{ 'selected' if filters.b_when == 'upcoming' }}>Upcoming (nearest first)</option>
+            <option value="past" {{ 'selected' if filters.b_when == 'past' }}>Past stays</option>
+          </select>
+        {% endif %}
+        {% if platforms|length > 1 %}
+          <select name="b_platform" onchange="this.form.submit()">
+            <option value="">All channels</option>
+            {% for p in platforms %}<option value="{{ p }}" {{ 'selected' if filters.b_platform == p }}>{{ CHANNELS.get(p|channel_key, p|replace('_', ' ')|title) }}</option>{% endfor %}
+          </select>
+        {% endif %}
+        {% if sources|length > 1 %}
+          <select name="b_source" onchange="this.form.submit()">
+            <option value="">All sources</option>
+            {% for src in sources %}<option value="{{ src }}" {{ 'selected' if filters.b_source == src }}>{{ src|replace('_', ' ')|title }}</option>{% endfor %}
+          </select>
+        {% endif %}
+        {% if has_cancelled %}
+          <select name="b_status" onchange="this.form.submit()">
+            <option value="">Confirmed</option>
+            <option value="cancelled" {{ 'selected' if filters.b_status == 'cancelled' }}>Cancelled</option>
+            <option value="all" {{ 'selected' if filters.b_status == 'all' }}>All statuses</option>
+          </select>
+        {% endif %}
+        {% if filters.b_when or filters.b_platform or filters.b_source or filters.b_status %}<a class="clear-link" href="{{ cx('properties.bookings', property_id=prop.id) }}">Clear filters</a>{% endif %}
+      </form>
+    {% endif %}
     <div class="card flush">
       {% if bookings %}
         <table>
-          <thead><tr><th>Platform</th><th>Check-in</th><th>Check-out</th><th class="num">Nights</th><th class="num">Net revenue</th><th>Source</th></tr></thead>
+          <thead><tr>
+            <th>Platform</th>
+            <th><a class="sort {{ 'on' if b_sort == 'check_in' }}" href="{{ sort_href('check_in') }}">Check-in{% if b_sort == 'check_in' %} {{ '↓' if b_dir == 'desc' else '↑' }}{% endif %}</a></th>
+            <th><a class="sort {{ 'on' if b_sort == 'check_out' }}" href="{{ sort_href('check_out') }}">Check-out{% if b_sort == 'check_out' %} {{ '↓' if b_dir == 'desc' else '↑' }}{% endif %}</a></th>
+            <th class="num">Nights</th>
+            <th class="num"><a class="sort {{ 'on' if b_sort == 'gross' }}" href="{{ sort_href('gross') }}" title="{{ METRIC_INFO.gross_booking_revenue }}">Gross booking revenue{% if b_sort == 'gross' %} {{ '↓' if b_dir == 'desc' else '↑' }}{% endif %}</a></th>
+            <th class="num">Net revenue</th><th>Source</th>{% if has_cancelled %}<th>Status</th>{% endif %}
+          </tr></thead>
           <tbody>
             {% for b in bookings %}
               <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
@@ -23,15 +65,18 @@
                 <td>{{ b.check_in }}</td>
                 <td>{{ b.check_out }}</td>
                 <td class="num">{{ b.nights }}</td>
+                <td class="num">{{ b.gross_revenue|money }}</td>
                 <td class="num">{{ b.net_revenue|money }}</td>
                 <td class="note">{{ b.source|replace('_', ' ')|title }}</td>
+                {% if has_cancelled %}<td>{{ b.status|title }}</td>{% endif %}
               </tr>
             {% endfor %}
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No bookings imported for " ~ ctx.display, "There are no reservations for " ~ prop.name ~ " in this period. Upload a booking-platform statement or choose a different period.", "Upload a statement", url_for('documents.index', property=prop.id, type='booking_statement') ~ '#upload') }}
+        {{ empty_state("No bookings imported for " ~ ctx.display, "There are no reservations for " ~ prop.name ~ " in this view. Upload a booking-platform statement, choose a different period, or clear a filter.", "Upload a statement", url_for('documents.index', property=prop.id, type='booking_statement') ~ '#upload') }}
       {% endif %}
     </div>
+    {% if total_rows > bookings|length %}<p class="note" style="margin-top:var(--s2)">Showing the first {{ bookings|length }} of {{ total_rows }} reservations in this order.</p>{% endif %}
   {% endcall %}
 {% endblock %}

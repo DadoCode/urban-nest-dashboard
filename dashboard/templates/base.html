@@ -11,7 +11,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
   <script defer src="{{ url_for('static', filename='ui.js', v=asset_v) }}"></script>
 </head>
-<body class="{% block body_class %}{% endblock %}{{ ' viewer' if role == 'viewer' }}">
+<body class="{% block body_class %}{% endblock %}{{ ' viewer' if role == 'viewer' }}"{% if demo_mode %} data-demo="1" data-demo-message="{{ demo_message }}"{% endif %}>
   <div id="navbar"></div>
   <div class="app-shell">
     <aside class="sidebar">
@@ -53,6 +53,7 @@
     <div class="main-col">
       <main>
         {% if role == 'viewer' %}<div class="viewer-note">You're viewing in read-only mode. Everything is live, but nothing can be changed from this account.</div>{% endif %}
+        {% if demo_mode %}<div class="viewer-note">{{ demo_message }} What you see is sample data.</div>{% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% for category, m in messages %}<div class="flash {{ category if category in ('success', 'warning', 'error', 'info') else 'info' }}" role="status">{{ m }}</div>{% endfor %}
         {% endwith %}

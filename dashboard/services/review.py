@@ -51,6 +51,14 @@ def changed_fields(item):
     return out
 
 
+def field_changes(item):
+    """What the reviewer changed on a line: [{"field", "from", "to"}], from
+    the value the parser read to the value now on the line."""
+    orig = original_of(item)
+    fields = _RES_FIELDS if item["item_kind"] == "reservation" else _TX_FIELDS
+    return [{"field": key, "from": orig.get(key), "to": item[fields[key]]} for key in changed_fields(item)]
+
+
 def duplicate_info(conn, item, find_duplicate_reservation):
     """The existing record this line looks like, or None. Only meaningful
     before the document is confirmed."""

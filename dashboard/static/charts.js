@@ -122,3 +122,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+
+/* Hosted demo: every write is refused server-side; this also greys out the
+   controls so nobody fills in a form that cannot save. Runs on load and on
+   each drawer swap (htmx), since drawers carry edit/delete forms. */
+function applyDemoMode(root) {
+  const msg = document.body.dataset.demoMessage;
+  if (!document.body.dataset.demo) return;
+  (root || document).querySelectorAll('form[method="post"], form[method="POST"]').forEach((form) => {
+    if ((form.getAttribute('action') || '').indexOf('/login') !== -1) return;
+    form.querySelectorAll('button:not([type="button"]), input[type="submit"], input[type="file"]').forEach((el) => {
+      el.disabled = true; el.title = msg;
+    });
+    form.addEventListener('submit', (e) => e.preventDefault());
+  });
+  (root || document).querySelectorAll('.add-btn, [data-demo-off]').forEach((el) => { el.disabled = true; el.title = msg; });
+}
+document.addEventListener('DOMContentLoaded', () => {
+  applyDemoMode();
+  document.body.addEventListener('htmx:afterSwap', (e) => applyDemoMode(e.target));
+});

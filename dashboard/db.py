@@ -6,11 +6,14 @@ one-time move from the older monthly_summary/expense_items/goals shape):
 KPIs are never stored as totals -- dashboard/kpis.py derives them on read
 from `bookings` (reservation-level income) and `transactions` (everything
 else, income or expense) for whatever property/date-range is asked for."""
+import os
 import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DB_PATH = ROOT / "data" / "dashboard.db"
+# DASHBOARD_DB_PATH lets a test run point at a scratch copy so it can never
+# touch the real ledger; unset, it is always data/dashboard.db.
+DB_PATH = Path(os.environ["DASHBOARD_DB_PATH"]) if os.environ.get("DASHBOARD_DB_PATH") else ROOT / "data" / "dashboard.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS properties (
@@ -163,6 +166,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
     user TEXT
 );
 
+-- One row per step in a document's ingestion life (uploaded, extracted,
+-- edited, confirmed, undone...), so a wrong number can be traced back to
+-- what the parser read and what the reviewer changed. Deliberately not an
+-- FK: the trail outlives nothing, but it must never block a delete.
+CREATE TABLE IF NOT EXISTS document_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL,
+    event TEXT NOT NULL,           -- uploaded | extracted | extraction_failed | edited | confirmed | undone
+    summary TEXT,                  -- one human-readable line
+    detail TEXT,                   -- JSON, event-specific
+    timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_events_doc ON document_events(document_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_property_date ON bookings(property_id, check_in);
 CREATE INDEX IF NOT EXISTS idx_transactions_property_date ON transactions(property_id, date);
 CREATE INDEX IF NOT EXISTS idx_document_items_document ON document_items(document_id);
@@ -263,6 +280,20 @@ def ensure_schema():
                 FROM documents_old;
             DROP TABLE documents_old;
         """)
+
+    # Added after the legacy rebuild above (which recreates the table with
+    # only the original columns) so a rebuilt table still ends up with them.
+    doc_cols = {row["name"] for row in conn.execute("PRAGMA table_info(documents)")}
+    for col, ddl in [
+        ("file_hash", "TEXT"),                  # sha256 of the stored file, for exact-duplicate detection
+        ("file_size", "INTEGER"),
+        ("failure_reason", "TEXT"),             # why automatic extraction failed, in plain words
+        ("detection_json", "TEXT"),             # how property/period were decided + any warnings
+        ("duplicate_of_document", "INTEGER"),   # earlier upload this one looks like
+    ]:
+        if col not in doc_cols:
+            conn.execute(f"ALTER TABLE documents ADD COLUMN {col} {ddl}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash)")
     conn.commit()
     conn.close()
 

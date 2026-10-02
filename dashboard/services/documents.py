@@ -8,12 +8,19 @@ import mimetypes
 import re
 from pathlib import Path
 
+from werkzeug.utils import secure_filename
+
 import services.extraction as extraction
+import services.ingest as ingest
 import services.kpis as kpis
+from services import runtime
 from services.common import get_properties
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-UPLOADS = ROOT / "data" / "uploads"
+# What the pipeline knows how to open. Anything else is still kept (so the
+# attempt is visible and auditable) but marked Failed with a clear reason.
+SPREADSHEET_EXTS = {".csv", ".tsv", ".xls", ".xlsx", ".xlsm"}
+SUPPORTED_EXTS = SPREADSHEET_EXTS | {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".docx"}
+LOW_CONFIDENCE = 0.7
 
 
 def period_from_hint(hint):
@@ -66,47 +73,115 @@ def find_duplicate_reservation(conn, property_id, item):
     return row["id"] if row else None
 
 
+def _size_label(n):
+    if n < 1024:
+        return f"{n} bytes"
+    return f"{n / 1024 / 1024:.1f} MB" if n >= 1024 * 1024 else f"{n / 1024:.0f} KB"
+
+
+def _fail(conn, doc_id, filename, code, message, flash, warnings=None, dup=None):
+    """Mark a document Failed with a plain-words reason. The file stays on
+    disk and the trail records why, so the manual-entry fallback still works."""
+    detection = {"warnings": (warnings or [])}
+    conn.execute(
+        "UPDATE documents SET status='failed', failure_reason=?, detection_json=?, duplicate_of_document=? WHERE id=?",
+        (message, json.dumps(detection), dup["id"] if dup else None, doc_id))
+    ingest.log_event(conn, doc_id, "extraction_failed", message, {"code": code})
+    conn.commit()
+    flash(f"{filename}: {message}", "warning")
+    return doc_id
+
+
 def save_upload(conn, file, doc_type, property_id, flash):
     """Handles a single uploaded file: saves it, extracts line items into
     document_items (the reviewable Document -> extracted -> reviewed ->
-    transaction lineage -- see db.py's schema comment), guesses a property
-    when none was given, flags likely duplicates. `flash` is Flask's
-    flash() (passed in so this stays framework-agnostic about how a route
-    reports back to the user). Returns the new document id."""
-    dest_dir = UPLOADS / (property_id or "_unassigned")
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}_{Path(file.filename).name}"
-    dest_path = dest_dir / safe_name
-    file.save(dest_path)
+    transaction lineage -- see db.py's schema comment), detects property
+    and period (saying so when unsure), and flags likely duplicates. Every
+    step is written to the document's trail. `flash` is Flask's flash()
+    (passed in so this stays framework-agnostic about how a route reports
+    back). Returns the new document id, or None if the file couldn't even
+    be stored (nothing is created in that case)."""
+    original = Path(file.filename).name
+    ext = Path(original).suffix.lower()
+    if property_id and not conn.execute("SELECT 1 FROM properties WHERE id=?", (property_id,)).fetchone():
+        property_id = None
 
-    mime_type = file.mimetype or mimetypes.guess_type(file.filename)[0]
+    dest_dir = runtime.uploads_dir() / (property_id or "_unassigned")
+    stored_name = f"{datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')}_{secure_filename(original) or 'upload'}"
+    dest_path = dest_dir / stored_name
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        file.save(dest_path)
+    except OSError:
+        flash(f"{original}: we couldn't store this file, so nothing was uploaded. Check that the uploads folder is writable and has space.", "error")
+        return None
+
+    size = dest_path.stat().st_size
+    file_hash = ingest.file_sha256(dest_path)
+    mime_type = file.mimetype or mimetypes.guess_type(original)[0]
     cur = conn.execute(
-        "INSERT INTO documents (property_id, filename, stored_path, doc_type, status) VALUES (?,?,?,?,'pending')",
-        (property_id, file.filename, str(dest_path), doc_type),
+        "INSERT INTO documents (property_id, filename, stored_path, doc_type, status, file_hash, file_size) VALUES (?,?,?,?,'processing',?,?)",
+        (property_id, original, str(dest_path), doc_type, file_hash, size),
     )
     doc_id = cur.lastrowid
+    ingest.log_event(conn, doc_id, "uploaded", f"Uploaded {original} ({_size_label(size)}) as {doc_type.replace('_', ' ')}",
+                     {"filename": original, "size": size, "doc_type": doc_type, "property_selected": property_id})
     conn.commit()
 
-    result = extraction.extract(dest_path, mime_type, doc_type)
-    if result is None:
-        conn.execute("UPDATE documents SET status='failed' WHERE id=?", (doc_id,))
-        conn.commit()
-        flash(f"We saved {file.filename} but couldn't read it automatically, so nothing has been added yet. Enter its lines by hand below, "
-              f"or upload the original statement or export instead of a screenshot. (PDFs and photos need an Anthropic key; spreadsheets and text files don't.)", "warning")
-        return doc_id
+    dup_doc = ingest.find_duplicate_document(conn, doc_id, file_hash)
+    warnings = []
+    if dup_doc:
+        warnings.append({"code": "duplicate_file", "level": "warn",
+                         "message": f"Possible duplicate: this exact file was already uploaded on {dup_doc['uploaded_at'][:10]} as \u201c{dup_doc['filename']}\u201d ({ingest.status_display(dup_doc['status'])[0].lower()}).",
+                         "document_id": dup_doc["id"]})
+
+    if size == 0:
+        return _fail(conn, doc_id, original, "empty_file", "This file is empty (0 bytes). Check the original and upload it again.", flash, warnings, dup_doc)
+    if ext not in SUPPORTED_EXTS:
+        hint = " HEIC photos need exporting as JPG first." if ext in (".heic", ".heif") else ""
+        return _fail(conn, doc_id, original, "unsupported_type",
+                     f"{ext or 'This'} files aren't supported.{hint} Upload a PDF, a JPG/PNG photo, an Excel/CSV file, or a Word/text document.", flash, warnings, dup_doc)
+
+    result, failure = extraction.extract_with_reason(dest_path, mime_type, doc_type)
+    if failure:
+        return _fail(conn, doc_id, original, failure["code"], failure["message"], flash, warnings, dup_doc)
 
     items = result["items"]
-    detected_property_id = property_id
-    if not detected_property_id and result.get("document_hint"):
-        properties = [dict(p) for p in get_properties(conn, include_overhead=False)]
-        guessed_id, confidence = extraction.guess_property(result["document_hint"], properties)
-        if guessed_id:
-            detected_property_id = guessed_id
+    if not items:
+        return _fail(conn, doc_id, original, "no_rows",
+                     "No lines could be read from this document. If it's a scan or photo it may be too blurry, cropped or empty -- try a clearer copy, or enter the rows manually.",
+                     flash, warnings, dup_doc)
 
-    period = period_from_hint(result.get("period_hint"))
-    is_reservations = result.get("kind") == "reservation"
     properties = [dict(p) for p in get_properties(conn, include_overhead=False)]
-    dupes = 0
+    names = {p["id"]: p["name"] for p in properties}
+    is_reservations = result.get("kind") == "reservation"
+
+    # ---- which property? (chosen by you > document text > file name; two near-equal matches = ambiguous) ----
+    prop_info = {"source": "none", "id": None, "candidates": []}
+    detected_property_id = property_id
+    if property_id:
+        prop_info.update(source="selected by you", id=property_id)
+    else:
+        hint_text, source = result.get("document_hint"), "text on the document"
+        ranked = extraction.rank_properties(hint_text, properties)
+        if not ranked:
+            ranked, source = extraction.rank_properties(Path(original).stem, properties), "file name"
+        prop_info["candidates"] = ranked[:3]
+        if ranked and ingest.rank_is_ambiguous(ranked):
+            warnings.append({"code": "property_ambiguous", "level": "warn",
+                             "message": f"Could be {ranked[0]['name']} or {ranked[1]['name']} (the {source} matches both). No property was assigned -- choose one before confirming."})
+        elif ranked:
+            detected_property_id = ranked[0]["id"]
+            prop_info.update(source=source, id=ranked[0]["id"], confidence=ranked[0]["score"])
+        elif not is_reservations:
+            warnings.append({"code": "property_missing", "level": "warn",
+                             "message": "No property was detected on this document. Choose one on each line before confirming."})
+
+    # ---- which period? ----
+    period, period_warnings = ingest.detect_period(items, is_reservations, result.get("period_hint"))
+    warnings += period_warnings
+
+    dupes, no_property_lines = 0, 0
     for i, item in enumerate(items):
         if is_reservations:
             # a statement covers several flats -- match each reservation to its own by listing name
@@ -114,6 +189,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
             if not item_property and item.get("description"):
                 item_property = extraction.guess_property(item["description"], properties)[0]
             item_property = item_property or detected_property_id
+            no_property_lines += not item_property
             duplicate_of = find_duplicate_reservation(conn, item_property, item)
             dupes += bool(duplicate_of)
             platform = item.get("platform") or result.get("platform")
@@ -143,17 +219,74 @@ def save_upload(conn, file, doc_type, property_id, flash):
              direction, detected_property_id, category, 1 if category == "furniture" else 0, item.get("confidence"),
              duplicate_of, json.dumps(item), _int(item.get("page")), _int(item.get("row"))),
         )
+    if is_reservations and no_property_lines:
+        warnings.append({"code": "property_missing", "level": "warn",
+                         "message": f"{no_property_lines} of {len(items)} reservations couldn't be matched to a property. Choose one on each before confirming."})
 
-    conn.execute(
-        """UPDATE documents SET status='extracted', extracted_json=?, property_id=?,
-             detected_year=?, detected_month=? WHERE id=?""",
-        (json.dumps(items), detected_property_id, period[0] if period else None,
-         period[1] if period else None, doc_id),
-    )
-    conn.commit()
-    noun = "reservation" if is_reservations else "line"
-    msg = f"\u2713 Read {len(items)} {noun}{'s' if len(items) != 1 else ''} from {file.filename} — check them below, then confirm."
+    # ---- partial extraction: what the parser skipped or wasn't sure about ----
+    amount_key = "net" if is_reservations else "amount"
+    total = round(sum(abs(float(i.get(amount_key) or 0)) for i in items), 2)
+    confs = [float(i["confidence"]) for i in items if i.get("confidence") is not None]
+    low = sum(1 for c in confs if c < LOW_CONFIDENCE)
+    gaps = []
+    skipped = (result.get("rows_seen") or 0) - len(items)
+    if skipped > 0:
+        gaps.append(f"{skipped} of {result['rows_seen']} rows in the file couldn't be read and were skipped")
+    missing = sum(1 for i in items if not i.get(amount_key))
+    if missing:
+        gaps.append(f"{missing} line{'s' if missing != 1 else ''} without an amount")
+    if not is_reservations:
+        undated = sum(1 for i in items if not i.get("date"))
+        if undated:
+            gaps.append(f"{undated} line{'s' if undated != 1 else ''} without a date")
+    if low:
+        gaps.append(f"{low} line{'s' if low != 1 else ''} below {int(LOW_CONFIDENCE * 100)}% confidence")
+    if gaps:
+        warnings.append({"code": "partial_extraction", "level": "warn", "message": "Partial extraction: " + "; ".join(gaps) + ". Check these against the source."})
+
+    if not is_reservations and doc_type != "booking_statement":
+        # The spreadsheet reader treats positive amounts as money in unless the document type says otherwise.
+        # Say so, rather than letting a list of costs quietly default to income.
+        n_income = sum(1 for i in items if (i.get("category") or "other") == "booking_income")
+        if n_income:
+            warnings.append({"code": "income_guess", "level": "warn",
+                             "message": f"{n_income} line{'s were' if n_income != 1 else ' was'} categorised as Booking Income (money in). If this document lists costs, change each line's category before confirming."})
+
+    year = month = None
+    if period:
+        year, month = map(int, (period.get("dominant") or period["from"]).split("-"))
+
+    similar = None if dup_doc else ingest.find_similar_document(conn, doc_id, doc_type, detected_property_id, year, month, len(items), total)
+    if similar:
+        warnings.append({"code": "duplicate_content", "level": "warn",
+                         "message": f"Possible duplicate: \u201c{similar['filename']}\u201d (uploaded {similar['uploaded_at'][:10]}) is the same kind of document for the same property and period with the same number of lines and total.",
+                         "document_id": similar["id"]})
     if dupes:
-        msg += f" {dupes} look like they might already be on file" + (" (unticked so they aren't counted twice)." if is_reservations else ".")
-    flash(msg, "warning" if dupes else "success")
+        warnings.append({"code": "duplicate_rows", "level": "warn",
+                         "message": f"{dupes} {'reservation' if is_reservations else 'line'}{'s' if dupes != 1 else ''} look like they're already on file. Decide on each before confirming."})
+
+    detection = {"property": prop_info, "period": period, "warnings": warnings,
+                 "method": "spreadsheet parser" if ext in SPREADSHEET_EXTS else "AI extraction",
+                 "total": total, "rows": len(items), "low_confidence": low}
+    conn.execute(
+        """UPDATE documents SET status='extracted', extracted_json=?, property_id=?, detected_year=?, detected_month=?,
+             confidence=?, detection_json=?, duplicate_of_document=?, failure_reason=NULL WHERE id=?""",
+        (json.dumps(items), detected_property_id, year, month,
+         round(sum(confs) / len(confs), 3) if confs else None, json.dumps(detection),
+         (dup_doc or similar)["id"] if (dup_doc or similar) else None, doc_id),
+    )
+    noun = "reservation" if is_reservations else "line"
+    ingest.log_event(
+        conn, doc_id, "extracted",
+        f"Read {len(items)} {noun}{'s' if len(items) != 1 else ''} · total £{total:,.2f} · property: "
+        f"{names.get(detected_property_id, 'not detected')} · period: {ingest.period_label(period) or 'not detected'}",
+        {"rows": len(items), "total": total, "method": detection["method"], "property": prop_info, "period": period,
+         "warnings": [w["code"] for w in warnings]})
+    conn.commit()
+
+    attention = sum(1 for w in warnings if w["level"] == "warn")
+    msg = f"\u2713 Read {len(items)} {noun}{'s' if len(items) != 1 else ''} from {original} — check them below, then confirm."
+    if attention:
+        msg += f" {attention} thing{'s' if attention != 1 else ''} need checking."
+    flash(msg, "warning" if attention else "success")
     return doc_id

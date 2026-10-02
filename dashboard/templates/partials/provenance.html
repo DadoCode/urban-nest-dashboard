@@ -1,0 +1,19 @@
+{# The "Source" block shared by the transaction and reservation drawers:
+   record -> document it came from, and where in that document. `prov` is
+   services.ingest.provenance(); falsy for records with no document (an
+   Excel import or a hand-typed entry). #}
+{% if prov %}
+  <div class="drawer-field"><span>Source document</span><span style="text-align:right"><a href="{{ url_for('documents.review', doc_id=prov.id, item=prov.line_id) }}">{{ prov.filename }}</a></span></div>
+  <div class="drawer-field"><span>Document type</span><strong>{{ prov.type }}</strong></div>
+  <div class="drawer-field"><span>Uploaded</span><strong>{{ prov.uploaded }}</strong></div>
+  {% if prov.property %}<div class="drawer-field"><span>Detected property</span><strong>{{ prov.property }}</strong></div>{% endif %}
+  <div class="drawer-field"><span>Detected period</span><strong>{{ prov.period or '—' }}</strong></div>
+  <div class="drawer-field"><span>Document status</span><span class="pill {{ prov.kind }}">{{ prov.status }}</span></div>
+  {% if prov.page or prov.row or prov.line_index %}
+    <div class="drawer-field"><span>Source line</span><strong>{% if prov.page %}page {{ prov.page }}{% elif prov.row %}row {{ prov.row }}{% else %}line {{ prov.line_index }}{% endif %}</strong></div>
+  {% endif %}
+  <div class="drawer-field"><span>Import ref</span><span class="note">{{ prov.ref }}</span></div>
+  <a class="btn secondary" style="margin-top:var(--s2); width:100%" href="{{ url_for('documents.review', doc_id=prov.id, item=prov.line_id) }}">View source document</a>
+{% else %}
+  <p class="note" style="margin:var(--s2) 0 0">No source document is attached to this record (it came from the Excel import or was entered by hand).</p>
+{% endif %}

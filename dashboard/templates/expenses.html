@@ -115,6 +115,7 @@
       {% for k, v in base_params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
       {% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}
       {% if f.t_month %}<input type="hidden" name="t_month" value="{{ f.t_month }}">{% endif %}
+      <input type="hidden" name="t_sort" value="{{ t_sort }}"><input type="hidden" name="t_dir" value="{{ t_dir }}">
       <input type="text" name="t_q" value="{{ f.t_q }}" placeholder="Search vendor or description…">
       {% if scope is not none %}
         <select name="t_scope" onchange="this.form.submit()">
@@ -136,6 +137,12 @@
         <option value="">All vendors</option>
         {% for v in all_vendors %}<option value="{{ v.id }}" {{ 'selected' if f.t_vendor == v.id|string }}>{{ v.name }}</option>{% endfor %}
       </select>
+      {% if sources|length > 1 %}
+        <select name="t_source" onchange="this.form.submit()">
+          <option value="">All sources</option>
+          {% for src in sources %}<option value="{{ src }}" {{ 'selected' if f.t_source == src }}>{{ src|replace('_', ' ')|title }}</option>{% endfor %}
+        </select>
+      {% endif %}
       <button type="submit" class="secondary">Search</button>
     </form>
     {% if chips %}
@@ -149,7 +156,11 @@
     <div class="card flush">
       {% if ledger %}
         <table>
-          <thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th>Scope</th><th>Category</th><th>Type</th><th class="num">Amount</th><th>Source</th></tr></thead>
+          <thead><tr>
+            <th><a class="sort {{ 'on' if t_sort == 'date' }}" href="{{ sort_href('date') }}">Date{% if t_sort == 'date' %} {{ '↓' if t_dir == 'desc' else '↑' }}{% endif %}</a></th>
+            <th>Vendor</th><th>Description</th><th>Scope</th><th>Category</th><th>Type</th>
+            <th class="num"><a class="sort {{ 'on' if t_sort == 'amount' }}" href="{{ sort_href('amount') }}">Amount{% if t_sort == 'amount' %} {{ '↓' if t_dir == 'desc' else '↑' }}{% endif %}</a></th>
+            <th>Source</th></tr></thead>
           <tbody>
             {% for t in ledger %}
               <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML">
@@ -169,7 +180,7 @@
         {{ empty_state("No transactions match", "Nothing in this period fits the filters above. Clear a filter or change the period.", "Clear filters", (xurl(base_params, scope=scope) if scope else xurl(base_params)) ~ '#ledger') }}
       {% endif %}
     </div>
-    {% if ledger_total.n > ledger|length %}<p class="note" style="margin-top:var(--s2)">Showing the latest {{ ledger|length }} of {{ ledger_total.n }} matching transactions.</p>{% endif %}
+    {% if ledger_total.n > ledger|length %}<p class="note" style="margin-top:var(--s2)">Showing the first {{ ledger|length }} of {{ ledger_total.n }} matching transactions in this order.</p>{% endif %}
   {% endcall %}
 
   <script>

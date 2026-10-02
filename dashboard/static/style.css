@@ -311,6 +311,23 @@ td.truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white
   .prop-table td:last-child, .prop-table th:last-child { padding-right: var(--s3); }
 }
 
+/* Document review: the summary strip above the two-pane workspace and the
+   ingestion trail below it. */
+.rv-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--s4); }
+.rv-sum-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rv-sum-item .label { color: var(--muted); font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.05em; }
+.rv-sum-item strong { font-size: var(--fs-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ol.trail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
+ol.trail li { padding-left: var(--s3); border-left: 2px solid var(--line-strong); }
+ol.trail li details { margin-top: 2px; }
+ol.trail li details ul { margin: 4px 0 0; padding-left: 18px; }
+.trail-ev { font-weight: 600; font-size: var(--fs-small); }
+.trail-confirmed { color: var(--pos); }
+.trail-extraction_failed { color: var(--neg); }
+.trail-undone { color: var(--warn); }
+
+button:disabled, .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
 /* ---------- forms & buttons ---------- */
 
 input:not([type=checkbox]):not([type=radio]):not([type=file]), select, textarea {

@@ -257,18 +257,59 @@ def bookings(property_id):
         return redirect(cx_url("properties.detail", property_id=property_id))
 
     start, end = _range(ctx)
+
+    # ---- reservation list: sort + filters, using only fields the model has ----
+    a = request.args
+    today = datetime.date.today().isoformat()
+    base = "property_id=? AND reservation_id != 'monthly-aggregate'"
+    facts = conn.execute(
+        f"""SELECT SUM(check_in >= ?) AS future, COUNT(DISTINCT COALESCE(NULLIF(platform,''),'other')) AS platforms,
+                   COUNT(DISTINCT source) AS sources, SUM(status='cancelled') AS cancelled
+            FROM bookings WHERE {base}""", (today, property_id)).fetchone()
+    b_when = a.get("b_when") if a.get("b_when") in ("upcoming", "past") and facts["future"] else ""
+    b_platform = a.get("b_platform") or ""
+    b_source = a.get("b_source") or ""
+    b_status = a.get("b_status") if a.get("b_status") in ("cancelled", "all") and facts["cancelled"] else "confirmed"
+    default_dir = "asc" if b_when == "upcoming" else "desc"   # nearest check-in first for what's coming; newest first for history
+    b_sort = a.get("b_sort") if a.get("b_sort") in ("check_in", "check_out", "gross") else "check_in"
+    b_dir = a.get("b_dir") if a.get("b_dir") in ("asc", "desc") else default_dir
+    sort_col = {"check_in": "check_in", "check_out": "check_out", "gross": "gross_revenue"}[b_sort]
+
+    clauses, params = [base], [property_id]
+    if b_status != "all":
+        clauses.append("status=?"); params.append(b_status)
+    if b_when == "upcoming":
+        clauses.append("check_in >= ?"); params.append(today)       # every future stay, whatever period is selected
+    else:
+        clauses.append("check_in < ? AND check_out > ?"); params += [end, start]
+        if b_when == "past":
+            clauses.append("check_in < ?"); params.append(today)
+    if b_platform:
+        clauses.append("COALESCE(NULLIF(platform,''),'other')=?"); params.append(b_platform)
+    if b_source:
+        clauses.append("source=?"); params.append(b_source)
+    where = " AND ".join(clauses)
     rows = conn.execute(
-        """SELECT *, CAST(julianday(check_out) - julianday(check_in) AS INTEGER) AS nights
-           FROM bookings WHERE property_id=? AND status='confirmed' AND reservation_id != 'monthly-aggregate'
-             AND check_in < ? AND check_out > ? ORDER BY check_in DESC LIMIT 100""",
-        (property_id, end, start),
-    ).fetchall()
+        f"""SELECT *, CAST(julianday(check_out) - julianday(check_in) AS INTEGER) AS nights
+            FROM bookings WHERE {where} ORDER BY {sort_col} {b_dir.upper()}, id {b_dir.upper()} LIMIT 100""", params).fetchall()
+    total_rows = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where}", params).fetchone()[0]
+    platforms = [r[0] for r in conn.execute(f"SELECT DISTINCT COALESCE(NULLIF(platform,''),'other') FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
+    sources = [r[0] for r in conn.execute(f"SELECT DISTINCT source FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
+    filters = {"b_when": b_when, "b_platform": b_platform, "b_source": b_source, "b_status": b_status if b_status != "confirmed" else ""}
+
+    def sort_href(column):
+        direction = ("asc" if b_dir == "desc" else "desc") if b_sort == column else ("asc" if column != "gross" and b_when == "upcoming" else "desc")
+        return cx_url("properties.bookings", property_id=property_id, **{k: v for k, v in filters.items() if v},
+                      b_sort=column, b_dir=direction)
 
     resp = make_response(render_template(
         "property/bookings.html", all_properties=get_properties(conn),
         **_ws(conn, ctx, prop, "bookings", is_overhead=is_overhead),
         booked_nights=kpis.booked_nights(conn, property_id, start, end),
-        adr=kpis.adr(conn, property_id, start, end), bookings=rows,
+        adr=kpis.adr(conn, property_id, start, end), bookings=rows, total_rows=total_rows,
+        b_sort=b_sort, b_dir=b_dir, sort_href=sort_href, filters=filters, platforms=platforms, sources=sources,
+        has_future=bool(facts["future"]), has_cancelled=bool(facts["cancelled"]),
+        ctx_params=link_params(),
         # Bookings is the reservation evidence layer -- what guests
         # actually booked and paid, so it's Gross Booking Revenue (the
         # true guest value) here, never the adjusted Urban Nest figure

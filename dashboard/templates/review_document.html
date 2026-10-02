@@ -79,8 +79,32 @@
       <p class="subtitle">{{ doc_type_label }} · {{ prop.name if prop else 'Property not detected' }}{% if period_label %} · {{ period_label }}{% endif %} · uploaded {{ doc.uploaded_at[:10] }}</p>
     </div>
     <div class="page-actions">
-      {% if confirmed %}{{ pill('Confirmed', 'pos') }}{% elif doc.status == 'failed' %}{{ pill('Could not read automatically', 'neg') }}{% else %}{{ pill('Needs review', 'warn') }}{% endif %}
+      {% if confirmed %}{{ pill(status_label, 'pos') }}{% elif doc.status == 'failed' %}{{ pill('Failed', 'neg') }}{% else %}{{ pill(status_label, 'warn') }}{% endif %}
+      {% if not confirmed %}
+        <form method="post" action="{{ url_for('documents.reject', doc_id=doc.id) }}" onsubmit="return confirm('Delete this draft? The extracted lines and the stored file are removed. Nothing has reached your figures, so no numbers change.')" style="display:inline">
+          <button type="submit" class="danger" title="Delete this draft and its stored file">Reject / delete draft</button>
+        </form>
+      {% endif %}
     </div>
+  </div>
+
+  {% if doc.status == 'failed' %}
+    <div class="flash warning" style="margin-bottom:var(--s3)"><strong>Couldn't read this automatically.</strong> {{ doc.failure_reason or 'Nothing could be read from this file.' }}{% if not extraction_available %} (Automatic extraction isn't configured.){% endif %}</div>
+  {% endif %}
+  {% for w in warnings %}
+    <div class="flash {{ 'warning' if w.level == 'warn' else 'info' }}" style="margin-bottom:var(--s2)">
+      {{ w.message }}{% if w.document_id %} <a href="{{ url_for('documents.review', doc_id=w.document_id) }}">Open the earlier upload</a>{% endif %}
+    </div>
+  {% endfor %}
+
+  <div class="card rv-summary" style="margin-bottom:var(--s4)">
+    <div class="rv-sum-item"><span class="label">Source file</span><strong class="truncate" title="{{ strip.filename }}">{{ strip.filename }}</strong><span class="note">{{ strip.size or '' }}{% if strip.size %} · {% endif %}uploaded {{ strip.uploaded[:16] }}</span></div>
+    <div class="rv-sum-item"><span class="label">Document type</span><strong>{{ strip.doc_type }}</strong><span class="note">{% if strip.method %}read by {{ strip.method }}{% else %}as chosen at upload{% endif %}</span></div>
+    <div class="rv-sum-item"><span class="label">Detected property</span><strong>{{ strip.property or 'Not detected' }}</strong><span class="note">{{ strip.property_how }}</span></div>
+    <div class="rv-sum-item"><span class="label">Detected period</span><strong>{{ strip.period or 'Not detected' }}</strong><span class="note">{{ strip.period_how or 'check each line\'s date' }}</span></div>
+    <div class="rv-sum-item"><span class="label">Extracted {{ strip.noun }}s</span><strong>{{ strip.rows }}</strong><span class="note">{% if not confirmed %}{{ strip.included }} included{% else %}{{ strip.included }} imported{% endif %}</span></div>
+    <div class="rv-sum-item"><span class="label">Extracted total</span><strong>{{ strip.extracted_total|money2 }}</strong><span class="note">{% if strip.income and strip.expense %}{{ strip.expense|money2 }} costs · {{ strip.income|money2 }} income{% elif strip.edited_total %}now {{ strip.included_total|money2 }} after your edits{% else %}all lines as read{% endif %}</span></div>
+    <div class="rv-sum-item"><span class="label">Confidence</span><strong>{{ (strip.confidence ~ '%') if strip.confidence is not none else 'Not reported' }}</strong><span class="note">{% if strip.low_confidence %}{{ strip.low_confidence }} line{{ 's' if strip.low_confidence != 1 }} below 70%{% elif strip.confidence is not none %}no low-confidence lines{% else %}spreadsheet or hand-entered{% endif %}</span></div>
   </div>
 
   <div class="rv-split">
@@ -211,7 +235,7 @@
 
       {% elif res_mode %}
         <div class="card">
-          <p class="note" style="margin:0 0 var(--s3)">Nothing could be read from this file automatically{% if doc.status == 'failed' %} (PDFs and photos need an extraction key; spreadsheets and text files are read without one){% endif %}. Enter the reservations from the statement by hand; blank rows are ignored.</p>
+          <p class="note" style="margin:0 0 var(--s3)">{% if not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: type the reservations from the statement below; blank rows are ignored. Each is checked against what's already on file.</p>
           <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
             {% for i in range(6) %}
               <div class="rv-row" data-row>
@@ -230,13 +254,14 @@
                 </div>
               </div>
             {% endfor %}
+            <label class="note" style="display:block; margin-bottom:var(--s2)"><input type="checkbox" name="allow_dups" value="1" style="width:auto"> Add even if they look like duplicates</label>
             <button type="submit">Add reservations</button>
           </form>
         </div>
 
       {% else %}
         <div class="card">
-          <p class="note" style="margin:0 0 var(--s3)">Nothing could be read from this file automatically{% if doc.status == 'failed' %} (PDFs and photos need an extraction key; spreadsheets and text files are read without one){% endif %}. Add its lines by hand; rows without an amount are ignored.</p>
+          <p class="note" style="margin:0 0 var(--s3)">{% if not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: add the lines from the source below; rows without an amount are ignored. Each is checked against what's already on file.</p>
           <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
             {% for i in range(5) %}
               <div class="rv-row" data-row>
@@ -255,12 +280,82 @@
                 </div>
               </div>
             {% endfor %}
+            <label class="note" style="display:block; margin-bottom:var(--s2)"><input type="checkbox" name="allow_dups" value="1" style="width:auto"> Add even if they look like duplicates</label>
             <button type="submit">Add to ledger</button>
           </form>
         </div>
       {% endif %}
     </div>
   </div>
+
+  <section class="section" style="margin-top:var(--s5)">
+    <div class="section-head"><h2>What happened to this file</h2><span class="note">Uploaded → extracted → edited → confirmed</span></div>
+
+    {% if confirmed and (created.transactions or created.bookings) %}
+      <div class="card flush" style="margin-bottom:var(--s3)">
+        <table>
+          <thead><tr><th colspan="5">Records created from this document</th></tr>
+            <tr><th>Property</th><th>Date</th><th>Detail</th><th class="num">Amount</th><th>Source line</th></tr></thead>
+          <tbody>
+            {% for t in created.transactions %}
+              <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+                <td>{{ t.property_name }}</td><td>{{ t.date }}</td><td class="truncate">{{ t.vendor or t.description or '—' }} <span class="note">· {{ t.category|replace('_', ' ')|title }}</span></td><td class="num">{{ t.amount|money2 }}</td><td class="note">Transaction</td>
+              </tr>
+            {% endfor %}
+            {% for b in created.bookings %}
+              <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+                <td>{{ b.property_name }}</td><td>{{ b.check_in }}</td><td>{{ b.platform or 'Reservation' }} <span class="note">· to {{ b.check_out }}</span></td><td class="num">{{ b.net_revenue|money2 }}</td><td class="note">Reservation</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    {% if kpi_changes %}
+      <div class="card flush" style="margin-bottom:var(--s3)">
+        <table>
+          <thead><tr><th colspan="4">Figures that moved when this was confirmed (property-month totals)</th></tr>
+            <tr><th>Property · period</th><th class="num">Revenue</th><th class="num">Costs</th><th class="num">Booked nights</th></tr></thead>
+          <tbody>
+            {% for k in kpi_changes %}
+              <tr><td>{{ k.property }} · {{ k.period }}</td>
+                  <td class="num">{{ k.before.revenue|money2 }} → {{ k.after.revenue|money2 }}</td>
+                  <td class="num">{{ k.before.costs|money2 }} → {{ k.after.costs|money2 }}</td>
+                  <td class="num">{{ k.before.booked_nights }} → {{ k.after.booked_nights }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <div class="card">
+      {% if events %}
+        <ol class="trail">
+          {% for e in events %}
+            <li>
+              <div><span class="trail-ev trail-{{ e.event }}">{{ e.label }}</span> <span class="note">{{ e.timestamp[:16] }}</span></div>
+              <div>{{ e.summary }}</div>
+              {% if e.event == 'edited' and e.detail %}
+                <details><summary class="note">See what changed</summary>
+                  <ul class="note">{% for d in e.detail %}{% for c in d.changes %}<li>{{ d.line }} · {{ c.field|replace('_', ' ') }}: {{ c['from'] if c['from'] is not none else '—' }} → {{ c.to if c.to is not none else '—' }}</li>{% endfor %}{% endfor %}</ul></details>
+              {% elif e.event == 'extracted' and e.detail %}
+                <details><summary class="note">How it decided</summary>
+                  <ul class="note">
+                    <li>Read by {{ e.detail.method }}</li>
+                    <li>Property: {{ e.detail.property.source }}{% if e.detail.property.confidence %} ({{ (e.detail.property.confidence * 100)|round|int }}% name match){% endif %}</li>
+                    {% if e.detail.period %}<li>Period: {{ e.detail.period.source }}{% if e.detail.period.ambiguous %} (spans several months){% endif %}</li>{% endif %}
+                    {% if e.detail.warnings %}<li>Flagged: {{ e.detail.warnings|join(', ')|replace('_', ' ') }}</li>{% endif %}
+                  </ul></details>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="note" style="margin:0">No trail was recorded for this file (it was uploaded before ingestion tracking was added).</p>
+      {% endif %}
+    </div>
+  </section>
 
   <script src="{{ url_for('static', filename='review.js', v=asset_v) }}"></script>
 {% endblock %}

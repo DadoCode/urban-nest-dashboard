@@ -16,10 +16,28 @@ extract() returns {"items": [...], "document_hint": str|None,
 import base64
 import csv
 import json
+import logging
 import mimetypes
 import os
 import re
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+# The extraction API rejects images over 5 MB; checking first lets us say so
+# plainly instead of surfacing an opaque API error.
+IMAGE_API_LIMIT = 5 * 1024 * 1024
+
+NO_KEY_MESSAGE = "Automatic extraction isn't configured. You can enter the extracted rows manually."
+
+
+class ExtractionFailure(Exception):
+    """A known, explainable reason a file could not be read automatically.
+    `message` is written for the person uploading, never for a log."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code, self.message = code, message
 
 EXTRACTION_PROMPT = """You are looking at a document from a UK short-term-rental \
 business: it could be an Amazon/Temu order confirmation, a cleaner's invoice, \
@@ -180,16 +198,28 @@ def available():
     return bool(_load_key())
 
 
-def extract(file_path, mime_type=None, doc_type=None):
-    """doc_type == 'booking_statement' means "read reservations" (each
-    item is a real booking with check-in/out); anything else reads plain
-    money-in/money-out transaction lines. Never raises -- an upload that
+def extract_with_reason(file_path, mime_type=None, doc_type=None):
+    """(result, failure): exactly one is None. `failure` is
+    {"code", "message"} in plain words. Never raises -- an upload that
     can't be read automatically must fall through to "enter it by hand",
     never a crash, no matter how malformed the file turns out to be."""
     try:
-        return _extract(file_path, mime_type, doc_type)
-    except Exception:
-        return None
+        result = _extract(file_path, mime_type, doc_type)
+    except ExtractionFailure as e:
+        return None, {"code": e.code, "message": e.message}
+    except Exception as e:  # noqa: BLE001 -- anything else is still "couldn't read it"
+        log.warning("extraction crashed on %s: %s", Path(str(file_path)).name, type(e).__name__)
+        return None, {"code": "unexpected", "message": "This file couldn't be read automatically. You can enter its rows manually."}
+    if result is None:
+        return None, {"code": "unreadable", "message": "Nothing could be read from this file. You can enter its rows manually."}
+    return result, None
+
+
+def extract(file_path, mime_type=None, doc_type=None):
+    """doc_type == 'booking_statement' means "read reservations" (each
+    item is a real booking with check-in/out); anything else reads plain
+    money-in/money-out transaction lines. Returns the result or None."""
+    return extract_with_reason(file_path, mime_type, doc_type)[0]
 
 
 def _extract(file_path, mime_type, doc_type):
@@ -209,9 +239,12 @@ def _extract(file_path, mime_type, doc_type):
     # can still be read as a table; otherwise hand the text to the model.
     text = read_text(file_path)
     if text is None:
-        return None
+        raise ExtractionFailure("unreadable", "This file has no readable text (it may be binary or empty). You can enter its rows manually.")
     if name.endswith(".txt"):
-        tabular = _extract_csv(file_path, reservations, doc_type)
+        try:
+            tabular = _extract_csv(file_path, reservations, doc_type)
+        except ExtractionFailure:
+            tabular = None
         if tabular:
             return tabular
     return _extract_via_claude(file_path, mime_type, prompt, reservations, text=text)
@@ -240,22 +273,25 @@ def _extract_via_claude(file_path, mime_type, prompt=None, reservations=False, t
     prompt = prompt or EXTRACTION_PROMPT
     api_key = _load_key()
     if not api_key:
-        return None
+        raise ExtractionFailure("no_key", NO_KEY_MESSAGE)
     try:
         import anthropic
     except ImportError:
-        return None
+        raise ExtractionFailure("not_installed", "Automatic extraction isn't available because its library isn't installed. You can enter the rows manually.")
 
     if text is not None:
         content_block = {"type": "text", "text": "DOCUMENT TEXT:\n" + text[:60000]}
     else:
+        size = os.path.getsize(file_path)
+        if mime_type and mime_type.startswith("image/") and size > IMAGE_API_LIMIT:
+            raise ExtractionFailure("too_large_to_read", f"This photo is {size / 1024 / 1024:.1f} MB, over the 5 MB limit for automatic reading. Upload a smaller or compressed photo, or enter the rows manually.")
         data = base64.standard_b64encode(open(file_path, "rb").read()).decode()
         if mime_type == "application/pdf":
             content_block = {"type": "document", "source": {"type": "base64", "media_type": mime_type, "data": data}}
         elif mime_type and mime_type.startswith("image/"):
             content_block = {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": data}}
         else:
-            return None
+            raise ExtractionFailure("unsupported", "This kind of file can't be read automatically. You can enter its rows manually.")
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -264,22 +300,27 @@ def _extract_via_claude(file_path, mime_type, prompt=None, reservations=False, t
             max_tokens=4096 if reservations else 2048,
             messages=[{"role": "user", "content": [content_block, {"type": "text", "text": prompt}]}],
         )
-        text = "".join(block.text for block in response.content if block.type == "text").strip()
-        if text.startswith("```"):
-            text = text.strip("`")
-            text = text.split("\n", 1)[1] if "\n" in text else text
-        result = json.loads(text)
-        if not isinstance(result, dict) or not isinstance(result.get("items"), list):
-            return None
-        return {
-            "items": result["items"],
-            "document_hint": result.get("document_hint"),
-            "period_hint": result.get("period_hint"),
-            "kind": "reservation" if reservations else "transaction",
-            "platform": result.get("platform"),
-        }
-    except Exception:
-        return None
+    except Exception as e:  # noqa: BLE001 -- network/auth/quota: report the class only, never the key or payload
+        log.warning("extraction API call failed: %s", type(e).__name__)
+        raise ExtractionFailure("api_error", f"Automatic extraction didn't complete ({type(e).__name__}). Try again later, or enter the rows manually.")
+
+    out = "".join(block.text for block in response.content if block.type == "text").strip()
+    if out.startswith("```"):
+        out = out.strip("`")
+        out = out.split("\n", 1)[1] if "\n" in out else out
+    try:
+        result = json.loads(out)
+    except ValueError:
+        raise ExtractionFailure("bad_response", "The document was sent for reading but the reply couldn't be understood. Try again, or enter the rows manually.")
+    if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+        raise ExtractionFailure("bad_response", "The document was sent for reading but the reply couldn't be understood. Try again, or enter the rows manually.")
+    return {
+        "items": result["items"],
+        "document_hint": result.get("document_hint"),
+        "period_hint": result.get("period_hint"),
+        "kind": "reservation" if reservations else "transaction",
+        "platform": result.get("platform"),
+    }
 
 
 _COLUMN_HINTS = {
@@ -337,21 +378,15 @@ def _rows_to_items(header, rows, doc_type=None):
 
 
 def _extract_csv(file_path, reservations=False, doc_type=None):
-    with open(file_path, newline="", encoding="utf-8-sig", errors="replace") as f:
-        sample = f.read(4096)
-        f.seek(0)
-        delimiter = "\t" if str(file_path).lower().endswith(".tsv") else _sniff_delimiter(sample)
-        reader = csv.reader(f, delimiter=delimiter)
-        rows = list(reader)
-    if not rows:
-        return None
-    if reservations:
-        items = _rows_to_reservations(rows[0], rows[1:])
-        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
-    items = _rows_to_items(rows[0], rows[1:], doc_type)
-    if items is None:
-        return None
-    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}
+    try:
+        with open(file_path, newline="", encoding="utf-8-sig", errors="replace") as f:
+            sample = f.read(4096)
+            f.seek(0)
+            delimiter = "\t" if str(file_path).lower().endswith(".tsv") else _sniff_delimiter(sample)
+            rows = list(csv.reader(f, delimiter=delimiter))
+    except (csv.Error, OSError):
+        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened -- it looks corrupted or isn't really a CSV. Re-export it, or enter the rows manually.")
+    return _sheet_result(rows, reservations, doc_type)
 
 
 def _sniff_delimiter(sample):
@@ -367,49 +402,72 @@ def _extract_xls(file_path, reservations=False, doc_type=None):
     try:
         import xlrd
     except ImportError:
-        return None
+        raise ExtractionFailure("not_installed", "Old-format .xls files can't be read here. Save it as .xlsx or .csv and upload that, or enter the rows manually.")
     try:
         ws = xlrd.open_workbook(file_path).sheet_by_index(0)
     except Exception:
-        return None
+        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened -- it looks corrupted. Re-export it, or enter the rows manually.")
     rows = [[ws.cell_value(r, c) for c in range(ws.ncols)] for r in range(ws.nrows)]
     return _sheet_result(rows, reservations, doc_type)
-
-
-def _sheet_result(rows, reservations, doc_type=None):
-    if not rows:
-        return None
-    header = [str(c) if c is not None else "" for c in rows[0]]
-    if reservations:
-        items = _rows_to_reservations(header, rows[1:])
-        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
-    items = _rows_to_items(header, rows[1:], doc_type)
-    if items is None:
-        return None
-    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}
 
 
 def _extract_xlsx(file_path, reservations=False, doc_type=None):
     try:
         import openpyxl
     except ImportError:
-        return None
-    wb = openpyxl.load_workbook(file_path, data_only=True)
-    ws = wb.active
-    rows = [[c.value for c in row] for row in ws.iter_rows()]
-    if not rows:
-        return None
+        raise ExtractionFailure("not_installed", "Excel files can't be read here. Save it as .csv and upload that, or enter the rows manually.")
+    try:
+        ws = openpyxl.load_workbook(file_path, data_only=True).active
+        rows = [[c.value for c in row] for row in ws.iter_rows()]
+    except Exception:
+        raise ExtractionFailure("malformed_spreadsheet", "This spreadsheet couldn't be opened -- it looks corrupted or password-protected. Re-export it, or enter the rows manually.")
+    return _sheet_result(rows, reservations, doc_type)
+
+
+def _sheet_result(rows, reservations, doc_type=None):
+    """One reader for csv/xls/xlsx. Raises a specific ExtractionFailure for
+    an empty sheet or unrecognised columns. `rows_seen` (non-blank data
+    rows) lets the caller report how many rows could not be read."""
+    if not rows or not any(str(c or "").strip() for c in rows[0]):
+        raise ExtractionFailure("empty_file", "This file is empty (no header row). You can enter its rows manually.")
     header = [str(c) if c is not None else "" for c in rows[0]]
+    data_rows = rows[1:]
+    rows_seen = sum(1 for r in data_rows if any(str(c or "").strip() for c in r))
     if reservations:
-        items = _rows_to_reservations(header, rows[1:])
-        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None} if items else None
-    items = _rows_to_items(header, rows[1:], doc_type)
+        items = _rows_to_reservations(header, data_rows)
+        if items is None:
+            raise ExtractionFailure("columns_not_recognised", "This doesn't look like a booking statement: no check-in date and payout/amount columns were found. Check the document type, or enter the reservations manually.")
+        return {"items": items, "document_hint": None, "period_hint": None, "kind": "reservation", "platform": None, "rows_seen": rows_seen}
+    items = _rows_to_items(header, data_rows, doc_type)
     if items is None:
-        return None
-    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction"}
+        raise ExtractionFailure("columns_not_recognised", "No Amount column was found. Expected headers like Date, Vendor, Description and Amount. Rename the columns, or enter the rows manually.")
+    return {"items": items, "document_hint": None, "period_hint": None, "kind": "transaction", "rows_seen": rows_seen}
 
 
 _NON_WORD = re.compile(r"[^a-z0-9]+")
+
+
+def rank_properties(hint_text, properties):
+    """Every property whose name/address matches the text well enough
+    (>= half its words), best first: [{"id", "name", "score"}]. Several
+    close scores means the text is ambiguous."""
+    if not hint_text:
+        return []
+    hint = _NON_WORD.sub(" ", hint_text.lower())
+    out = []
+    for p in properties:
+        best, best_hits = 0.0, 0
+        for candidate in (p["name"], p["address"] or ""):
+            words = [w for w in _NON_WORD.sub(" ", candidate.lower()).split() if len(w) > 2]
+            if not words:
+                continue
+            hits = sum(1 for w in words if w in hint)
+            if (hits / len(words), hits) > (best, best_hits):
+                best, best_hits = hits / len(words), hits
+        if best >= 0.5:
+            out.append({"id": p["id"], "name": p["name"], "score": round(best, 2), "hits": best_hits})
+    # a longer name that matches in full is more specific than a shorter one inside it
+    return sorted(out, key=lambda c: (-c["score"], -c["hits"]))
 
 
 def guess_property(hint_text, properties):
@@ -417,17 +475,5 @@ def guess_property(hint_text, properties):
     known property names/addresses. Returns (property_id, confidence) or
     (None, 0) -- confidence is just "how much of the property's own name
     matched", not a calibrated probability."""
-    if not hint_text:
-        return None, 0.0
-    hint = _NON_WORD.sub(" ", hint_text.lower())
-    best_id, best_score = None, 0.0
-    for p in properties:
-        for candidate in (p["name"], p["address"] or ""):
-            words = [w for w in _NON_WORD.sub(" ", candidate.lower()).split() if len(w) > 2]
-            if not words:
-                continue
-            hits = sum(1 for w in words if w in hint)
-            score = hits / len(words)
-            if score > best_score:
-                best_id, best_score = p["id"], score
-    return (best_id, round(best_score, 2)) if best_score >= 0.5 else (None, 0.0)
+    ranked = rank_properties(hint_text, properties)
+    return (ranked[0]["id"], ranked[0]["score"]) if ranked else (None, 0.0)

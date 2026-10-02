@@ -6,6 +6,7 @@ import re
 from flask import Blueprint, redirect, render_template, request, url_for
 
 import db
+import services.ingest as ingest
 import services.kpis as kpis
 from services.common import METRIC_INFO, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta
 from services.context import compare_bounds, range_params, request_context
@@ -90,8 +91,14 @@ def booking_drawer(booking_id):
            FROM bookings b JOIN properties p ON p.id = b.property_id WHERE b.id=?""", (booking_id,)).fetchone()
     if not b:
         return "<p class='note'>Booking not found.</p>", 404
-    doc = conn.execute("SELECT id, filename FROM documents WHERE id=?", (b["document_id"],)).fetchone() if b["document_id"] else None
-    return render_template("partials/booking_drawer.html", b=b, doc=doc)
+    line = None
+    if b["document_id"]:
+        # the extracted line this reservation came from: same confirmation code, else same stay dates
+        line = (conn.execute("SELECT * FROM document_items WHERE document_id=? AND reservation_id=? AND reservation_id != '' LIMIT 1",
+                             (b["document_id"], b["reservation_id"])).fetchone()
+                or conn.execute("SELECT * FROM document_items WHERE document_id=? AND check_in=? AND check_out=? LIMIT 1",
+                                (b["document_id"], b["check_in"], b["check_out"])).fetchone())
+    return render_template("partials/booking_drawer.html", b=b, prov=ingest.provenance(conn, b["document_id"], line))
 
 
 @bp.route("/bookings/day/<day>")
