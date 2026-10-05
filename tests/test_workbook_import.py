@@ -361,6 +361,78 @@ A.undo_batch(c8, bid0, "test")
 undone_first = True
 check("I undoing the first full import works and leaves the pre-import rows back", undone_first and snapshot(c8) == before_all, "")
 
+# ------------------------------------------------------------------ L
+print("L  workbook quirks found in the real file")
+plan_jan = P.plan_month(c8, parsed, "2026-01", with_after=False)
+e170 = item(plan_jan, "170E")
+check("L 170E Jan: the unlabelled 8.14 its block total counts is imported (as '(no label)') and the month reconciles",
+      e170["status"] == "ok" and any(d["new"] and d["new"]["description"] == "(no label)" and abs(d["new"]["amount"] - 8.14) < 1e-9 for d in e170["rows"]), e170["status"])
+check("L unlabelled amounts are reported, not silent", any(i["code"] == "unlabelled_amount" for i in parsed["issues"]))
+tcr_rows = [d["new"] for d in item(plan, "TCR")["rows"] if d["new"] and d["new"]["category"] == "management_fee"]
+check("L TCR (no fee row on its sheet): the Main Page fee 1795.71 is recorded as a management_fee row", len(tcr_rows) == 1 and abs(tcr_rows[0]["amount"] - 1795.707) < 1e-6, tcr_rows)
+check("L ...and does not disturb TCR's Opex reconciliation", all(ch["status"] == "PASS" for ch in item(plan, "TCR")["checks"]), [ch for ch in item(plan, "TCR")["checks"] if ch["status"] != "PASS"])
+plan_apr = P.plan_month(c8, parsed, "2026-04", with_after=False)
+rate = [ch for ch in item(plan_apr, "TCR")["checks"] if ch["metric"] == "Management fee rate"]
+check("L TCR April: a fee that is not 15% of the income is flagged", rate and rate[0]["status"] == "REVIEW", rate)
+cc_jan = [ch for ch in item(plan_jan, "CC")["checks"] if ch["metric"] == "Management fee"]
+check("L CC January: stale Main Page fee (346.18 vs sheet 393.46) is flagged", cc_jan and cc_jan[0]["status"] == "REVIEW", cc_jan)
+check("L 11PW June: workbook occupancy that disagrees with its Days Booked is flagged",
+      any(ch["metric"] == "Occupancy" and ch["status"] == "REVIEW" for ch in item(P.plan_month(c8, parsed, "2026-06", with_after=False), "11PW")["checks"]))
+w8_jan = item(plan_jan, "W8")
+check("L W8 January: a text '£1.59' amount in the breakdown blocks that property, with the cell named", w8_jan["status"] == "error" and any("D76" in r for r in w8_jan["reasons"]), w8_jan["reasons"])
+nw4_jul = item(P.plan_month(c8, parsed, "2026-07", with_after=False), "NW4")
+check("L NW4 July: workbook blank but dashboard has rows -> would remove them, so flagged", nw4_jul["status"] in ("review", "no_activity") and (nw4_jul["status"] != "review" or any("blank" in r for r in nw4_jul["reasons"])))
+
+# ------------------------------------------------------------------ K  the pages
+print("K  pages and gates")
+import io  # noqa: E402
+import re  # noqa: E402
+from app import create_app  # noqa: E402
+
+client = create_app().test_client()
+snap_k0 = snapshot(db.get_conn())
+check("K import page and reframed Documents page load", client.get("/imports").status_code == 200 and
+      b"Source documents" in client.get("/documents").data and b"Import monthly workbook" in client.get("/documents").data)
+bad = client.post("/imports/upload", data={"workbook": (io.BytesIO(b"not a workbook"), "notes.txt")}, content_type="multipart/form-data")
+check("K non-Excel upload refused", bad.status_code == 302 and c8.execute("SELECT COUNT(*) FROM import_batches WHERE filename='notes.txt'").fetchone()[0] == 0)
+junk = client.post("/imports/upload", data={"workbook": (io.BytesIO(b"PK junk"), "broken.xlsx")}, content_type="multipart/form-data", follow_redirects=True)
+check("K corrupt .xlsx gives a friendly message, not a 500", junk.status_code == 200 and b"not an .xlsx workbook" in junk.data or b"could not be opened" in junk.data)
+up = client.post("/imports/upload", data={"workbook": (io.BytesIO(ORIGINAL), "Biz_Accounts_Tracker_2026_Sept_v4.xlsx")}, content_type="multipart/form-data")
+loc = up.headers["Location"]
+page = client.get(loc).data.decode()
+check("K preview defaults to September (latest month where most properties have income)", "Import September 2026 only" in page)
+check("K preview names the unmapped-property wording, new-property check and the credential exclusion", "excluded by name" in page and "Not in dashboard" in page)
+check("K preview shows now -> workbook figures and reconciliation", "Reconciliation (workbook vs what would be imported)" in page and "PASS" in page)
+fp = re.search(r'name="fingerprint" value="([^"]+)"', page).group(1)
+ticked = re.findall(r'name="include" value="([^"]+)" checked', page)
+check("K only clean properties are pre-ticked (NW4 / Draycott need a deliberate tick)", "nw4" not in ticked and "19-draycott-ave" not in ticked and "crested-court" in ticked, ticked)
+n0 = c8.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+r = client.post(loc + "/apply", data={"month": SEP, "fingerprint": "stale", "include": ticked})
+check("K a stale preview is refused and nothing is written", c8.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == n0)
+r = client.post(loc + "/apply", data={"month": SEP, "fingerprint": fp, "include": ticked + ["nw4"]})
+check("K a flagged property needs the acknowledgement tick", c8.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == n0)
+r = client.post(loc + "/apply", data={"month": SEP, "fingerprint": fp, "include": ticked})
+bid_k = int(loc.rsplit("/", 1)[1])
+check("K apply through the page records an applied batch", c8.execute("SELECT status FROM import_batches WHERE id=?", (bid_k,)).fetchone()[0] == "applied")
+led = client.get(f"/expenses?from={SEP}-01&to={SEP}-01&t_batch={bid_k}").data.decode()
+check("K the ledger can be filtered to one import's rows, and shows the batch link", f"Import #{bid_k}" in led and f"#{bid_k}</a>" in led)
+check("K provenance line appears for the imported month and not for an untouched one",
+      b"Updated from workbook" in client.get(f"/expenses?from={SEP}-01&to={SEP}-01").data and b"Updated from workbook" not in client.get("/expenses?from=2026-05-01&to=2026-05-01").data)
+done = client.get(loc).data.decode()
+check("K applied page shows before/after, reconciliation and workbook = ledger = dashboard", "Before and after" in done and "Workbook = ledger = dashboard" in done and "Undo import" in done)
+snap_applied = snapshot(db.get_conn())
+client.post(loc + "/undo")
+check("K undo through the page restores the pre-import ledger", c8.execute("SELECT status FROM import_batches WHERE id=?", (bid_k,)).fetchone()[0] == "undone" and snapshot(db.get_conn()) == snap_k0)
+check("K sort / filter on the batch list works", client.get("/imports?status=applied&sort=period&dir=asc").status_code == 200 and client.get("/imports?sort=bogus&status=bogus").status_code == 200)
+import subprocess  # noqa: E402
+demo_env = {**os.environ, "UN_DEMO_MODE": "1"}
+probe = subprocess.run([sys.executable, "-c",
+    "import sys,io;sys.path.insert(0,r'%s');from app import create_app;c=create_app().test_client();"
+    "r=c.post('/imports/upload',data={'workbook':(io.BytesIO(b'x'),'a.xlsx')},content_type='multipart/form-data');"
+    "p=c.get('/imports').data;print(r.status_code, b'Imports are off in this demo' in p)" % (ROOT / "dashboard")],
+    env=demo_env, capture_output=True, text=True)
+check("K demo mode: uploads refused and the page says imports are off", probe.stdout.strip() == "302 True", probe.stdout + probe.stderr[-300:])
+
 # ---------------------------------------------------------------- summary
 print("provenance")
 check("provenance helper finds nothing after undo", B.provenance(c8, "crested-court", SEP) is None)

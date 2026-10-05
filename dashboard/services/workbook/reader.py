@@ -216,10 +216,15 @@ def read_block(sheet, header_row, end_row, months, issues, scope, year):
         key = ym(year, m)
         total_row = _block_total_row(sheet, lc, vc, header_row + 1, end_row)
         stop = total_row if total_row else end_row + 1
+        counted = _coeffs(sheet.formula(total_row, vc), vc) if total_row else None   # rows the block's own SUM counts
         items = []
         for r in range(header_row + 1, stop):
             label = sheet.value(r, lc)
             if label is None:
+                # an amount with no label that the block's own total counts is real money: keep it, visibly
+                if counted and counted.get(r, 0) > 0 and _is_number(sheet.value(r, vc)):
+                    items.append({"label": "(no label)", "amount": round(float(sheet.value(r, vc)), 4), "ref": sheet.ref(r, vc)})
+                    issues.add("info", "unlabelled_amount", f"{sheet.ref(r, vc)} has an amount with no label that the block total counts; imported as '(no label)'.", scope, sheet.ref(r, vc), key)
                 continue
             amount_cell = sheet.cells.get((r, vc))
             if amount_cell is None:

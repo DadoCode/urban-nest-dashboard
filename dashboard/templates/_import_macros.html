@@ -1,0 +1,26 @@
+{# Number and status formatting for the workbook import pages. Pence are shown: this is where figures are checked. #}
+{% macro val(v, kind) -%}
+  {%- if v is none -%}—
+  {%- elif kind == 'money' -%}{{ '−' if v < 0 }}£{{ '{:,.2f}'.format(v|abs) }}
+  {%- elif kind == 'pct' -%}{{ '{:.1f}'.format(v * 100) }}%
+  {%- else -%}{{ '{:,.0f}'.format(v) }}{%- endif -%}
+{%- endmacro %}
+{% macro change(a, b, kind) -%}
+  {%- if a is none or b is none -%}
+  {%- else -%}{%- set d = b - a -%}
+    {%- if kind == 'money' -%}{%- if d|abs < 0.005 -%}<span class="note">no change</span>{%- else -%}<span class="{{ 'pos' if d > 0 else 'neg' }}">{{ '+' if d > 0 else '−' }}£{{ '{:,.2f}'.format(d|abs) }}</span>{%- endif -%}
+    {%- elif kind == 'pct' -%}{%- if d|abs < 0.0005 -%}<span class="note">no change</span>{%- else -%}<span class="{{ 'pos' if d > 0 else 'neg' }}">{{ '+' if d > 0 else '−' }}{{ '{:.1f}'.format(d|abs * 100) }} pts</span>{%- endif -%}
+    {%- else -%}{%- if d|abs < 0.5 -%}<span class="note">no change</span>{%- else -%}<span class="{{ 'pos' if d > 0 else 'neg' }}">{{ '+' if d > 0 else '−' }}{{ '{:,.0f}'.format(d|abs) }}</span>{%- endif -%}
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+{% macro status_pill(status) -%}
+  {%- set m = {'ok': ('pos', 'Ready'), 'review': ('warn', 'Needs review'), 'error': ('neg', 'Blocked'), 'unchanged': ('', 'Already up to date'),
+               'no_activity': ('', 'No activity'), 'missing_sheet': ('warn', 'Sheet missing'), 'not_in_dashboard': ('neg', 'Not in dashboard'),
+               'applied': ('pos', 'Applied'), 'undone': ('', 'Undone'), 'staged': ('warn', 'Not imported yet')} -%}
+  <span class="pill {{ m[status][0] if status in m else '' }}">{{ m[status][1] if status in m else status }}</span>
+{%- endmacro %}
+{% macro row_pill(s) -%}
+  <span class="pill {{ {'NEW': 'pos', 'CHANGED': 'warn', 'REMOVED': 'neg', 'UNCHANGED': ''}[s] }}">{{ s }}</span>
+{%- endmacro %}
+{% macro check_pill(s) -%}<span class="pill {{ 'pos' if s == 'PASS' else 'warn' }}">{{ s }}</span>{%- endmacro %}

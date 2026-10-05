@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_head, empty_state %}
+{% from "_import_macros.html" import status_pill %}
+{% block title %}Import monthly workbook — Urban Nest Estates{% endblock %}
+{% block content %}
+  {{ page_head("Import monthly workbook", "Upload the monthly workbook prepared from your source documents. It is checked, you see exactly what would change for the month, and only then is it imported. Any import can be undone.") }}
+  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('documents.index') }}">&larr; Documents</a> · <a href="{{ url_for('reconcile.index') }}">Reconciliation</a></p>
+
+  <div class="card">
+    {% if demo_mode %}
+      <div class="empty" style="padding:var(--s4)"><div class="empty-title">Imports are off in this demo</div><div class="empty-body" style="margin-bottom:0">{{ demo_message }}</div></div>
+    {% else %}
+      <form method="post" action="{{ url_for('imports.upload') }}" enctype="multipart/form-data" class="filter-bar" style="margin:0">
+        <input type="file" name="workbook" accept=".xlsx,.xlsm" required>
+        <button type="submit">Check workbook</button>
+      </form>
+      <p class="note" style="margin:var(--s3) 0 0">One Excel workbook in the standard monthly layout. Only the sheets this importer knows are read; a sheet holding logins is excluded by name and never opened. The file itself is not kept — only the figures read from it, so a batch can be reviewed and undone.</p>
+    {% endif %}
+  </div>
+
+  <nav class="tabs" style="margin-top:var(--s5)">
+    <a href="?" class="tab {{ 'active' if not f_status }}">All</a>
+    <a href="?status=applied" class="tab {{ 'active' if f_status == 'applied' }}">Applied</a>
+    <a href="?status=staged" class="tab {{ 'active' if f_status == 'staged' }}">Not imported yet</a>
+    <a href="?status=undone" class="tab {{ 'active' if f_status == 'undone' }}">Undone</a>
+  </nav>
+  <div class="card flush">
+    {% if batches %}
+      {% macro sort_link(key, label) %}<a class="sort {{ 'on' if sort == key }}" href="?status={{ f_status }}&sort={{ key }}&dir={{ 'asc' if (sort == key and direction == 'desc') else 'desc' }}">{{ label }}{% if sort == key %} {{ '↑' if direction == 'asc' else '↓' }}{% endif %}</a>{% endmacro %}
+      <table>
+        <thead><tr><th>{{ sort_link('uploaded', 'Uploaded') }}</th><th>Workbook</th><th>{{ sort_link('period', 'Period') }}</th><th>{{ sort_link('status', 'Status') }}</th><th>Properties</th><th class="num">Row changes</th><th></th></tr></thead>
+        <tbody>
+          {% for b in batches %}
+            <tr>
+              <td class="note">{{ b.uploaded_at[:16] }}</td>
+              <td class="truncate" title="{{ b.filename }}">{{ b.filename }}</td>
+              <td>{{ b.period_label }}</td>
+              <td>{{ status_pill(b.status) }}</td>
+              <td class="note">{{ b.property_names|length }}{% if b.property_names %} · {{ b.property_names[:3]|join(', ') }}{% if b.property_names|length > 3 %}…{% endif %}{% endif %}</td>
+              <td class="num">{{ b.row_count }}</td>
+              <td class="num"><a class="btn secondary" href="{{ url_for('imports.batch', batch_id=b.id) }}">{{ 'Review' if b.status == 'staged' else 'View' }}</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      {{ empty_state("No imports yet", "Upload the monthly workbook above to preview your first import.") }}
+    {% endif %}
+  </div>
+{% endblock %}

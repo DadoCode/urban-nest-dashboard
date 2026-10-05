@@ -76,6 +76,20 @@ def provenance(conn, property_id, ym):
     return None
 
 
+def provenance_for_range(conn, property_id, start_ym, end_ym):
+    """The most recent applied import that wrote any month in [start_ym, end_ym] for this property (or any property).
+    Quiet by design: a demo database that predates the import tables simply has none."""
+    try:
+        rows = conn.execute("SELECT id, filename, applied_at, period, properties FROM import_batches WHERE status='applied' "
+                            "AND period>=? AND period<=? ORDER BY id DESC", (start_ym, end_ym)).fetchall()
+    except Exception:
+        return None
+    for r in rows:
+        if property_id is None or property_id in json.loads(r["properties"] or "[]"):
+            return {"id": r["id"], "filename": r["filename"], "applied_at": r["applied_at"], "period": r["period"]}
+    return None
+
+
 def list_batches(conn, status="", sort="uploaded", direction="desc"):
     order = {"uploaded": "uploaded_at", "period": "COALESCE(period,'')", "status": "status"}.get(sort, "uploaded_at")
     d = "ASC" if direction == "asc" else "DESC"

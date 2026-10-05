@@ -67,6 +67,18 @@ _DOC_SORTS = {
 }
 
 
+def _last_import(conn):
+    """The most recently applied workbook import, for the Documents page's primary card."""
+    try:
+        row = conn.execute("SELECT id, period, applied_at FROM import_batches WHERE status='applied' ORDER BY id DESC LIMIT 1").fetchone()
+    except Exception:                       # a demo database that predates the import tables
+        return None
+    if not row:
+        return None
+    from routes.imports import month_label
+    return {"id": row["id"], "period_label": month_label(row["period"]), "applied_at": row["applied_at"]}
+
+
 @bp.route("/documents")
 def index():
     conn = db.get_conn()
@@ -133,6 +145,7 @@ def index():
 
     return render_template(
         "documents.html", active="documents", all_properties=get_properties(conn), active_property=None, recon_needed=rc.needed_count(conn),
+        last_import=_last_import(conn),
         docs=rows, counts=counts, total=total, doc_types=DOC_TYPE_LABELS, status_labels=ingest.STATUS_FILTER_LABELS,
         periods=periods, sort=sort, sort_href=sort_href, extraction_available=extraction_available(),
         prefill_property=prefill_property, prefill_type=prefill_type,

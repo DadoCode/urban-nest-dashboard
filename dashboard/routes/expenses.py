@@ -108,6 +108,8 @@ def _ledger_where(ctx, start, end, args):
         clauses.append("t.vendor_id=?"); params.append(int(args["t_vendor"]))
     if args.get("t_source"):
         clauses.append("t.source=?"); params.append(args["t_source"])
+    if (args.get("t_batch") or "").isdigit():                      # rows written by one workbook import
+        clauses.append("t.import_batch_id=?"); params.append(int(args["t_batch"]))
     q = (args.get("t_q") or "").strip()
     if q:
         clauses.append("(t.vendor LIKE ? OR t.description LIKE ?)"); params += [f"%{q}%", f"%{q}%"]
@@ -299,7 +301,7 @@ def index():
         f"SELECT COUNT(*) n, COALESCE(SUM(t.amount),0) amt FROM transactions t JOIN properties p ON p.id=t.property_id WHERE {where}",
         params).fetchone()
 
-    f = {k: request.args.get(k) or "" for k in ("t_category", "t_type", "t_vendor", "t_q", "t_scope", "t_source")}
+    f = {k: request.args.get(k) or "" for k in ("t_category", "t_type", "t_vendor", "t_q", "t_scope", "t_source", "t_batch")}
     f["t_month"] = f_month
     chips = []
     base = range_params(ctx)
@@ -322,6 +324,8 @@ def index():
         chip(vname["name"] if vname else "Vendor", "t_vendor")
     if f["t_source"]:
         chip(f["t_source"].replace("_", " ").title(), "t_source")
+    if f["t_batch"]:
+        chip(f"Import #{f['t_batch']}", "t_batch")
     if f["t_q"]:
         chip(f'"{f["t_q"]}"', "t_q")
 

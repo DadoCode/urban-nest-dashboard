@@ -140,6 +140,22 @@ def create_app():
         return redirect(_back("documents.index"))
 
     @flask_app.context_processor
+    def _inject_provenance():
+        """Which workbook import last updated the figures on this page (shown quietly under the context bar)."""
+        from flask import g
+        import db as _db
+        from services.workbook import batches as _wb
+
+        def workbook_provenance(ctx):
+            try:
+                lo = f"{ctx['start_year']}-{ctx['start_month']:02d}"
+                hi = f"{ctx['end_year']}-{ctx['end_month']:02d}"
+                return _wb.provenance_for_range(_db.get_conn(), ctx.get("property_id"), lo, hi)
+            except Exception:
+                return None
+        return {"workbook_provenance": workbook_provenance}
+
+    @flask_app.context_processor
     def _inject_auth():
         from flask import g
         from routes.auth import enabled

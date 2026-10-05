@@ -69,6 +69,14 @@ def desired_property(parsed, code, ym):
         for item in detail["items"]:
             rows.append(_tx(pid, ym, "expense", item["description"] or item["vendor"] or "purchase", item["amount"],
                             "purchase", int(item["capex"]), item["vendor"], item["ref"]))
+    fee_main = parsed["main"]["months"].get(ym, {}).get("fees", {}).get(code)
+    if fee_main and not any(r["category"] == "management_fee" for r in rows):
+        # the sheet has no fee row but the Main Page records the month's fee: record it, so Management Fee Earned is the
+        # workbook's figure rather than the property's percentage applied to income
+        fee = _tx(pid, ym, "expense", "Management fee (Main Page)", fee_main, "management_fee", 0, None, f"Main Page{parsed['year'] % 100:02d} fee")
+        fee["_main_fee"] = True
+        rows.append(fee)
+        notes.append("management fee taken from the Main Page (the property sheet has no fee row)")
     summary = prop["summary"].get(ym, {})
     days, derived = summary.get("days"), False
     if days is None and summary.get("occupancy"):
@@ -194,9 +202,10 @@ def reconcile_property(parsed, code, ym, want, conn=None):
     prop = parsed["properties"][code]
     summary = prop["summary"].get(ym, {})
     rows = want["rows"]
-    inc = sum(r["amount"] for r in rows if r["direction"] == "income")
-    opex = sum(r["amount"] for r in rows if r["direction"] == "expense" and not r["capex"])
-    capex = sum(r["amount"] for r in rows if r["direction"] == "expense" and r["capex"])
+    own = [r for r in rows if not r.get("_main_fee")]          # what the property sheet itself counts
+    inc = sum(r["amount"] for r in own if r["direction"] == "income")
+    opex = sum(r["amount"] for r in own if r["direction"] == "expense" and not r["capex"])
+    capex = sum(r["amount"] for r in own if r["direction"] == "expense" and r["capex"])
     days = want["days"] or 0
     checks = [
         _check("Income", summary.get("income"), round(inc, 4)),
@@ -237,21 +246,25 @@ def reconcile_property(parsed, code, ym, want, conn=None):
                            "status": "REVIEW", "note": "OPEX/CAPEX subtotal differs from the rows its own formula counts", "fmt": "money"})
     # management fee: Main Page figure vs the fee that will be on the books
     fee_wb = parsed["main"]["months"].get(ym, {}).get("fees", {}).get(code)
-    if fee_wb is not None and conn is not None:
+    pct = None
+    if conn is not None:
+        pct = (conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (C.PROPERTY_SHEETS[code][0],)).fetchone() or [None])[0]
+    sheet_fee = sum(r["amount"] for r in own if r["category"] == "management_fee")
+    if fee_wb is not None and sheet_fee:
+        checks.append(_check("Management fee", fee_wb, round(sheet_fee, 4), note="Main Page vs the fee row on the property sheet"))
+    elif fee_wb and not sheet_fee:
+        if pct and inc:
+            rate = fee_wb / inc * 100
+            checks.append({"metric": "Management fee rate", "workbook": round(rate / 100, 4), "imported": round(pct / 100, 4), "diff": round((rate - pct) / 100, 4),
+                           "status": "PASS" if abs(rate - pct) <= 0.05 else "REVIEW", "fmt": "pct",
+                           "note": f"Main Page fee {fee_wb:.2f} is {rate:.2f}% of imported income; the dashboard's setting is {pct:g}%"})
+        elif not pct:
+            checks.append({"metric": "Management fee", "workbook": fee_wb, "imported": 0.0, "diff": -fee_wb, "status": "REVIEW", "fmt": "money",
+                           "note": "Main Page lists a fee but the dashboard property has no management model"})
+    elif conn is not None and inc > 0 and fee_wb is None:
         pid = C.PROPERTY_SHEETS[code][0]
         pct = (conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0]
-        recorded = sum(r["amount"] for r in rows if r["category"] == "management_fee")
-        if recorded:
-            checks.append(_check("Management fee", fee_wb, round(recorded, 4), note="Main Page vs fee row on the property sheet"))
-        elif pct:
-            checks.append(_check("Management fee", fee_wb, round(inc * pct / 100, 4), note=f"Main Page vs dashboard estimate at {pct:g}% of income (no fee row on the sheet)"))
-        else:
-            checks.append({"metric": "Management fee", "workbook": fee_wb, "imported": 0.0, "diff": -fee_wb, "status": "REVIEW",
-                           "note": "Main Page lists a fee but the dashboard property has no management model", "fmt": "money"})
-    elif conn is not None and inc > 0:
-        pid = C.PROPERTY_SHEETS[code][0]
-        pct = (conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0]
-        if pct and not sum(r["amount"] for r in rows if r["category"] == "management_fee"):
+        if pct and not sheet_fee:
             checks.append({"metric": "Management model", "workbook": 0.0, "imported": round(inc * pct / 100, 4), "diff": round(inc * pct / 100, 4),
                            "status": "REVIEW", "fmt": "money",
                            "note": f"the dashboard models this property as managed at {pct:g}% and would show a fee of {inc * pct / 100:.2f}, "
@@ -442,5 +455,8 @@ def month_overview(conn, parsed):
         if conn.execute("SELECT 1 FROM properties WHERE id=?", (BUSINESS_ID,)).fetchone() and ym in parsed["main"]["months"]:
             d = _counts(diff_rows(current_rows(conn, BUSINESS_ID, ym)[0], desired_business(parsed, ym)["rows"]))
             biz_changed = d["NEW"] + d["CHANGED"] + d["REMOVED"]
-        out.append({"ym": ym, "changed_rows": changed + biz_changed, "properties": props, "business_changed": biz_changed})
+        earning = sum(1 for c in parsed["properties"].values() if (c["summary"].get(ym, {}).get("income") or 0) > 0
+                      or sum(i["amount"] for i in c["income"].get(ym, {}).get("items", [])) > 0)
+        out.append({"ym": ym, "changed_rows": changed + biz_changed, "properties": props, "business_changed": biz_changed,
+                    "properties_with_income": earning, "of": len(parsed["properties"])})
     return out
