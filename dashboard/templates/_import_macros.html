@@ -23,4 +23,4 @@
 {% macro row_pill(s) -%}
   <span class="pill {{ {'NEW': 'pos', 'CHANGED': 'warn', 'REMOVED': 'neg', 'UNCHANGED': ''}[s] }}">{{ s }}</span>
 {%- endmacro %}
-{% macro check_pill(s) -%}<span class="pill {{ 'pos' if s == 'PASS' else 'warn' }}">{{ s }}</span>{%- endmacro %}
+{% macro check_pill(s) -%}<span class="pill {{ 'pos' if s == 'PASS' else 'warn' }}" {% if s == 'NO CONTROL' %}title="The workbook's own total for this figure is blank, so there is nothing to compare against"{% endif %}>{{ s }}</span>{%- endmacro %}

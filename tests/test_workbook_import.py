@@ -199,6 +199,8 @@ check("A 'General' subtotal not imported on top of its items", not c.execute("SE
 check("A booking source for the month is the workbook (explicit)", c.execute("SELECT active_source FROM booking_source_state WHERE property_id='lascar-wharf' AND month=?", (SEP,)).fetchone()["active_source"] == "legacy_aggregate")
 check("A NW4 is flagged: dashboard models it as managed (15%) but the workbook records no fee", item(plan, "NW4")["status"] == "review" and
       any(ch["metric"] == "Management model" and ch["status"] == "REVIEW" for ch in item(plan, "NW4")["checks"]), item(plan, "NW4")["status"])
+dv = A.verify_item(c, parsed, "19Draycott", SEP)
+check("A Draycott (blank workbook totals): shown as NO CONTROL, not a pass", {r["metric"]: r["status"] for r in dv["rows"]}["Income / booking revenue"] == "NO CONTROL", dv["rows"])
 for code in ("CC", "LW", "TCR", "W8", "170E", "175E", "11PW"):
     vr = A.verify_item(c, parsed, code, SEP)
     check(f"A verify {code}: workbook = ledger = dashboard", all(r["status"] == "PASS" for r in vr["rows"]), [r for r in vr["rows"] if r["status"] != "PASS"])

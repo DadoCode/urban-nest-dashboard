@@ -91,3 +91,12 @@ Mapping into `bookings`: `gross_revenue = Total payment`, `platform_fees = Commi
 6. **Costs on managed flats** appear in Property Costs but do not reduce Urban Nest's Property Profit; if they are not recharged to owners, that cost is invisible.
 7. **Months with no Excel history** switch to the detailed bookings automatically. If an upload for such a month is partial, the month will look small until the rest arrives.
 8. **Portfolio available nights** uses today's active-flat count for every historical month.
+
+## 5. Workbook imports are the monthly source of truth
+
+Rows written from the monthly workbook carry `source='workbook'` (and `import_batch_id`); the older Excel
+history is `source='excel_import'`. **Both are the aggregate side** of section 1 (`services/sources.AGGREGATE_SOURCES`),
+so everything above applies unchanged: one active source per property-month, detailed reservations never silently
+replace workbook totals, and importing records the workbook as the active source for the property-months it wrote
+(`booking_source_state`, undone with the import). Format, field mapping, reconciliation and undo rules:
+`docs/monthly-workbook-spec.md`.

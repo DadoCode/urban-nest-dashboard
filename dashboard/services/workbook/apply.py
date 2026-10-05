@@ -222,5 +222,7 @@ def verify_item(conn, parsed, code, ym):
         agree = len(vals) >= 2 and max(vals) - min(vals) <= tol
         if name.endswith("(n/a)"):
             continue
-        out.append({"metric": name, "workbook": wb, "ledger": led, "dashboard": dash, "status": "PASS" if agree else "REVIEW", "note": notes.get(name, "")})
+        # a blank workbook control total cannot confirm anything: say so instead of passing on ledger = dashboard alone
+        status = "NO CONTROL" if wb is None else ("PASS" if agree else "REVIEW")
+        out.append({"metric": name, "workbook": wb, "ledger": led, "dashboard": dash, "status": status, "note": notes.get(name, "")})
     return {"code": code, "property_id": pid, "model": view["model"], "rows": out}
