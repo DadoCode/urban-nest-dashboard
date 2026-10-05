@@ -98,6 +98,15 @@ class Sheet:
         v = self.value(r, c)
         return v.strip().lower() if isinstance(v, str) else None
 
+    def label(self, r, c):
+        """A label as lower-case text; a numeric label (170, 175) counts as its text."""
+        v = self.value(r, c)
+        if isinstance(v, str):
+            return v.strip().lower()
+        if _is_number(v):
+            return str(int(v)) if float(v).is_integer() else str(v)
+        return None
+
     def ref(self, r, c):
         return f"{self.name}!{get_column_letter(c)}{r}"
 
@@ -114,8 +123,10 @@ def sheet_names(data):
     return [html.unescape(m) for m in re.findall(r"<sheet\b[^>]*?\bname=\"([^\"]+)\"", xml)]
 
 
-def classify(names):
-    """-> (year, roles) where roles[name] = (role, detail). role: blocked | ignored | main | breakdown | property | unmapped."""
+def classify(names, codes=None):
+    """-> (year, roles) where roles[name] = (role, detail). role: blocked | ignored | main | breakdown | property | candidate.
+    `codes` are the sheet codes already mapped to a property; a '<code><yy>' sheet outside them is a CANDIDATE new property."""
+    codes = set(codes) if codes is not None else set(C.PROPERTY_SHEETS)
     roles, mains = {}, []
     for n in names:
         low = n.strip().lower()
@@ -141,12 +152,12 @@ def classify(names):
         suffix = n.strip()[-2:] if n.strip()[-2:].isdigit() else None
         if base.lower() == C.BREAKDOWN_SHEET_BASE.lower() and suffix:
             roles[n] = ("breakdown", None) if suffix == yy else ("ignored", f"{C.BREAKDOWN_SHEET_BASE} for another year")
-        elif base in C.PROPERTY_SHEETS and suffix:
+        elif base in codes and suffix:
             roles[n] = ("property", base) if suffix == yy else ("ignored", f"{base} sheet for another year ({suffix})")
         elif base.lower() == "main" and suffix:
             roles[n] = ("ignored", "prior-year Main sheet")
         elif suffix and suffix == yy:
-            roles[n] = ("unmapped", base)
+            roles[n] = ("candidate", base)
         else:
             roles[n] = ("ignored", "not part of the monthly import")
     return year, roles
@@ -334,14 +345,14 @@ def _coeffs(formula, amount_col):
     return coeffs if consumed == f else None
 
 
-def parse_breakdown(sheet, year, issues):
+def parse_breakdown(sheet, year, issues, codes=None):
     """{code: {ym: {"items": [...], "opex": float, "capex": float}}} from the "<code> Expenses Breakdown" sections."""
     titles = [(r, C.BREAKDOWN_SECTION_RE.match(str(sheet.value(r, 2)))) for r in range(1, sheet.max_row + 1)
               if isinstance(sheet.value(r, 2), str)]
     titles = [(r, m.group(1)) for r, m in titles if m]
     out = {}
     for i, (t, tag) in enumerate(titles):
-        code = next((k for k in C.PROPERTY_SHEETS if k.lower() == tag.lower()), None)
+        code = next((k for k in (codes if codes is not None else C.PROPERTY_SHEETS) if k.lower() == tag.lower()), None)
         end = (titles[i + 1][0] if i + 1 < len(titles) else sheet.max_row + 1) - 1
         if code is None:
             issues.add("info", "breakdown_unmapped", f"Expense Breakdown section '{tag}' is not a mapped property and was ignored.", None, sheet.ref(t, 2))
@@ -446,28 +457,48 @@ def parse_main(sheet, year, issues):
                 continue
             end = _block_total_row(sheet, lc, vc, hdr + 1, hdr + 40) or hdr + 40
             for r in range(hdr + 1, end):
-                code = C.MAIN_FEE_LABELS.get(sheet.lower(r, lc) or "")
+                code = C.MAIN_FEE_LABELS.get(sheet.label(r, lc) or "")
                 if code and (r, vc) in sheet.cells:
                     amount = read_amount(sheet, r, vc, issues, "MAIN", key, "management fee")
                     if amount is not None:
                         out[key]["fees"][code] = round(out[key]["fees"].get(code, 0) + amount, 4)
-    return {"months": out}
+    # which section of the Gross Income block each property sits in (R2R = operated, Management SA = managed): model evidence
+    sections = {}
+    if inc_head is not None and hdr:
+        names = {"management long term", "r2r", "management sa", "other"}
+        end_row = _block_total_row(sheet, B, B + 1, hdr + 1, hdr + 40) or hdr + 40
+        for lc in (fmonths or {}).values():
+            current = None
+            for r in range(hdr + 1, end_row + 1):
+                head = sheet.lower(r, B)
+                if head in names and sheet.value(r, B + 1) is None:
+                    current = head
+                    continue
+                label = sheet.label(r, lc)
+                if current and label and label not in names:
+                    sections.setdefault(current, {}).setdefault(label, False)
+                    v = sheet.value(r, lc + 1)
+                    if _is_number(v) and v != 0:
+                        sections[current][label] = True
+    return {"months": out, "sections": sections}
 
 
 # ------------------------------------------------------------------- top level
 
-def parse_workbook(data, filename):
-    """Parse the allowed sheets of a workbook (bytes). Returns plain JSON-safe data."""
+def parse_workbook(data, filename, mapping=None):
+    """Parse the allowed sheets of a workbook (bytes). `mapping` = sheet codes already known (default: the built-in list).
+    Returns plain JSON-safe data."""
     sha = hashlib.sha256(data).hexdigest()
     names = sheet_names(data)
-    year, roles = classify(names)
+    year, roles = classify(names, mapping)
     issues = Issues()
     result = {"filename": filename, "sha256": sha, "year": year, "roles": {n: list(r) for n, r in roles.items()},
               "properties": {}, "breakdown": {}, "main": {"months": {}}, "issues": issues}
     if year is None:
         issues.add("error", "no_year", "The workbook year could not be detected: expected exactly one sheet named like 'Main Page26'.")
         return result
-    to_open = [n for n, (role, _d) in roles.items() if role in ("main", "breakdown", "property")]
+    to_open = [n for n, (role, _d) in roles.items() if role in ("main", "breakdown", "property", "candidate")]
+    all_codes = set(mapping if mapping is not None else C.PROPERTY_SHEETS) | {d for r, d in roles.values() if r == "candidate"}
     assert not any(C.is_blocked(n) for n in to_open)
     try:
         wb_v = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
@@ -483,10 +514,11 @@ def parse_workbook(data, filename):
     try:
         for name in to_open:
             role, detail = roles[name]
-            if role == "property":
+            if role in ("property", "candidate"):
                 result["properties"][detail] = parse_property_sheet(load(name, 160, 40), detail, year, issues)
+                result["properties"][detail]["candidate"] = role == "candidate"
             elif role == "breakdown":
-                result["breakdown"] = parse_breakdown(load(name, 400, 42), year, issues)
+                result["breakdown"] = parse_breakdown(load(name, 400, 42), year, issues, all_codes)
             elif role == "main":
                 result["main"] = parse_main(load(name, 120, 30), year, issues)
     finally:

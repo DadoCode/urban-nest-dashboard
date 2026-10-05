@@ -7,13 +7,14 @@ sheet) is ever written to disk.
 import json
 
 from . import config as C
+from . import identity
 from . import plan as P
 from . import reader
 
 
 def stage(conn, data, filename):
     """Parse an uploaded workbook and keep the result as a 'staged' batch. Returns the batch id."""
-    parsed = reader.parse_workbook(data, filename)
+    parsed = reader.parse_workbook(data, filename, set(identity.mapping(conn)))
     report = validation_report(parsed, conn)
     cur = conn.execute(
         """INSERT INTO import_batches (filename, file_hash, workbook_year, status, parsed, validation)
@@ -38,20 +39,20 @@ def cancel(conn, batch_id):
 def validation_report(parsed, conn=None):
     """What was found in the workbook, independent of any month."""
     roles = parsed["roles"]
-    used = [n for n, (r, _d) in roles.items() if r in ("main", "breakdown", "property")]
+    used = [n for n, (r, _d) in roles.items() if r in ("main", "breakdown", "property", "candidate")]
     ignored = [{"sheet": n, "reason": d} for n, (r, d) in roles.items() if r == "ignored"]
     blocked = [n for n, (r, _d) in roles.items() if r == "blocked"]
-    unmapped = [n for n, (r, _d) in roles.items() if r == "unmapped"]
+    candidates = [n for n, (r, _d) in roles.items() if r == "candidate"]
     year = parsed["year"]
     yy = f"{year % 100:02d}" if year else "??"
     required = [{"name": f"{C.MAIN_SHEET_BASE}{yy}", "ok": any(r == "main" for r, _d in roles.values())},
                 {"name": f"{C.BREAKDOWN_SHEET_BASE}{yy}", "ok": any(r == "breakdown" for r, _d in roles.values()),
                  "note": "purchase detail; without it the sheets' 'Purchases' lumps are imported instead"}]
     missing = []
-    for code, (pid, name) in C.PROPERTY_SHEETS.items():
-        present = code in parsed["properties"]
-        if not present:
-            missing.append({"sheet": f"{code}{yy}", "property": name})
+    mapped = identity.mapping(conn) if conn is not None else {c: {"name": n} for c, (_p, n) in C.PROPERTY_SHEETS.items()}
+    for code, info in mapped.items():
+        if code not in parsed["properties"]:
+            missing.append({"sheet": f"{code}{yy}", "property": info["name"]})
     names = [n.strip().lower() for n in roles]
     duplicates = sorted({n for n in names if names.count(n) > 1})
     issues = {"error": [], "review": [], "info": []}
@@ -60,7 +61,7 @@ def validation_report(parsed, conn=None):
     if duplicates:
         issues["error"].append({"level": "error", "code": "duplicate_sheet", "scope": None, "month": None, "ref": None,
                                 "message": "Duplicate sheet names: " + ", ".join(duplicates)})
-    unmapped_msgs = [{"sheet": n, "message": "New property detected -- map this sheet before importing."} for n in unmapped]
+    unmapped_msgs = [{"sheet": n, "message": "New property detected -- review and confirm it in the preview before anything is created."} for n in candidates]
     global_errors = [i for i in issues["error"] if i["code"] in ("no_year", "main_layout", "duplicate_sheet")]
     return {"year": year, "required": required, "used": used, "ignored": ignored, "blocked": blocked,
             "unmapped": unmapped_msgs, "missing_properties": missing, "issues": issues,

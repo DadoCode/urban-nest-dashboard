@@ -25,6 +25,15 @@
   </div>
   {% endcall %}
 
+  {% if workbook_identity and (workbook_identity.codes or workbook_identity.aliases) %}
+  {% call section("Names in the monthly workbook", "How the workbook import recognises this property") %}
+  <div class="card">
+    <div><strong>{{ prop.name }}</strong>{% if workbook_identity.codes %} <span class="note">· sheet code {{ workbook_identity.codes|join(', ') }}</span>{% endif %}</div>
+    <div class="note" style="margin-top:4px">Also known as: {% for a in workbook_identity.aliases if a.alias_text != prop.name %}{{ a.alias_text }}{{ ', ' if not loop.last }}{% endfor %}. Renaming this property never changes its id or breaks the workbook mapping.</div>
+  </div>
+  {% endcall %}
+  {% endif %}
+
   {% call section("Names on booking platforms", "Listing names that mean this property") %}
   <div class="card">
     {% if aliases %}

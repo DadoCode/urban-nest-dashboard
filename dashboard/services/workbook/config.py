@@ -28,11 +28,11 @@ PROPERTY_SHEETS = {
     "W8":        ("campbell-hill-w8",      "7A Campden Hill"),        # the workbook calls it "7A Campbell Hill"
     "170E":      ("170-miles-building",    "170 Miles Building"),
     "175E":      ("175-miles-building",    "175 Miles Building"),
-    "NW4":       ("nw4",                   "Flat 3 NW4"),
+    "NW4":       ("nw4",                   "Flat 3 NW4"),             # full address not found anywhere in the project: left as is, flagged
     "TCR":       ("tottenham-court-road",  "Tottenham Court Road"),
     "11PW":      ("11-perryfield-way",     "11 Perryfield Way"),
     "22PW":      ("22-perryfield-way",     "22 Perryfield Way"),      # mapped, but not (yet) a dashboard property
-    "19Draycott": ("19-draycott-ave",      "19 Draycott Ave"),
+    "19Draycott": ("19-draycott-ave",      "19 Draycott Avenue"),
     "S10":       ("44-spooner-road",       "44 Spooner Road"),
 }
 
@@ -43,7 +43,7 @@ BREAKDOWN_SHEET_BASE = "Expense Breakdown"   # -> "Expense Breakdown26": item de
 IGNORED_SHEETS = {
     "2025 vs 2026": "comparison sheet -- would duplicate transactions",
     "copy of main page": "archive copy of the Main Page -- would duplicate transactions",
-    "mcr": "Manchester, held outside the dashboard -- not a dashboard property",
+    "mcr": "Manchester, held outside the dashboard -- deliberately not imported or offered as a new property",
 }
 
 # Breakdown sections are titled "<code> Expenses Breakdown"; the code must be a property code above.
@@ -104,9 +104,32 @@ PROPERTY_ALIASES = {
     "TCR":       ["TCR", "Tottenham Court Road", "Tottenham"],
     "11PW":      ["11PW", "11 Perryfield Way", "11 PW"],
     "22PW":      ["22PW", "22 Perryfield Way", "22 PW"],
-    "19Draycott": ["19Draycott", "19 Draycott Ave", "Draycott"],
+    "19Draycott": ["19Draycott", "19 Draycott Avenue", "19 Draycott Ave", "Draycott Avenue", "Draycott"],
     "S10":       ["S10", "44 Spooner Road", "Spooner Road", "Spooner"],
 }
 
 TOLERANCE = 0.01          # money, in pounds
 OCCUPANCY_TOLERANCE = 0.005
+
+# ---------------------------------------------------------------- full names
+# property id -> (canonical full display name, confidence, where the name comes from, open question or None).
+# Names are never invented: where nothing in the workbook, the database or the project's files gives a full name
+# or address, the current name stays and the question is raised.
+CANONICAL_NAMES = {
+    "crested-court":        ("40 Crested Court",       "high",   "dashboard name + workbook sheet title", None),
+    "lascar-wharf":         ("602 Lascar Wharf",       "high",   "dashboard name + workbook sheet title", None),
+    "campbell-hill-w8":     ("7A Campden Hill",        "high",   "dashboard name + your property list (the workbook sheet says '7A Campbell Hill')", None),
+    "170-miles-building":   ("170 Miles Building",     "high",   "dashboard name + workbook sheet title", None),
+    "175-miles-building":   ("175 Miles Building",     "high",   "dashboard name + workbook sheet title", None),
+    "nw4":                  ("Flat 3 NW4",             "low",    "dashboard name + workbook sheet title only",
+                             "NW4 is a postcode district: no street address exists in the workbook, the database, the documents or the project files. Needs the address from you."),
+    "tottenham-court-road": ("Tottenham Court Road",   "medium", "dashboard name + workbook sheet title",
+                             "No street number appears anywhere; kept as is."),
+    "11-perryfield-way":    ("11 Perryfield Way",      "high",   "dashboard name + workbook sheet title", None),
+    "22-perryfield-way":    ("22 Perryfield Way",      "high",   "workbook sheet title + your property list", None),
+    "19-draycott-ave":      ("19 Draycott Avenue",     "high",   "your property list ('19 Draycott Avenue'); the workbook and dashboard say 'Ave'", None),
+    "44-spooner-road":      ("44 Spooner Road",        "high",   "dashboard name + workbook sheet title", None),
+}
+
+# Properties the workbook treats as rent-to-rent (operated): the person confirmed NW4 is rent-to-rent.
+MODEL_DECISIONS = {"nw4": ("operated", "Dado confirmed Flat 3 NW4 is rent-to-rent; the workbook lists it under R2R and has never recorded a management fee for it")}

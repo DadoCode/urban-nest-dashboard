@@ -31,6 +31,22 @@ def _valid_month(ym):
     return bool(ym) and len(ym) == 7 and ym[4] == "-" and ym[:4].isdigit() and ym[5:].isdigit() and 1 <= int(ym[5:]) <= 12
 
 
+def _choices(source):
+    """What the person typed or ticked for new properties and excluded rows: ({pid: {name, model, pct}}, excluded set | None)."""
+    confirm = {}
+    for key in source:
+        if key.startswith("new_model:"):
+            pid = key.split(":", 1)[1]
+            raw = (source.get(f"new_pct:{pid}") or "").strip()
+            try:
+                pct = max(0.0, min(100.0, float(raw))) if raw else None
+            except ValueError:
+                pct = None
+            confirm[pid] = {"name": (source.get(f"new_name:{pid}") or "").strip(), "model": source.get(key) or "", "pct": pct}
+    excluded = set(source.getlist("exclude")) if "exclude_form" in source else None
+    return confirm, excluded
+
+
 def fingerprint(plan):
     """What the preview showed, so Apply can refuse if the ledger moved underneath it."""
     body = [(i["property_id"], i["status"], i.get("counts"), i.get("days")) for i in plan["properties"] + [plan["business"]] if i]
@@ -100,11 +116,13 @@ def batch(batch_id):
     report = json.loads(row["validation"] or "{}")
     overview = P.month_overview(conn, parsed) if report.get("can_import") else []
     ym = request.args.get("month") if _valid_month(request.args.get("month")) else _default_month(overview, parsed)
-    plan = P.plan_month(conn, parsed, ym) if (ym and report.get("can_import")) else None
+    confirm, excluded = _choices(request.args)
+    plan = P.plan_month(conn, parsed, ym, excluded=excluded, confirm=confirm) if (ym and report.get("can_import")) else None
+    base = P.plan_month(conn, parsed, ym, with_after=False) if plan else None
     month_issues = [i for i in parsed["issues"] if i["level"] in ("error", "review") and i["month"] == ym]
     elsewhere = sum(1 for i in parsed["issues"] if i["level"] in ("error", "review") and i["month"] not in (None, ym))
     return render_template("import_batch.html", report=report, overview=overview, ym=ym, plan=plan, month_issues=month_issues,
-                           elsewhere=elsewhere, fingerprint=fingerprint(plan) if plan else "", **ctx)
+                           elsewhere=elsewhere, fingerprint=fingerprint(base) if base else "", **ctx)
 
 
 def _applied(conn, row, parsed, ctx):
@@ -115,11 +133,18 @@ def _applied(conn, row, parsed, ctx):
     recon = json.loads(row["reconciliation"] or "{}")
     verification = []
     if row["status"] == "applied" and parsed:
-        for code, (pid, _n) in C.PROPERTY_SHEETS.items():
-            if pid in after and code in parsed["properties"]:
-                verification.append(A.verify_item(conn, parsed, code, row["period"]))
+        for code, info in P.identity_map(conn, parsed).items():
+            if info["pid"] in after and code in parsed["properties"] and info["exists"]:
+                v = A.verify_item(conn, parsed, code, row["period"])
+                checks = recon.get(info["pid"], [])
+                flagged = [c for c in checks if c["status"] == "REVIEW" or (c["status"] == "NO CONTROL" and c["imported"] not in (0, 0.0, None))]
+                bad = [r for r in v["rows"] if r["status"] in ("REVIEW", "NO CONTROL")]
+                v["verdict"] = "REVIEW" if (flagged or bad) else "PASS"
+                v["reasons"] = [c["metric"] for c in flagged]
+                verification.append(v)
+    created = json.loads(row["new_properties"] or "[]")
     return render_template("import_applied.html", names=names, before=before, after=after, recon=recon, verification=verification,
-                           undoable=(row["status"] == "applied"), **ctx)
+                           created=created, undoable=(row["status"] == "applied"), **ctx)
 
 
 @bp.route("/imports/<int:batch_id>/apply", methods=["POST"])
@@ -130,12 +155,14 @@ def apply(batch_id):
     if not row or row["status"] != "staged" or not _valid_month(ym):
         flash("That import can't be applied (it may already have been applied or cancelled).", "error")
         return redirect(url_for("imports.index"))
-    plan = P.plan_month(conn, parsed, ym)
-    if request.form.get("fingerprint") != fingerprint(plan):
+    base = P.plan_month(conn, parsed, ym, with_after=False)
+    if request.form.get("fingerprint") != fingerprint(base):
         flash("The dashboard changed since this preview was shown. Review the updated preview before applying.", "warning")
         return redirect(url_for("imports.batch", batch_id=batch_id, month=ym))
+    confirm, excluded = _choices(request.form)
+    plan = P.plan_month(conn, parsed, ym, with_after=False, excluded=excluded, confirm=confirm)
     selected = set(request.form.getlist("include"))
-    reviewed = {i["property_id"] for i in plan["properties"] + [plan["business"]] if i and i["status"] == "review"} & selected
+    reviewed = {i["property_id"] for i in plan["properties"] + [plan["business"]] if i and (i["status"] == "review" or i.get("flagged"))} & selected
     if reviewed and request.form.get("ack") != "1":
         flash("Some selected properties have flagged checks. Tick \"I have reviewed the flagged items\" to import them, or untick them.", "error")
         return redirect(url_for("imports.batch", batch_id=batch_id, month=ym))
@@ -147,7 +174,8 @@ def apply(batch_id):
     except A.ImportRefused as exc:
         flash(str(exc), "error")
         return redirect(url_for("imports.batch", batch_id=batch_id, month=ym))
-    flash(f"Imported {month_label(ym)}: {len(result['touched'])} area(s) updated, {result['rows']} row change(s). You can undo this from the import page.", "success")
+    made = f" {len(result['created'])} new propert{'y' if len(result['created']) == 1 else 'ies'} created." if result["created"] else ""
+    flash(f"Imported {month_label(ym)}: {len(result['touched'])} area(s) updated, {result['rows']} row change(s).{made} You can undo this from the import page.", "success")
     return redirect(url_for("imports.batch", batch_id=batch_id))
 
 

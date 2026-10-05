@@ -6,7 +6,9 @@
                ('days', 'Days booked', 'int'), ('occupancy', 'Occupancy', 'pct'), ('profit', 'Property profit / fee', 'money'), ('business_costs', 'Business costs', 'money')] %}
 {% block content %}
   {{ page_head("Import #" ~ batch.id ~ " · " ~ (month_label(batch.period) if batch.period else ''), batch.filename) }}
-  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('imports.index') }}">&larr; All imports</a> · {{ status_pill(batch.status) }} · applied {{ (batch.applied_at or '')[:16] }}{% if batch.undone_at %} · undone {{ batch.undone_at[:16] }}{% endif %} · {{ batch.row_count }} row change(s) · workbook {{ batch.file_hash[:10] }}</p>
+  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('imports.index') }}">&larr; All imports</a> · {{ status_pill(batch.status) }} · applied {{ (batch.applied_at or '')[:16] }}{% if batch.undone_at %} · undone {{ batch.undone_at[:16] }}{% endif %} · {{ batch.rows_added }} added · {{ batch.rows_changed }} changed · {{ batch.rows_removed }} superseded · workbook {{ batch.file_hash[:10] }}</p>
+  {% if created %}<div class="card" style="margin-bottom:var(--s3)"><strong>New properties created by this import:</strong> {% for pid in created %}{{ names.get(pid, pid) }}{{ ', ' if not loop.last }}{% endfor %}
+    <span class="note">Undo removes them again only while nothing else has been recorded against them.</span></div>{% endif %}
 
   {% if undoable %}
     <div class="card" style="margin-bottom:var(--s4)">
@@ -23,8 +25,8 @@
     <table>
       <thead><tr><th>Area</th>{% for key, label, kind in KEYS %}<th class="num">{{ label }}</th>{% endfor %}</tr></thead>
       <tbody>
-        {% for pid, b in before.items() %}
-          <tr><td rowspan="2"><strong>{{ names.get(pid, pid) }}</strong></td>
+        {% for pid, b0 in before.items() %}{% set b = b0 or {} %}
+          <tr><td rowspan="2"><strong>{{ names.get(pid, pid) }}</strong>{% if b0 is none %} <span class="pill brand">new property</span>{% endif %}</td>
             {% for key, label, kind in KEYS %}<td class="num note">{{ val(b.get(key), kind) if key in b else '' }}</td>{% endfor %}</tr>
           <tr>{% for key, label, kind in KEYS %}<td class="num">{{ val(after[pid].get(key), kind) if key in after[pid] else '' }}</td>{% endfor %}</tr>
         {% endfor %}
@@ -36,7 +38,7 @@
   <h2 style="margin:var(--s4) 0 var(--s2)">Reconciliation at import time</h2>
   {% for pid, checks in recon.items() %}
     <details class="card" style="margin-bottom:var(--s2)"><summary><strong>{{ names.get(pid, pid) }}</strong>
-      {% set bad = checks|selectattr('status', 'equalto', 'REVIEW')|list %}
+      {% set bad = checks|rejectattr('status', 'equalto', 'PASS')|list %}
       {{ check_pill('REVIEW' if bad else 'PASS') }}</summary>
       <table style="margin-top:var(--s2)"><thead><tr><th>Check</th><th class="num">Workbook</th><th class="num">Imported</th><th class="num">Difference</th><th></th></tr></thead><tbody>
         {% for c in checks %}<tr><td>{{ c.metric }}</td><td class="num">{{ val(c.workbook, 'pct' if c.metric == 'Occupancy' else 'money') }}</td><td class="num">{{ val(c.imported, 'pct' if c.metric == 'Occupancy' else 'money') }}</td><td class="num">{{ val(c.diff, 'money') if c.diff is not none else '—' }}</td><td>{{ check_pill(c.status) }}</td></tr>{% endfor %}
@@ -47,8 +49,8 @@
     <h2 style="margin:var(--s4) 0 var(--s2)">Workbook = ledger = dashboard</h2>
     <p class="note">Checked live against the dashboard's own figures, so a month someone switched to detailed bookings would show here.</p>
     {% for v in verification %}
-      <details class="card" style="margin-bottom:var(--s2)" {{ 'open' if v.rows|selectattr('status', 'equalto', 'REVIEW')|list }}><summary><strong>{{ names.get(v.property_id, v.property_id) }}</strong> <span class="note">{{ v.model }}</span>
-        {{ check_pill('REVIEW' if v.rows|selectattr('status', 'equalto', 'REVIEW')|list else 'PASS') }}</summary>
+      <details class="card" style="margin-bottom:var(--s2)" {{ 'open' if v.verdict == 'REVIEW' }}><summary><strong>{{ names.get(v.property_id, v.property_id) }}</strong> <span class="note">{{ v.model }}</span>
+        {{ check_pill(v.verdict) }}{% if v.reasons %} <span class="note">flagged: {{ v.reasons|join(', ') }}</span>{% endif %}</summary>
         <table style="margin-top:var(--s2)"><thead><tr><th>Figure</th><th class="num">Workbook</th><th class="num">Imported ledger</th><th class="num">Dashboard</th><th></th></tr></thead><tbody>
           {% for r in v.rows %}{% set kind = 'pct' if r.metric == 'Occupancy' else ('int' if r.metric == 'Days booked' else 'money') %}
             <tr><td>{{ r.metric }}{% if r.note %}<div class="note">{{ r.note }}</div>{% endif %}</td><td class="num">{{ val(r.workbook, kind) }}</td><td class="num">{{ val(r.ledger, kind) }}</td><td class="num">{{ val(r.dashboard, kind) }}</td><td>{{ check_pill(r.status) }}</td></tr>

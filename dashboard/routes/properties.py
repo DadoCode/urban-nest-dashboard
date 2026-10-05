@@ -520,10 +520,20 @@ def settings_tab(property_id):
         checklist=_checklist(conn, property_id, is_overhead, ctx["end_year"], ctx["end_month"]),
         fee_pct=prop["management_fee_pct"], your_income=None if is_overhead else kpis.business_income(conn, property_id, start, end),
         aliases=[] if is_overhead else conn.execute("SELECT alias, label FROM property_aliases WHERE property_id=? AND ignore=0 ORDER BY label", (property_id,)).fetchall(),
+        workbook_identity=None if is_overhead else _workbook_identity(conn, property_id),
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
     return resp
+
+
+def _workbook_identity(conn, property_id):
+    """The codes and names the monthly workbook import knows this property by (the id itself never changes)."""
+    try:
+        from services.workbook import identity
+        return {"codes": identity.sheet_codes_of(conn, property_id), "aliases": identity.aliases_of(conn, property_id)}
+    except Exception:                      # a demo database that predates the identity tables
+        return None
 
 
 @bp.route("/property/<property_id>")

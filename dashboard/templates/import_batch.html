@@ -19,7 +19,7 @@
       <div class="note" style="margin-top:var(--s2)"><span class="pill warn">Missing</span> {{ r.name }}{% if r.note %} — {{ r.note }}{% endif %}</div>
     {% endfor %}
     {% for u in report.unmapped %}
-      <div style="margin-top:var(--s2)"><span class="pill neg">New property detected</span> <strong>{{ u.sheet }}</strong> — {{ u.message }}</div>
+      <div style="margin-top:var(--s2)"><span class="pill brand">New property detected</span> <strong>{{ u.sheet }}</strong> — {{ u.message }}</div>
     {% endfor %}
     {% if report.missing_properties %}
       <div class="note" style="margin-top:var(--s2)">No sheet in this workbook for: {% for m in report.missing_properties %}{{ m.property }} ({{ m.sheet }}){{ ', ' if not loop.last }}{% endfor %}. Those properties are left exactly as they are.</div>
@@ -42,7 +42,7 @@
         <a href="?month={{ m.ym }}" class="tab {{ 'active' if m.ym == ym }}">{{ month_label(m.ym)[:3] }}<span class="count" title="{{ m.changed_rows }} row change(s) against the dashboard">{{ m.changed_rows }}</span></a>
       {% endfor %}
     </nav>
-    <p class="note" style="margin:var(--s2) 0 var(--s3)">Imports one month at a time. The number on each month is how many rows differ from the dashboard today — History is not re-imported unless you pick that month.</p>
+    <p class="note" style="margin:var(--s2) 0 var(--s3)">Imports one month at a time. The number on each month is how many rows differ from the dashboard today. History is not re-imported unless you pick that month.</p>
 
     {% if plan %}
       <h2 style="margin:var(--s3) 0 var(--s2)">Import {{ month_label(ym) }} only</h2>
@@ -54,30 +54,65 @@
       <form method="post" action="{{ url_for('imports.apply', batch_id=batch.id) }}">
         <input type="hidden" name="month" value="{{ ym }}">
         <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
+        <input type="hidden" name="exclude_form" value="1">
 
         {% macro item_block(it, business) %}
-          {% set selectable = it.status in ('ok', 'review') and it.change_count %}
+          {% set selectable = it.status in ('ok', 'review', 'new_property') and it.change_count %}
+          {% set cur = it.current or {} %}{% set aft = it.after or {} %}
           <tr>
             <td style="width:28px"><input type="checkbox" name="include" value="{{ it.property_id }}" {{ 'checked' if it.status == 'ok' and it.change_count }} {{ 'disabled' if not selectable }}></td>
-            <td><strong>{{ it.name }}</strong>{% if it.current and it.current.model in ('managed', 'operated') %}<div class="note">{{ it.current.model }}</div>{% endif %}</td>
+            <td><strong>{{ it.name }}</strong>{% if it.code and not business %} <span class="note">· {{ it.code }}</span>{% endif %}
+              {% if it.new_property %}<div class="note">new · {{ it.new_property.model or 'model to choose' }}{% if it.new_property.model == 'managed' and it.new_property.pct %} {{ '%g'|format(it.new_property.pct) }}%{% endif %}</div>
+              {% elif cur.model in ('managed', 'operated') %}<div class="note">{{ cur.model }}</div>{% endif %}</td>
             <td>{{ status_pill(it.status) }}</td>
             {% if business %}
-              <td class="num" colspan="3">{{ val(it.current.business_costs, 'money') if it.current else '—' }} → {{ val(it.after.business_costs, 'money') if it.after else '—' }} {% if it.current and it.after %}<div class="note">{{ change(it.current.business_costs, it.after.business_costs, 'money') }}</div>{% endif %}</td>
+              <td class="num" colspan="3">{{ val(cur.business_costs, 'money') if it.current else '—' }} → {{ val(aft.business_costs, 'money') if it.after else '—' }} {% if it.current and it.after %}<div class="note">{{ change(cur.business_costs, aft.business_costs, 'money') }}</div>{% endif %}</td>
             {% else %}
-              <td class="num">{% if it.current %}{{ val(it.current.revenue, 'money') }} → {{ val(it.after.revenue, 'money') }}<div class="note">{{ change(it.current.revenue, it.after.revenue, 'money') }}</div>{% endif %}</td>
-              <td class="num">{% if it.current %}{{ val(it.current.property_costs, 'money') }} → {{ val(it.after.property_costs, 'money') }}<div class="note">{{ change(it.current.property_costs, it.after.property_costs, 'money') }}</div>{% endif %}</td>
-              <td class="num">{% if it.current %}{{ val(it.current.days, 'int') }} → {{ val(it.after.days, 'int') }} <span class="note">({{ val(it.after.occupancy, 'pct') }})</span>{% endif %}</td>
+              <td class="num">{% if it.after %}{{ val(cur.revenue, 'money') if it.current else 'new' }} → {{ val(aft.revenue, 'money') }}{% if it.current %}<div class="note">{{ change(cur.revenue, aft.revenue, 'money') }}</div>{% endif %}{% endif %}</td>
+              <td class="num">{% if it.after %}{{ val(cur.property_costs, 'money') if it.current else 'new' }} → {{ val(aft.property_costs, 'money') }}{% if it.current %}<div class="note">{{ change(cur.property_costs, aft.property_costs, 'money') }}</div>{% endif %}{% endif %}</td>
+              <td class="num">{% if it.after %}{{ val(cur.days, 'int') if it.current else 'new' }} → {{ val(aft.days, 'int') }} <span class="note">({{ val(aft.occupancy, 'pct') }})</span>{% endif %}</td>
             {% endif %}
             <td class="num note">{% if it.counts %}+{{ it.counts.NEW }} ~{{ it.counts.CHANGED }} −{{ it.counts.REMOVED }} <span style="opacity:.7">={{ it.counts.UNCHANGED }}</span>{% endif %}</td>
           </tr>
           <tr><td></td><td colspan="6" style="padding-top:0">
             {% for r in it.reasons %}<div class="note" style="margin-bottom:4px">{{ r }}</div>{% endfor %}
+            {% if it.new_property %}
+              {% set np = it.new_property %}
+              <div class="card" style="margin:var(--s2) 0; border-color: var(--brand)">
+                <strong>NEW PROPERTY DETECTED</strong> <span class="note">Nothing is created until you tick it and apply. It is created with a permanent id and these identities.</span>
+                <div class="note" style="margin-top:4px">Workbook sheet <strong>{{ np.sheet }}</strong> · id <strong>{{ np.property_id }}</strong> · aliases {{ np.aliases|join(', ') }} · name from {{ np.name_source }}</div>
+                <div class="note">Evidence for the model: {{ np.evidence|join('; ') }}.</div>
+                <div class="filter-bar" style="margin:var(--s2) 0 0">
+                  <label class="note">Name <input type="text" name="new_name:{{ it.property_id }}" value="{{ np.name }}" style="min-width:16rem"></label>
+                  <label class="note">Model
+                    <select name="new_model:{{ it.property_id }}">
+                      <option value="" {{ 'selected' if not np.model }}>Choose…</option>
+                      <option value="managed" {{ 'selected' if np.model == 'managed' }}>Managed (Urban Nest earns a fee)</option>
+                      <option value="operated" {{ 'selected' if np.model == 'operated' }}>Operated (rent-to-rent)</option>
+                    </select></label>
+                  <label class="note">Fee % <input type="number" step="0.1" min="0" max="100" name="new_pct:{{ it.property_id }}" value="{{ np.pct if np.pct is not none else '' }}" style="width:5rem"></label>
+                  <button type="submit" class="secondary" formmethod="get" formaction="{{ url_for('imports.batch', batch_id=batch.id) }}">Refresh preview with these choices</button>
+                </div>
+              </div>
+            {% endif %}
+            {% if business and it.suspects %}
+              <div class="card" style="margin:var(--s2) 0">
+                <strong>Possible duplicates of property costs</strong>
+                <div class="note">Tick a row to leave it out of the import (it is the same expense as a property cost). Nothing is removed unless you tick it, and your choice is remembered for this month.</div>
+                {% for s in it.suspects %}
+                  <label style="display:block;margin-top:4px"><input type="checkbox" name="exclude" value="{{ s.ref }}" {{ 'checked' if s.ref in plan.excluded }}> {{ s.label }} {{ val(s.amount, 'money') }} <span class="note">= {% for c, l in s.matches %}{{ c }}: {{ l }}{{ ', ' if not loop.last }}{% endfor %} · {{ s.ref }}</span></label>
+                {% endfor %}
+              </div>
+            {% endif %}
             {% if it.checks or it.rows %}
-              <details><summary class="note" style="cursor:pointer">Details: reconciliation, figures and rows</summary>
-                {% if it.current and not business %}
-                  <table style="margin:var(--s2) 0"><thead><tr><th>Dashboard figure</th><th class="num">Current</th><th class="num">After import</th><th class="num">Change</th></tr></thead><tbody>
-                    {% for key, label, kind in METRICS if not (key == 'management_fee' and it.current.model != 'managed') %}
-                      <tr><td>{{ label }}</td><td class="num">{{ val(it.current[key], kind) }}</td><td class="num">{{ val(it.after[key], kind) }}</td><td class="num">{{ change(it.current[key], it.after[key], kind) }}</td></tr>
+              <details><summary class="note" style="cursor:pointer">Details: figures, reconciliation and rows</summary>
+                {% if (it.after) and not business %}
+                  <table style="margin:var(--s2) 0"><thead><tr><th>Dashboard figure</th><th class="num">Current dashboard</th><th class="num">Workbook</th><th class="num">After import</th><th class="num">Change</th></tr></thead><tbody>
+                    {% set wbv = it.workbook or {} %}
+                    {% for key, label, kind in METRICS if not (key == 'management_fee' and aft.model != 'managed') %}
+                      <tr><td>{{ label }}</td><td class="num">{{ val(cur[key], kind) if it.current else '—' }}</td>
+                        <td class="num">{{ val(wbv[key], kind) if wbv[key] is not none else '—' }}{% if wbv[key] is none %}<div class="note">blank in workbook</div>{% endif %}</td>
+                        <td class="num">{{ val(aft[key], kind) }}</td><td class="num">{{ change(cur[key], aft[key], kind) if it.current else '' }}</td></tr>
                     {% endfor %}
                   </tbody></table>
                 {% endif %}
@@ -91,7 +126,7 @@
                 {% set shown = it.rows|selectattr('status', 'ne', 'UNCHANGED')|list %}
                 <table style="margin:var(--s2) 0"><thead><tr><th>Row</th><th>Description</th><th>Category</th><th>Type</th><th class="num">Dashboard now</th><th class="num">Workbook</th><th>Cell</th></tr></thead><tbody>
                   {% for d in shown %}{% set r = d.new or d.old %}
-                    <tr><td>{{ row_pill(d.status) }}</td><td>{{ r.description }}{% if r.vendor %} <span class="note">· {{ r.vendor }}</span>{% endif %}</td><td>{{ r.category }}</td>
+                    <tr><td>{{ row_pill(d.status) }}{% if it.new_property %} <span class="pill brand">New property</span>{% endif %}</td><td>{{ r.description }}{% if r.vendor %} <span class="note">· {{ r.vendor }}</span>{% endif %}</td><td>{{ r.category }}</td>
                       <td>{{ 'Income' if r.direction == 'income' else ('Capex' if r.capex else 'Opex') }}</td>
                       <td class="num">{{ val(d.old.amount, 'money') if d.old else '—' }}</td><td class="num">{{ val(d.new.amount, 'money') if d.new else '—' }}</td>
                       <td class="note">{{ (d.new.source_ref if d.new else '') }}</td></tr>
@@ -107,19 +142,19 @@
 
         <div class="card flush">
           <table>
-            <thead><tr><th></th><th>Property</th><th>Status</th><th class="num">Revenue<div class="note">now → workbook</div></th><th class="num">Property costs<div class="note">now → workbook</div></th><th class="num">Days booked<div class="note">now → workbook</div></th><th class="num">Rows<div class="note">+new ~changed −removed</div></th></tr></thead>
+            <thead><tr><th></th><th>Property</th><th>Status</th><th class="num">Revenue<div class="note">now → after import</div></th><th class="num">Property costs<div class="note">now → after import</div></th><th class="num">Days booked<div class="note">now → after import</div></th><th class="num">Rows<div class="note">+new ~changed −removed</div></th></tr></thead>
             <tbody>
-              {% for it in plan.properties if it.status != 'missing_sheet' or true %}{{ item_block(it, false) }}{% endfor %}
+              {% for it in plan.properties %}{{ item_block(it, false) }}{% endfor %}
               {% if plan.business %}{{ item_block(plan.business, true) }}{% endif %}
             </tbody>
           </table>
         </div>
 
-        {% set any_review = (plan.properties + [plan.business])|selectattr('status', 'equalto', 'review')|list %}
+        {% set flagged = (plan.properties + [plan.business])|selectattr('flagged')|list %}
         <div class="card" style="margin-top:var(--s3)">
-          {% if any_review %}
+          {% if flagged %}
             <label style="display:block;margin-bottom:var(--s2)"><input type="checkbox" name="ack" value="1"> I have reviewed the flagged items for the properties I ticked.</label>
-            <div class="note" style="margin-bottom:var(--s2)">Properties that need review are not ticked by default. A flagged check means the workbook's own figures disagree with each other or with the dashboard's setup.</div>
+            <div class="note" style="margin-bottom:var(--s2)">Anything flagged is not ticked by default. A flagged check means the workbook's own figures disagree with each other or with the dashboard's setup, or that a figure has no workbook control to confirm it.</div>
           {% endif %}
           <button type="submit" {{ 'disabled' if demo_mode }}>Apply import for {{ month_label(ym) }}</button>
           <span class="note">Only the ticked rows change. Nothing outside {{ month_label(ym) }} is touched, and you can undo it afterwards.</span>

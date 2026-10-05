@@ -44,6 +44,7 @@ import wbtools  # noqa: E402
 from services.workbook import apply as A  # noqa: E402
 from services.workbook import batches as B  # noqa: E402
 from services.workbook import config as C  # noqa: E402
+from services.workbook import identity  # noqa: E402
 from services.workbook import plan as P  # noqa: E402
 from services.workbook import reader  # noqa: E402
 
@@ -69,6 +70,7 @@ SEED = [("11-perryfield-way", "11PW", "11 Perryfield Way", 10.0), ("170-miles-bu
 for pid, code, name, fee in SEED:
     conn.execute("INSERT INTO properties (id, code, name, address, type, management_fee_pct) VALUES (?,?,?,?, 'flat', ?)", (pid, code, name, name, fee))
 conn.execute("INSERT INTO properties (id, code, name, address, type) VALUES ('general-overheads','GEN','Portfolio General Expenses','-','overhead')")
+identity.seed(conn)
 
 
 def history(pid, ym, rows, nights):
@@ -162,7 +164,9 @@ print("A  clean September import")
 plan = P.plan_month(c, parsed, SEP)
 for code in ("CC", "LW", "W8", "170E", "175E", "TCR", "11PW"):
     check(f"A {code} importable", item(plan, code)["status"] == "ok", item(plan, code)["status"])
-check("A 22 Perryfield Way is mapped but not a dashboard property -> blocked", item(plan, "22PW")["status"] == "not_in_dashboard")
+check("A 22 Perryfield Way is mapped but not in the dashboard -> proposed as a NEW PROPERTY, nothing created", item(plan, "22PW")["status"] == "new_property"
+      and not db.get_conn().execute("SELECT 1 FROM properties WHERE id='22-perryfield-way'").fetchone())
+check("A Manchester (MCR26) is never offered as a property", parsed0["roles"]["MCR26"][0] == "ignored" and all(i["code"] != "MCR" for i in plan["properties"]))
 check("A 19 Draycott is flagged for review (blank control totals)", item(plan, "19Draycott")["status"] == "review")
 check("A 44 Spooner Road has no activity", item(plan, "S10")["status"] == "no_activity")
 cc = item(plan, "CC")
@@ -220,7 +224,7 @@ plan_b = P.plan_month(c2, parsed_b, SEP)
 changes = sum(i.get("change_count", 0) for i in plan_b["properties"] if i["status"] in ("ok", "review", "unchanged"))
 check("B second plan finds zero changes for the importable properties", all(i.get("change_count", 0) == 0 for i in plan_b["properties"] if i["status"] in ("ok", "unchanged")),
       [(i["code"], i.get("change_count")) for i in plan_b["properties"]])
-check("B second plan: business costs unchanged", plan_b["business"]["status"] == "unchanged", plan_b["business"]["status"])
+check("B second plan: business costs have nothing to change", plan_b["business"].get("change_count") == 0, plan_b["business"].get("change_count"))
 try:
     A.apply_batch(c2, bid_b, plan_b, set(ids), "test")
     check("B re-import refused (nothing to import)", False)
@@ -245,7 +249,7 @@ cc_fix = wbtools.patch(ORIGINAL, edits={
 c3, bid_c, parsed_c = stage(cc_fix)
 plan_c = P.plan_month(c3, parsed_c, SEP)
 ccc = item(plan_c, "CC")
-check("C only CC differs among the imported properties", [i["code"] for i in plan_c["properties"] if i.get("change_count") and i["code"] != "19Draycott"] == ["CC"], [(i["code"], i.get("change_count")) for i in plan_c["properties"]])
+check("C only CC differs among the imported properties", [i["code"] for i in plan_c["properties"] if i.get("change_count") and i["code"] not in ("19Draycott", "22PW")] == ["CC"], [(i["code"], i.get("change_count")) for i in plan_c["properties"]])
 check("C exactly one CHANGED row: Cleaning 378 -> 400", ccc["counts"]["CHANGED"] == 1 and ccc["counts"]["NEW"] == 0 and ccc["counts"]["REMOVED"] == 0 and
       any(d["status"] == "CHANGED" and d["old"]["amount"] == 378 and d["new"]["amount"] == 400 for d in ccc["rows"]), ccc["counts"])
 check("C corrected workbook still reconciles", ccc["status"] == "ok", ccc["status"])
@@ -262,11 +266,23 @@ check("C/I first batch is still applied after undoing the second", c3.execute("S
 
 # ------------------------------------------------------------------ D / E
 print("D  new property sheet   E  missing property sheet")
-c4, bid_d, parsed_d = stage(wbtools.patch(ORIGINAL, renames={"MCR26": "XY26"}))
+c4, bid_d, parsed_d = stage(wbtools.patch(ORIGINAL, renames={"S1026": "ZZ26"}))
 plan_d = P.plan_month(c4, parsed_d, SEP)
-check("D unmapped sheet detected with the required message", plan_d["unmapped"] == [{"sheet": "XY26", "message": "New property detected -- map this sheet before importing."}], plan_d["unmapped"])
-check("D validation report lists it too", B.validation_report(parsed_d)["unmapped"][0]["sheet"] == "XY26")
-check("D nothing is imported for it; other properties unaffected", all(i["code"] != "XY" for i in plan_d["properties"]) and item(plan_d, "CC")["status"] in ("ok", "unchanged"))
+zz = item(plan_d, "ZZ")
+check("D a sheet whose title matches an existing property's alias is THAT property, not a new one", zz["property_id"] == "44-spooner-road" and zz["status"] != "new_property", zz["status"])
+check("D ...so no duplicate property exists", c4.execute("SELECT COUNT(*) FROM properties WHERE name LIKE '%Spooner%'").fetchone()[0] == 1)
+c4b, bid_d2, parsed_d2 = stage(wbtools.patch(ORIGINAL, edits={("LW26", "B2"): "9 Test Street"}, renames={"LW26": "NEW26"}))
+plan_d2 = P.plan_month(c4b, parsed_d2, SEP)
+nw = item(plan_d2, "NEW")
+check("D a genuinely new sheet is proposed as a NEW PROPERTY with its sheet, alias and an unknown model", nw["status"] == "new_property" and nw["new_property"]["sheet"] == "NEW26"
+      and "NEW" in nw["new_property"]["aliases"] and nw["new_property"]["model"] is None, nw["new_property"])
+check("D validation report lists it", B.validation_report(parsed_d2)["unmapped"][0]["sheet"] == "NEW26")
+check("D nothing exists until applied", not c4b.execute("SELECT 1 FROM properties WHERE name='9 Test Street'").fetchone())
+try:
+    A.apply_batch(c4b, bid_d2, plan_d2, {nw["property_id"]}, "test")
+    check("D creation refused until the model is confirmed", False)
+except A.ImportRefused:
+    check("D creation refused until the model is confirmed", True)
 c5, bid_e, parsed_e = stage(wbtools.patch(ORIGINAL, renames={"TCR26": "TCRX"}))
 plan_e = P.plan_month(c5, parsed_e, SEP)
 check("E missing sheet is reported and that property is left alone", item(plan_e, "TCR")["status"] == "missing_sheet" and "left exactly as it is" in item(plan_e, "TCR")["reasons"][0])
@@ -367,8 +383,11 @@ check("I undoing the first full import works and leaves the pre-import rows back
 print("L  workbook quirks found in the real file")
 plan_jan = P.plan_month(c8, parsed, "2026-01", with_after=False)
 e170 = item(plan_jan, "170E")
-check("L 170E Jan: the unlabelled 8.14 its block total counts is imported (as '(no label)') and the month reconciles",
-      e170["status"] == "ok" and any(d["new"] and d["new"]["description"] == "(no label)" and abs(d["new"]["amount"] - 8.14) < 1e-9 for d in e170["rows"]), e170["status"])
+check("L 170E Jan: the unlabelled 8.14 its block total counts is imported (as '(no label)') and its income reconciles",
+      any(d["new"] and d["new"]["description"] == "(no label)" and abs(d["new"]["amount"] - 8.14) < 1e-9 for d in e170["rows"])
+      and {c["metric"]: c["status"] for c in e170["checks"]}["Income"] == "PASS", e170["status"])
+check("L 170E Jan: the stale Main Page fee (146.26 vs the sheet's 147.08) is flagged",
+      any(c["metric"] == "Management fee" and c["status"] == "REVIEW" for c in e170["checks"]))
 check("L unlabelled amounts are reported, not silent", any(i["code"] == "unlabelled_amount" for i in parsed["issues"]))
 tcr_rows = [d["new"] for d in item(plan, "TCR")["rows"] if d["new"] and d["new"]["category"] == "management_fee"]
 check("L TCR (no fee row on its sheet): the Main Page fee 1795.71 is recorded as a management_fee row", len(tcr_rows) == 1 and abs(tcr_rows[0]["amount"] - 1795.707) < 1e-6, tcr_rows)
@@ -403,7 +422,7 @@ up = client.post("/imports/upload", data={"workbook": (io.BytesIO(ORIGINAL), "Bi
 loc = up.headers["Location"]
 page = client.get(loc).data.decode()
 check("K preview defaults to September (latest month where most properties have income)", "Import September 2026 only" in page)
-check("K preview names the unmapped-property wording, new-property check and the credential exclusion", "excluded by name" in page and "Not in dashboard" in page)
+check("K preview shows NEW PROPERTY DETECTED (22 Perryfield Way) and the credential exclusion", "excluded by name" in page and "NEW PROPERTY DETECTED" in page and "22 Perryfield Way" in page)
 check("K preview shows now -> workbook figures and reconciliation", "Reconciliation (workbook vs what would be imported)" in page and "PASS" in page)
 fp = re.search(r'name="fingerprint" value="([^"]+)"', page).group(1)
 ticked = re.findall(r'name="include" value="([^"]+)" checked', page)
