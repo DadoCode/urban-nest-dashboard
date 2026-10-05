@@ -204,6 +204,39 @@ CREATE TABLE IF NOT EXISTS booking_source_state (
     PRIMARY KEY (property_id, month)
 );
 
+-- Monthly workbook imports. A batch is one workbook applied for one month; the
+-- parsed content of the allowed sheets is kept (never the file itself, so
+-- nothing from a sheet we do not read is ever stored). import_batch_rows is the
+-- exact change log: rows the batch added and full copies of rows it removed,
+-- which is what makes "Undo import" restore the previous state exactly.
+CREATE TABLE IF NOT EXISTS import_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+    workbook_year INTEGER,
+    period TEXT,                    -- 'YYYY-MM' the batch was applied for (NULL while only staged)
+    status TEXT NOT NULL DEFAULT 'staged',   -- staged | applied | undone | cancelled
+    applied_at TEXT, undone_at TEXT,
+    properties TEXT,                -- JSON list of property ids the batch touched
+    row_count INTEGER NOT NULL DEFAULT 0,
+    before_totals TEXT, after_totals TEXT,   -- JSON per property: income / costs / days
+    parsed TEXT,                    -- JSON: parsed allowed sheets
+    validation TEXT,                -- JSON: validation report
+    reconciliation TEXT,            -- JSON: reconciliation report at apply time
+    note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS import_batch_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    op TEXT NOT NULL,               -- 'added' | 'removed' | 'source_state_added'
+    tbl TEXT NOT NULL,              -- 'transactions' | 'bookings' | 'booking_source_state'
+    row_id INTEGER,                 -- id in tbl (NULL for booking_source_state)
+    row_json TEXT NOT NULL          -- the full row as it was (removed) / as written (added)
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON import_batch_rows(batch_id);
 CREATE INDEX IF NOT EXISTS idx_document_events_doc ON document_events(document_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_property_date ON bookings(property_id, check_in);
 CREATE INDEX IF NOT EXISTS idx_transactions_property_date ON transactions(property_id, date);
@@ -255,6 +288,12 @@ def ensure_schema():
                 SELECT v.id FROM vendors v WHERE v.name = TRIM(transactions.vendor)
             ) WHERE vendor IS NOT NULL AND TRIM(vendor) != ''
         """)
+
+    for table in ("transactions", "bookings"):
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for col, ddl in [("import_batch_id", "INTEGER"), ("source_ref", "TEXT")]:   # which workbook import wrote it, and from which cell
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
     item_cols = {row["name"] for row in conn.execute("PRAGMA table_info(document_items)")}
     for col, ddl in [

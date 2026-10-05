@@ -299,7 +299,7 @@ def bookings(property_id):
     platforms = [r[0] for r in conn.execute(f"SELECT DISTINCT COALESCE(NULLIF(platform,''),'other') FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
     sources = [r[0] for r in conn.execute(f"SELECT DISTINCT source FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
     S = src.Sources(conn, property_id, start, end)
-    inactive_stored = sum(1 for r in rows if r["source"] != "excel_import"
+    inactive_stored = sum(1 for r in rows if r["source"] not in src.AGGREGATE_SOURCES
                           and any(S.active(property_id, ym) == src.LEGACY for ym, _lo, _hi in src.stay_pieces(r, start, end)))
     filters = {"b_when": b_when, "b_platform": b_platform, "b_source": b_source, "b_status": b_status if b_status != "confirmed" else ""}
 

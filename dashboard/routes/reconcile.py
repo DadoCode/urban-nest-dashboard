@@ -91,7 +91,7 @@ def revert(property_id, ym):
 def _counts(conn, property_id, ym):
     s, e = rc.bounds(ym)
     one = lambda sql, *a: conn.execute(sql, a).fetchone()
-    leg = one("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM transactions WHERE property_id=? AND source='excel_import' AND direction='income' AND date>=? AND date<?", property_id, s, e)
+    leg = one("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM transactions WHERE property_id=? AND source IN ('excel_import','workbook') AND direction='income' AND date>=? AND date<?", property_id, s, e)
     agg = one("SELECT COUNT(*), COALESCE(SUM(julianday(check_out)-julianday(check_in)),0) FROM bookings WHERE property_id=? AND reservation_id='monthly-aggregate' AND check_in>=? AND check_in<?", property_id, s, e)
     res = lambda source: one("SELECT COUNT(*) FROM bookings WHERE property_id=? AND source=? AND status='confirmed' AND check_in<? AND check_out>?", property_id, source, e, s)[0]
     exp = one("SELECT COUNT(*), COALESCE(SUM(amount),0) FROM transactions WHERE property_id=? AND source='upload' AND direction='expense' AND date>=? AND date<?", property_id, s, e)

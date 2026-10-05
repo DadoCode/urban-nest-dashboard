@@ -81,7 +81,7 @@ def _income(conn, property_id, start, end, accommodation_only=False):
             f"""SELECT property_id, substr(date,1,7) ym, source, COALESCE(SUM(amount),0) amt FROM transactions
                 WHERE direction='income' {category} AND date>=? AND date<? {clause} GROUP BY property_id, ym, source""",
             (start, end, *params)):
-        if r["source"] == "excel_import" and S.active(r["property_id"], r["ym"]) == src.DETAILED:
+        if r["source"] in src.AGGREGATE_SOURCES and S.active(r["property_id"], r["ym"]) == src.DETAILED:
             continue
         total += r["amt"]
     return total
@@ -96,8 +96,8 @@ def _booking_pieces(conn, property_id, start, end):
         f"""SELECT id, property_id, reservation_id, check_in, check_out, net_revenue, source FROM bookings
             WHERE status='confirmed' AND check_in<? AND check_out>? {clause}""", (end, start, *params)).fetchall()
     S = src.Sources(conn, property_id, start, end)
-    legacy = [r for r in rows if r["source"] == "excel_import"]
-    detailed = src.dedupe_detailed([r for r in rows if r["source"] != "excel_import"])
+    legacy = [r for r in rows if r["source"] in src.AGGREGATE_SOURCES]
+    detailed = src.dedupe_detailed([r for r in rows if r["source"] not in src.AGGREGATE_SOURCES])
     out = []
     for kind, group in ((src.LEGACY, legacy), (src.DETAILED, detailed)):
         for r in group:

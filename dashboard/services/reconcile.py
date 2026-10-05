@@ -34,7 +34,7 @@ def metrics(conn, property_id, ym, source):
 
 def _all_legacy_months(conn):
     out = {(r[0], r[1]) for r in conn.execute(
-        "SELECT DISTINCT property_id, substr(date,1,7) FROM transactions WHERE source='excel_import' AND direction='income'")}
+        "SELECT DISTINCT property_id, substr(date,1,7) FROM transactions WHERE source IN ('excel_import','workbook') AND direction='income'")}
     out |= {(r[0], r[1]) for r in conn.execute(
         "SELECT DISTINCT property_id, substr(check_in,1,7) FROM bookings WHERE reservation_id='monthly-aggregate' AND status='confirmed'")}
     return out
@@ -43,7 +43,7 @@ def _all_legacy_months(conn):
 def detailed_months(conn):
     """{(property_id, ym)} that have at least one stored (non-Excel) reservation night."""
     out = set()
-    for r in conn.execute("SELECT property_id, check_in, check_out FROM bookings WHERE status='confirmed' AND source!='excel_import'"):
+    for r in conn.execute("SELECT property_id, check_in, check_out FROM bookings WHERE status='confirmed' AND source NOT IN ('excel_import','workbook')"):
         for ym in src.months_between(r["check_in"], r["check_out"]):
             out.add((r["property_id"], ym))
     return out
@@ -104,7 +104,7 @@ def uploaded_detail(conn, property_id, ym):
     rows = conn.execute(
         """SELECT b.id, b.property_id, b.platform, b.reservation_id, b.check_in, b.check_out, b.net_revenue, b.gross_revenue, b.source, b.document_id,
                   d.filename FROM bookings b LEFT JOIN documents d ON d.id=b.document_id
-           WHERE b.property_id=? AND b.status='confirmed' AND b.source!='excel_import' AND b.check_in<? AND b.check_out>?
+           WHERE b.property_id=? AND b.status='confirmed' AND b.source NOT IN ('excel_import','workbook') AND b.check_in<? AND b.check_out>?
            ORDER BY b.check_in""", (property_id, e, s)).fetchall()
     rows = src.dedupe_detailed(rows)
     lo, hi = src.datetime.date.fromisoformat(s), src.datetime.date.fromisoformat(e)

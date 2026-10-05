@@ -9,7 +9,7 @@ import re
 
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-PROTECTED = ("excel_import",)  # permanent history -- see services.ingest.PROTECTED_SOURCES
+PROTECTED = ("excel_import", "workbook")  # permanent history -- see services.ingest.PROTECTED_SOURCES
 
 # extracted-JSON key -> document_items column, for "manually corrected" counts
 _TX_FIELDS = {"vendor": "vendor", "description": "raw_description", "amount": "amount", "category": "category", "date": "date"}

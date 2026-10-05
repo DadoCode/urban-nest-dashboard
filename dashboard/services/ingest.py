@@ -271,7 +271,7 @@ def alias_remember(conn, text, property_id, ignore=False):
 
 # Records from these sources are the permanent history: an upload never
 # replaces, edits or removes them (a line that duplicates one is left out).
-PROTECTED_SOURCES = ("excel_import",)
+PROTECTED_SOURCES = ("excel_import", "workbook")
 
 
 def source_of(conn, table, record_id):
@@ -299,5 +299,5 @@ def excel_overlap(conn, property_id, date_text):
     s, e = kpis.month_bounds(y, m)
     return float(conn.execute(
         """SELECT COALESCE(SUM(amount),0) FROM transactions
-           WHERE property_id=? AND source IN ('excel_import') AND direction='income' AND date>=? AND date<?""",
+           WHERE property_id=? AND source IN ('excel_import','workbook') AND direction='income' AND date>=? AND date<?""",
         (property_id, s, e)).fetchone()[0])

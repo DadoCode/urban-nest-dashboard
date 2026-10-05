@@ -25,6 +25,10 @@ import datetime
 import json
 import threading
 
+# Rows written from the monthly workbook (and the older Excel history that came
+# from the same workbook) are the aggregate side; nothing else is.
+AGGREGATE_SOURCES = ("excel_import", "workbook")
+
 LEGACY = "legacy_aggregate"
 DETAILED = "detailed"
 STATES = (LEGACY, DETAILED)
@@ -32,7 +36,7 @@ STATES = (LEGACY, DETAILED)
 # Reservations that came from a statement, hand entry or a synced calendar.
 # (Excel's synthetic 'monthly-aggregate' rows are the legacy side.)
 def is_detailed_row(row):
-    return row["source"] != "excel_import"
+    return row["source"] not in AGGREGATE_SOURCES
 
 
 def _ym(text):
@@ -93,7 +97,7 @@ class Sources:
         lo, hi = f"{first}-01", f"{_next_month(last)}-01"
         self.legacy_months = {(r[0], r[1]) for r in conn.execute(
             f"""SELECT DISTINCT property_id, substr(date,1,7) FROM transactions
-                WHERE source='excel_import' AND direction='income' AND date>=? AND date<? {clause}""", (lo, hi, *params))}
+                WHERE source IN ('excel_import','workbook') AND direction='income' AND date>=? AND date<? {clause}""", (lo, hi, *params))}
         self.legacy_months |= {(r[0], r[1]) for r in conn.execute(
             f"""SELECT DISTINCT property_id, substr(check_in,1,7) FROM bookings
                 WHERE reservation_id='monthly-aggregate' AND status='confirmed' AND check_in>=? AND check_in<? {clause}""", (lo, hi, *params))}
