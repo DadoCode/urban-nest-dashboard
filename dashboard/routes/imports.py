@@ -138,7 +138,7 @@ def _applied(conn, row, parsed, ctx):
                 v = A.verify_item(conn, parsed, code, row["period"])
                 checks = recon.get(info["pid"], [])
                 flagged = [c for c in checks if c["status"] == "REVIEW" or (c["status"] == "NO CONTROL" and c["imported"] not in (0, 0.0, None))]
-                bad = [r for r in v["rows"] if r["status"] in ("REVIEW", "NO CONTROL")]
+                bad = [r for r in v["rows"] if r["gating"]]
                 v["verdict"] = "REVIEW" if (flagged or bad) else "PASS"
                 v["reasons"] = [c["metric"] for c in flagged]
                 verification.append(v)

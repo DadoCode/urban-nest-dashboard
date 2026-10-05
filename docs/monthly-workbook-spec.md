@@ -61,13 +61,25 @@ never inferred. The importer writes by **canonical property id**, not by sheet n
 | `NW4` | `nw4` | Flat 3 NW4 | NW4, Flat 3 NW4, Flat 3, NW4 |
 | `TCR` | `tottenham-court-road` | Tottenham Court Road | TCR, Tottenham Court Road, Tottenham |
 | `11PW` | `11-perryfield-way` | 11 Perryfield Way | 11PW, 11 Perryfield Way, 11 PW |
-| `22PW` | `22-perryfield-way` | 22 Perryfield Way | 22PW, 22 Perryfield Way, 22 PW (**not yet a dashboard property**: its import is blocked until it is added) |
-| `19Draycott` | `19-draycott-ave` | 19 Draycott Ave | 19Draycott, 19 Draycott Ave, Draycott |
+| `22PW` | `22-perryfield-way` | 22 Perryfield Way | 22PW, 22 Perryfield Way, 22 PW (created from the workbook on first import, after you confirm it) |
+| `19Draycott` | `19-draycott-ave` | 19 Draycott Avenue | 19Draycott, 19 Draycott Avenue, 19 Draycott Ave, Draycott Avenue, Draycott |
 | `S10` | `44-spooner-road` | 44 Spooner Road | S10, 44 Spooner Road, Spooner Road, Spooner |
 
-The aliases live in the **workbook-preparation step** (Claude, in chat). The importer receives
-canonical sheets only. A new property is added by (1) creating it in the dashboard, then
-(2) adding its row to `PROPERTY_SHEETS` (and aliases); there is deliberately no auto-create.
+The aliases live in the **workbook-preparation step** (Claude, in chat); the importer receives canonical
+sheets. Identity is also stored permanently in the database (`workbook_sheet_map`, `property_identity_aliases`),
+so a renamed property keeps working: the property **id never changes**, the old name stays as an alias.
+Matching order, never fuzzy: exact id → exact alias → normalised alias → sheet code → a person confirms.
+`MCR<yy>` (Manchester) is ignored on purpose and is never offered as a new property.
+
+### New properties
+
+A `<code><yy>` sheet that is not mapped is a **new property candidate**. If its code or title matches an existing
+alias it is that property (no duplicate is created). Otherwise the preview shows **NEW PROPERTY DETECTED** with the
+proposed name, id, sheet, aliases and the model the workbook suggests (R2R section = operated; Management SA section
+or a fee row = managed, with the % read from the fee row/label or the Main Page fee ÷ income), and nothing is created
+until you tick it, confirm the name and the model (and the fee % if managed) and apply. The import then creates the
+property (stable id, aliases, sheet mapping, defaults) and imports its rows. Re-importing never creates a second copy;
+undo removes it again only while nothing else has been recorded against it.
 
 ## 4. Property sheet layout (`<code><yy>`)
 
@@ -223,6 +235,25 @@ Anything REVIEW is **unticked by default** in the preview and needs an explicit 
 
 ## 13. Not built (by decision)
 
-- No auto-creation of properties or sheet mappings.
+- No silent creation of properties: a new property is only ever created from a confirmed preview.
 - No import of management-company income, R2R income lines, "Other" income, or prior-year sheets.
 - No attempt to interpret raw documents inside the dashboard.
+
+## 14. Names, model corrections and the clean-up batch
+
+- **Full names** are the primary label everywhere (`properties.name`); the short code is secondary (import preview, settings).
+  `Flat 3 NW4` and `Tottenham Court Road` could not be completed from any source (no street address / number exists in the
+  workbook, the database, the documents or the project files) and are flagged for you, not invented.
+- **Models** follow the workbook's evidence. NW4 is rent-to-rent (confirmed): operated, no management fee.
+  The importer flags any property whose dashboard model disagrees with its fee rows (*Management model*), whose fee is not
+  its % of income (*Management fee rate*), whose Main Page fee differs from its sheet's, or that has no workbook control.
+- **Echo / duplicate rules.** A business row whose description names a property and equals that property's total costs for the
+  month to the penny is a *confirmed echo* (eight "Lascar Wharf" rows, Jan–Aug 2026). The cleanup removes only those. A
+  Main Page business row ≥ £50 that equals a property row of the same month to the penny is a *possible duplicate*: flagged in
+  the preview with a tick-to-exclude box; your choice is remembered for that month.
+- **Draycott.** September's purchases are formulas `=August × −1` (a reversal), the typed fee (241.94) is 23.5% of income
+  against a 12% setting, the Opex block total excludes the fee row below it, and Days Booked is blank: it stays REVIEW / NO
+  CONTROL until the workbook is understood. Nothing is corrected silently.
+- **Clean-up** (`scripts/apply_property_cleanup.py --db PATH [--apply]`): dry-run by default; `--apply` takes a timestamped backup
+  first, prints the SHA-256, verifies the backup, runs the additive migration and applies the clean-up as one undoable batch.
+

@@ -322,5 +322,7 @@ def verify_item(conn, parsed, code, ym):
             continue
         # a blank workbook control total cannot confirm anything: say so instead of passing on ledger = dashboard alone
         status = "NO CONTROL" if wb is None else ("PASS" if agree else "REVIEW")
-        out.append({"metric": name, "workbook": wb, "ledger": led, "dashboard": dash, "status": status, "note": notes.get(name, "")})
+        # a blank control only matters when something was actually imported against it
+        gating = status == "REVIEW" or (status == "NO CONTROL" and any(abs(v or 0) > 1e-9 for v in (led, dash)))
+        out.append({"metric": name, "workbook": wb, "ledger": led, "dashboard": dash, "status": status, "gating": gating, "note": notes.get(name, "")})
     return {"code": code, "property_id": pid, "model": view["model"], "rows": out}
