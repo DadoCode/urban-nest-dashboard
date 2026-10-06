@@ -122,15 +122,14 @@ CANONICAL_NAMES = {
     "170-miles-building":   ("Flat 170, Miles Buildings, Penfold Place, London, NW1 6RP", "high", "confirmed by you, 6 Oct 2026", None),
     "175-miles-building":   ("Flat 175, Miles Buildings, Penfold Place, London, NW1 6RP", "high", "confirmed by you, 6 Oct 2026", None),
     "nw4":                  ("Flat 3, 48 Station Road, NW4 3SX", "high", "confirmed by you, 6 Oct 2026", None),
-    "tottenham-court-road": ("Flats 7 & 8, Shaldon Mansions, 132 Charing Cross Road, London, WC2H 0LA", "medium",
-                             "confirmed by you, 6 Oct 2026; matched to the Tottenham Court Road sheet by location (nothing in the files names Shaldon Mansions)",
-                             "Please confirm Shaldon Mansions is the Tottenham Court Road property."),
+    "tottenham-court-road": ("Flats 7 & 8, Shaldon Mansions, 132 Charing Cross Road, London, WC2H 0LA", "high",
+                             "confirmed by you, 6 Oct 2026; your website's Shaldon Mansions page puts it 1 minute from Tottenham Court Road", None),
     "11-perryfield-way":    ("Flat 11, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", "high", "confirmed by you, 6 Oct 2026", None),
     "22-perryfield-way":    ("Flat 22, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", "high", "confirmed by you, 6 Oct 2026", None),
     "19-draycott-ave":      ("Flat 1, 19 Draycott Avenue, Chelsea, London, SW3 3BS", "high", "confirmed by you, 6 Oct 2026", None),
     "44-spooner-road":      ("44 Spooner Road", "low", "dashboard name + workbook sheet title only",
-                             "No full address was given for 44 Spooner Road (S10). Your list also has 29 Station Road, Forest Gate, which I could not match to it: "
-                             "the Main Page treats 'Forest gate' (managed) and S10 (rent-to-rent) as two different properties."),
+                             "No full address was given for 44 Spooner Road (S10), and it is not on your website. It is NOT the Forest Gate property: the Main Page lists "
+                             "'Forest gate' (managed) and S10 (rent-to-rent) separately, and your site has a separate Forest Gate page."),
 }
 
 # A property that is not in the dashboard yet but whose business model you have already decided: pre-fills the
