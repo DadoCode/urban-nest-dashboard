@@ -101,6 +101,9 @@ def main():
     for d in actions["duplicates"]:
         print(f"    {d['row']['date']} {d['row']['description']} {d['row']['amount']:.2f} = {d['property_id']} costs {d['property_total']:.2f}")
     print(f"left alone: {len(actions['left_alone'])} business rows that name a property but do not match its costs")
+    pre = actions.get("pre_start", [])
+    print(f"NW4 pre-start copies: {len(pre)} income rows (exact copies of another property's rows), total {sum(d['row']['amount'] for d in pre):.2f}; "
+          f"ids {sorted(d['row']['id'] for d in pre)}; left alone (no twin): {len(actions.get('pre_start_left', []))}")
     if args.apply:
         batch = K.apply_cleanup(conn, actions, "script")
         print("\nnothing to change: the database already matches" if batch is None else f"\napplied as batch #{batch} (undo it from the Import page)")
