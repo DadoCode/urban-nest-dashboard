@@ -10,6 +10,8 @@ property_id=None means "the whole portfolio" everywhere below.
 """
 import datetime
 
+from services import sources as src
+
 
 def month_bounds(year, month):
     """[start, end) as ISO date strings for one calendar month."""
@@ -61,55 +63,63 @@ def _prop_clause(property_id, column="property_id"):
 
 
 
-# The Excel import is the permanent record of the old months and is NEVER
-# hidden or replaced: reservations and costs added later (statements, uploads,
-# hand entry) simply add to it. Overlap between an upload and what Excel
-# already holds can't be matched line by line (Excel carries one lump per
-# month), so the importer flags it at review instead -- see
-# services.ingest.excel_overlap. (These stay as empty clauses so every query
-# that interpolates them is unchanged.)
-_TX_NOT_SUPERSEDED = ""
-_BK_NOT_SUPERSEDED = ""
+# Booking-derived numbers (revenue, nights, reservations) come from exactly ONE
+# source per property and month -- the Excel history or the detailed
+# reservations -- chosen explicitly (services/sources.py). Adding both would
+# double count and letting one reservation replace a month would destroy it.
+# A stay that spans two months contributes each month's share under THAT
+# month's source. Costs and everything else are untouched.
 
-
-def _booking_revenue(conn, clause, params, start, end):
-    """Reservation income falling inside [start, end): a stay that straddles
-    a month boundary is prorated by nights, so it isn't counted in full in
-    both months."""
-    rows = conn.execute(
-        f"SELECT check_in, check_out, net_revenue FROM bookings WHERE status='confirmed' AND check_in<? AND check_out>? {clause}",
-        (end, start, *params),
-    ).fetchall()
-    start_d, end_d = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+def _income(conn, property_id, start, end, accommodation_only=False):
+    """Income transactions in [start, end). The Excel history's lumps count
+    only in months whose active source is the Excel history."""
+    clause, params = _prop_clause(property_id)
+    category = "AND category='booking_income'" if accommodation_only else ""
+    S = src.Sources(conn, property_id, start, end)
     total = 0.0
-    for r in rows:
-        ci_full, co_full = datetime.date.fromisoformat(r["check_in"]), datetime.date.fromisoformat(r["check_out"])
-        span = (co_full - ci_full).days
-        inside = (min(co_full, end_d) - max(ci_full, start_d)).days
-        if span > 0 and inside > 0:
-            total += r["net_revenue"] * inside / span
+    for r in conn.execute(
+            f"""SELECT property_id, substr(date,1,7) ym, source, COALESCE(SUM(amount),0) amt FROM transactions
+                WHERE direction='income' {category} AND date>=? AND date<? {clause} GROUP BY property_id, ym, source""",
+            (start, end, *params)):
+        if r["source"] in src.AGGREGATE_SOURCES and S.active(r["property_id"], r["ym"]) == src.DETAILED:
+            continue
+        total += r["amt"]
     return total
+
+
+def _booking_pieces(conn, property_id, start, end):
+    """[(row, nights, net_share)] for every stay overlapping [start, end),
+    counting only the nights that fall in a month whose active source owns
+    that kind of row. Detailed reservations are de-duplicated first."""
+    clause, params = _prop_clause(property_id)
+    rows = conn.execute(
+        f"""SELECT id, property_id, reservation_id, check_in, check_out, net_revenue, source FROM bookings
+            WHERE status='confirmed' AND check_in<? AND check_out>? {clause}""", (end, start, *params)).fetchall()
+    S = src.Sources(conn, property_id, start, end)
+    legacy = [r for r in rows if r["source"] in src.AGGREGATE_SOURCES]
+    detailed = src.dedupe_detailed([r for r in rows if r["source"] not in src.AGGREGATE_SOURCES])
+    out = []
+    for kind, group in ((src.LEGACY, legacy), (src.DETAILED, detailed)):
+        for r in group:
+            nights = share = 0.0
+            for ym, lo, hi in src.stay_pieces(r, start, end):
+                if S.active(r["property_id"], ym) == kind:
+                    nights += src.nights_inside(r, lo, hi)
+                    share += src.prorate(r, lo, hi, r["net_revenue"] or 0.0)
+            if nights:
+                out.append((r, int(nights), share))
+    return out
 
 
 def revenue(conn, property_id, start, end):
     """All accommodation + ancillary income for the period."""
-    clause, params = _prop_clause(property_id)
-    tx = conn.execute(
-        f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='income' AND date>=? AND date<? {clause} {_TX_NOT_SUPERSEDED}",
-        (start, end, *params),
-    ).fetchone()[0]
-    return tx + _booking_revenue(conn, clause, params, start, end)
+    return _income(conn, property_id, start, end) + sum(share for _r, _n, share in _booking_pieces(conn, property_id, start, end))
 
 
 def accommodation_revenue(conn, property_id, start, end):
     """Revenue narrowed to actual stays (booking_income transactions +
-    real bookings) -- excludes ancillary/other income -- for ADR/RevPAR."""
-    clause, params = _prop_clause(property_id)
-    tx = conn.execute(
-        f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE direction='income' AND category='booking_income' AND date>=? AND date<? {clause} {_TX_NOT_SUPERSEDED}",
-        (start, end, *params),
-    ).fetchone()[0]
-    return tx + _booking_revenue(conn, clause, params, start, end)
+    reservations) -- excludes ancillary/other income -- for ADR/RevPAR."""
+    return _income(conn, property_id, start, end, accommodation_only=True) + sum(share for _r, _n, share in _booking_pieces(conn, property_id, start, end))
 
 
 def costs(conn, property_id, start, end, capex=None):
@@ -126,60 +136,41 @@ def net_profit(conn, property_id, start, end):
 
 
 def booked_nights(conn, property_id, start, end):
-    """Sums nights from every booking clipped to [start, end) -- a
-    reservation spanning the boundary only contributes the nights that
-    actually fall inside the requested period."""
-    clause, params = _prop_clause(property_id)
-    rows = conn.execute(
-        f"SELECT check_in, check_out FROM bookings WHERE status='confirmed' AND check_in<? AND check_out>? {clause} {_BK_NOT_SUPERSEDED}",
-        (end, start, *params),
-    ).fetchall()
-    start_d, end_d = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
-    total = 0
-    for r in rows:
-        ci = max(datetime.date.fromisoformat(r["check_in"]), start_d)
-        co = min(datetime.date.fromisoformat(r["check_out"]), end_d)
-        total += max((co - ci).days, 0)
-    return total
+    """Nights inside [start, end) from the source that owns each month -- a
+    stay spanning the boundary contributes only the nights inside the period."""
+    return sum(n for _r, n, _s in _booking_pieces(conn, property_id, start, end))
 
 
 def reservation_count(conn, property_id, start, end):
-    """Real reservations only -- excludes the synthetic 'monthly-aggregate'
-    rows the historical Excel import uses to carry a month's occupancy
-    figure without a reconstructable reservation-level record."""
-    clause, params = _prop_clause(property_id)
-    return conn.execute(
-        f"""SELECT COUNT(*) FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
-            AND check_in<? AND check_out>? {clause}""",
-        (end, start, *params),
-    ).fetchone()[0]
+    """Real reservations only, counted from the active source -- excludes the
+    synthetic 'monthly-aggregate' rows the historical Excel import uses to carry
+    a month's occupancy without a reconstructable reservation-level record."""
+    return sum(1 for r, _n, _s in _booking_pieces(conn, property_id, start, end) if r["reservation_id"] != "monthly-aggregate")
 
 
 def avg_stay(conn, property_id, start, end):
     """Average Length of Stay: nights on real reservations / real
-    reservations. Only real reservations on both sides -- dividing all
-    booked nights (which include the Excel import's aggregate nights) by
-    the count of real ones would be meaningless."""
-    clause, params = _prop_clause(property_id)
-    rows = conn.execute(
-        f"""SELECT check_in, check_out FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
-            AND check_in<? AND check_out>? {clause}""",
-        (end, start, *params),
-    ).fetchall()
-    if not rows:
-        return 0.0
-    start_d, end_d = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
-    nights = sum(max((min(datetime.date.fromisoformat(r["check_out"]), end_d)
-                      - max(datetime.date.fromisoformat(r["check_in"]), start_d)).days, 0) for r in rows)
-    return nights / len(rows)
+    reservations (aggregate nights excluded on both sides)."""
+    real = [(r, n) for r, n, _s in _booking_pieces(conn, property_id, start, end) if r["reservation_id"] != "monthly-aggregate"]
+    return sum(n for _r, n in real) / len(real) if real else 0.0
+
+
+def _active_days(start, end, property_start):
+    """Nights in [start, end) on or after the date the property joined the portfolio (no start date = always)."""
+    s, e = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+    if property_start:
+        s = max(s, datetime.date.fromisoformat(property_start))
+    return max((e - s).days, 0)
 
 
 def available_nights(conn, property_id, start, end):
-    days = (datetime.date.fromisoformat(end) - datetime.date.fromisoformat(start)).days
+    """Nights a property (or the portfolio) could have been booked. A property is only available from its start_date:
+    before it joined the portfolio it is NOT ACTIVE, not "empty"."""
     if property_id:
-        return days
-    n = conn.execute("SELECT COUNT(*) FROM properties WHERE type='flat' AND active=1").fetchone()[0]
-    return days * n
+        row = conn.execute("SELECT start_date FROM properties WHERE id=?", (property_id,)).fetchone()
+        return _active_days(start, end, row["start_date"] if row else None)
+    return sum(_active_days(start, end, r["start_date"])
+               for r in conn.execute("SELECT start_date FROM properties WHERE type='flat' AND active=1"))
 
 
 def occupancy(conn, property_id, start, end):
@@ -213,11 +204,11 @@ def business_income(conn, property_id, start, end):
     (property_id=None) sums this per flat rather than netting on the total,
     since owned and managed flats are computed differently."""
     if property_id:
-        row = conn.execute("SELECT management_fee_pct, type FROM properties WHERE id=?", (property_id,)).fetchone()
+        row = conn.execute("SELECT management_fee_pct, is_managed, type FROM properties WHERE id=?", (property_id,)).fetchone()
         if not row or row["type"] == "overhead":
             return 0.0
         fee = row["management_fee_pct"]
-        if fee:
+        if fee or row["is_managed"]:
             recorded = conn.execute(
                 """SELECT COALESCE(SUM(amount),0) FROM transactions
                    WHERE property_id=? AND direction='expense' AND category='management_fee' AND date>=? AND date<?""",
@@ -225,7 +216,7 @@ def business_income(conn, property_id, start, end):
             ).fetchone()[0]
             if recorded:
                 return recorded
-            return revenue(conn, property_id, start, end) * fee / 100
+            return revenue(conn, property_id, start, end) * fee / 100 if fee else 0.0      # no % known: never estimate
         return net_profit(conn, property_id, start, end)
     total = 0.0
     for p in conn.execute("SELECT id FROM properties WHERE type='flat'"):
@@ -242,9 +233,9 @@ def adjusted_revenue(conn, property_id, start, end):
     rather than scaling one combined total, since owned and managed flats
     aren't adjusted by the same factor."""
     if property_id:
-        row = conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (property_id,)).fetchone()
-        fee = row["management_fee_pct"] if row else None
-        return business_income(conn, property_id, start, end) if fee else revenue(conn, property_id, start, end)
+        row = conn.execute("SELECT management_fee_pct, is_managed FROM properties WHERE id=?", (property_id,)).fetchone()
+        managed = bool(row and (row["management_fee_pct"] or row["is_managed"]))
+        return business_income(conn, property_id, start, end) if managed else revenue(conn, property_id, start, end)
     return sum(adjusted_revenue(conn, p["id"], start, end) for p in conn.execute("SELECT id FROM properties WHERE type='flat'"))
 
 

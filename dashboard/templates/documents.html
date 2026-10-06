@@ -2,8 +2,22 @@
 {% from "_components.html" import page_head, empty_state %}
 {% block title %}Documents — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Documents", "Upload statements and invoices, review what was extracted, then confirm. Nothing reaches your figures until you do.") }}
+  {{ page_head("Documents", "Each month, your source documents are turned into one standard workbook, which you import here. Source documents below stay available for reference and manual checks.") }}
+  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('reconcile.index') }}">Reconciliation{% if recon_needed %} ({{ recon_needed }} month{{ 's' if recon_needed != 1 }} need a decision){% endif %}</a> · <a href="{{ url_for('reconcile.figures') }}">Figure audit</a></p>
 
+  <div class="card" style="margin-bottom:var(--s5); border-color: var(--brand)">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:var(--s3); flex-wrap:wrap">
+      <div>
+        <strong style="font-size:var(--fs-lg, 1.05rem)">Import monthly workbook</strong>
+        <div class="note">Upload the month's workbook, see exactly what would change per property, then apply — or undo it later.</div>
+        {% if last_import %}<div class="note" style="margin-top:4px">Last import: <a href="{{ url_for('imports.batch', batch_id=last_import.id) }}">{{ last_import.period_label }}</a> · {{ (last_import.applied_at or '')[:10] }}</div>{% endif %}
+      </div>
+      <a class="btn" href="{{ url_for('imports.index') }}" style="color:#fff; font-weight:500">Import monthly workbook</a>
+    </div>
+  </div>
+
+  <h2 style="margin:0 0 var(--s2)">Source documents</h2>
+  <p class="note" style="margin:0 0 var(--s3)">Statements and invoices, kept for reference. They no longer drive the monthly figures; the workbook does.</p>
   <span id="upload"></span>
   {% if prefill_property or prefill_type %}
     <div class="flash info" style="margin-bottom:var(--s3)">

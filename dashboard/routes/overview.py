@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request
 
 import db
 import services.kpis as kpis
-from services.common import METRIC_INFO, get_properties, pct_delta
+from services.common import METRIC_INFO, get_properties, is_managed, pct_delta
 from services.context import request_context, range_params
 
 bp = Blueprint("overview", __name__)
@@ -106,7 +106,7 @@ def index():
     # meaningless Margin, so they're presented separately.
     rtr_rows, managed_rows = [], []
     for p in flats:
-        if p["management_fee_pct"]:
+        if is_managed(p):
             snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
             managed_rows.append({
                 "id": p["id"], "name": p["name"], "fee": snap["net_profit"],

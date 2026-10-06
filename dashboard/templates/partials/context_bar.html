@@ -54,5 +54,7 @@
     </div>
   </div>
   {% endif %}
+  {% set wbp = workbook_provenance(ctx) %}
+  {% if wbp %}<a class="note" style="margin-left:auto; text-decoration:none" href="{{ url_for('imports.batch', batch_id=wbp.id) }}" title="Import #{{ wbp.id }} · {{ wbp.filename }}">Updated from workbook · {{ wbp.applied_at[8:10]|int }} {{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][wbp.applied_at[5:7]|int - 1] }} {{ wbp.applied_at[:4] }}</a>{% endif %}
   {% if not ctx.is_latest %}<a class="ctx-reset" href="?{{ ctx.latest_params|urlencode }}" title="Back to the current month, all properties, default comparison">Reset to latest</a>{% endif %}
 </div>

@@ -7,8 +7,9 @@ import db
 import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
-from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta
-from services.completeness import completeness_for, health_for, health_state, seed_defaults
+import services.sources as src
+from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta, is_managed
+from services.completeness import completeness_for, health_for, health_state, not_active, seed_defaults
 from services.context import compare_bounds, link_params, range_params, request_context
 import services.ingest as ingest
 from services.audit import record
@@ -64,7 +65,8 @@ def index():
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"],
             "health_kind": kind, "health_label": label,
-            "managed": bool(fee), "fee": fee,
+            "managed": is_managed(p), "fee": fee,
+            "not_active": bool(not_active(conn, p["id"], start, end)),       # whole period is before it joined the portfolio
         })
 
     def _sorted(items, key):
@@ -154,7 +156,7 @@ def _overview_tiles(conn, prop, ctx):
     def d(cur_v, prev_v, base=0):
         return None if mtd else (pct_delta(cur_v, prev_v, min_base=base) if prev_v is not None else None)
 
-    if prop["management_fee_pct"]:
+    if is_managed(prop):
         cur_gross = kpis.revenue(conn, property_id, start, end)
         cur_fee = kpis.business_income(conn, property_id, start, end)
         cur_occ = kpis.occupancy(conn, property_id, start, end)
@@ -297,6 +299,9 @@ def bookings(property_id):
     total_rows = conn.execute(f"SELECT COUNT(*) FROM bookings WHERE {where}", params).fetchone()[0]
     platforms = [r[0] for r in conn.execute(f"SELECT DISTINCT COALESCE(NULLIF(platform,''),'other') FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
     sources = [r[0] for r in conn.execute(f"SELECT DISTINCT source FROM bookings WHERE {base} ORDER BY 1", (property_id,))]
+    S = src.Sources(conn, property_id, start, end)
+    inactive_stored = sum(1 for r in rows if r["source"] not in src.AGGREGATE_SOURCES
+                          and any(S.active(property_id, ym) == src.LEGACY for ym, _lo, _hi in src.stay_pieces(r, start, end)))
     filters = {"b_when": b_when, "b_platform": b_platform, "b_source": b_source, "b_status": b_status if b_status != "confirmed" else ""}
 
     def sort_href(column):
@@ -311,7 +316,7 @@ def bookings(property_id):
         adr=kpis.adr(conn, property_id, start, end), bookings=rows, total_rows=total_rows,
         b_sort=b_sort, b_dir=b_dir, sort_href=sort_href, filters=filters, platforms=platforms, sources=sources,
         has_future=bool(facts["future"]), has_cancelled=bool(facts["cancelled"]),
-        ctx_params=link_params(),
+        ctx_params=link_params(), inactive_stored=inactive_stored,
         # Bookings is the reservation evidence layer -- what guests
         # actually booked and paid, so it's Gross Booking Revenue (the
         # true guest value) here, never the adjusted Urban Nest figure
@@ -370,7 +375,7 @@ def performance_tab(property_id):
     cmp_b = compare_bounds(ctx)
     cur = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
     prev = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
-    managed = bool(prop["management_fee_pct"])
+    managed = is_managed(prop)
 
     mtd = ctx["partial"] and ctx["choice"] == "this_month"
 
@@ -514,12 +519,22 @@ def settings_tab(property_id):
         "property/settings.html", all_properties=get_properties(conn),
         **_ws(conn, ctx, prop, "settings", is_overhead=is_overhead),
         checklist=_checklist(conn, property_id, is_overhead, ctx["end_year"], ctx["end_month"]),
-        fee_pct=prop["management_fee_pct"], your_income=None if is_overhead else kpis.business_income(conn, property_id, start, end),
+        fee_pct=prop["management_fee_pct"], managed=is_managed(prop), your_income=None if is_overhead else kpis.business_income(conn, property_id, start, end),
         aliases=[] if is_overhead else conn.execute("SELECT alias, label FROM property_aliases WHERE property_id=? AND ignore=0 ORDER BY label", (property_id,)).fetchall(),
+        workbook_identity=None if is_overhead else _workbook_identity(conn, property_id),
     ))
     if not is_overhead:
         _remember_visit(resp, property_id)
     return resp
+
+
+def _workbook_identity(conn, property_id):
+    """The codes and names the monthly workbook import knows this property by (the id itself never changes)."""
+    try:
+        from services.workbook import identity
+        return {"codes": identity.sheet_codes_of(conn, property_id), "aliases": identity.aliases_of(conn, property_id)}
+    except Exception:                      # a demo database that predates the identity tables
+        return None
 
 
 @bp.route("/property/<property_id>")
@@ -555,14 +570,17 @@ def save_ownership(property_id):
     fee = None
     if kind == "managed":
         raw = (request.form.get("fee") or "").strip()
-        try:
-            fee = max(0.0, min(100.0, float(raw)))
-        except ValueError:
-            flash("Enter the management fee as a percentage, for example 15.", "error")
-            return redirect(url_for("properties.settings_tab", property_id=property_id))
-    conn.execute("UPDATE properties SET management_fee_pct=? WHERE id=?", (fee, property_id))
+        if raw:
+            try:
+                fee = max(0.0, min(100.0, float(raw)))
+            except ValueError:
+                flash("Enter the management fee as a percentage, for example 15.", "error")
+                return redirect(url_for("properties.settings_tab", property_id=property_id))
+    conn.execute("UPDATE properties SET management_fee_pct=?, is_managed=? WHERE id=?", (fee, 1 if kind == "managed" else 0, property_id))
     conn.commit()
-    if fee:
+    if kind == "managed" and not fee:
+        flash(f"\u2713 {prop['name']} is set as managed. The fee percentage is still to be set; until then only recorded fees count (nothing is estimated).", "success")
+    elif fee:
         flash(f"\u2713 {prop['name']} is set as managed -- this business earns {fee:g}% of its revenue.", "success")
     else:
         flash(f"\u2713 {prop['name']} is set as fully owned -- this business earns its full net profit.", "success")

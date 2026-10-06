@@ -11,7 +11,7 @@ import csv
 import io
 
 import services.kpis as kpis
-from services.common import MONTH_NAMES, get_properties, get_property, pct_delta
+from services.common import MONTH_NAMES, get_properties, get_property, is_managed, pct_delta
 
 REPORT_TYPES = {
     "portfolio_monthly": "Portfolio monthly report",
@@ -93,7 +93,7 @@ def _property_table(conn, start, end, heading="By property", use_adjusted=False)
         row = [p["name"], s["revenue"], s["costs"], s["net_profit"], s["margin"] * 100, s["occupancy"] * 100, s["adr"]]
         if use_adjusted:
             fee = p["management_fee_pct"]
-            row.append(f"Managed · {fee:g}%" if fee else "Operated")
+            row.append((f"Managed · {fee:g}%" if fee else "Managed · fee % not set") if is_managed(p) else "Operated")
         rows.append(row)
     rows.sort(key=lambda r: r[1], reverse=True)
     columns = [_col("Property"), _col("Revenue", "money"), _col("Costs", "money"), _col("Net profit", "money"),
@@ -145,8 +145,8 @@ def _your_income_section(conn, property_id, start, end, heading="This business's
     p = get_property(conn, property_id)
     fee = p["management_fee_pct"]
     income = kpis.business_income(conn, property_id, start, end)
-    if fee:
-        note = (f"This flat is managed for its owner: this business earns {fee:g}% of its revenue. "
+    if is_managed(p):
+        note = (f"This flat is managed for its owner: this business earns {(f'{fee:g}%' if fee else 'its recorded management fee')} of its revenue. "
                 "The rest of the revenue and costs above belong to the owner, not this business.")
     else:
         note = "This flat is fully owned: the net profit above is this business's income in full."

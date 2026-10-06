@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_head, empty_state %}
+{% from "_recon_macros.html" import fmt, diff %}
+{% block title %}{{ prop.name }} · {{ month_label }} — Reconciliation{% endblock %}
+{% block content %}
+  <p class="note" style="margin:0 0 var(--s2)"><a href="{{ url_for('reconcile.index') }}">&larr; All reconciliation</a></p>
+  {{ page_head(prop.name ~ " — " ~ month_label, "Which booking data feeds the dashboard for this month?") }}
+
+  <div class="card" style="margin-bottom:var(--s4)">
+    <span class="pill {{ status.kind }}">{{ status.label }}</span>
+    <strong style="margin-left:var(--s2)">Dashboard is using: {{ 'Excel history' if status.active == 'legacy_aggregate' else 'Detailed bookings' }}</strong>
+    <div class="note" style="margin-top:var(--s2)">{{ verdict[0] }}. This is a hint, never an automatic decision.</div>
+  </div>
+
+  <section class="section">
+    <div class="section-head"><h2>Excel history vs uploaded so far</h2></div>
+    <div class="card flush">
+      <table>
+        <thead><tr><th></th><th class="num">Existing (Excel monthly aggregate)</th><th class="num">Uploaded so far</th><th class="num">Difference</th></tr></thead>
+        <tbody>
+          {% for key, label, kind in rows %}
+            <tr><td>{{ label }}</td>
+                <td class="num">{% if key == 'reservations' %}—{% else %}{{ fmt(existing[key], kind) }}{% endif %}</td>
+                <td class="num">{{ fmt(uploaded[key], kind) }}</td>
+                <td class="num">{% if key == 'reservations' %}—{% else %}{{ diff(uploaded[key], existing[key], kind) }}{% endif %}</td></tr>
+          {% endfor %}
+          <tr><td class="note">of which guest-paid, before platform fees</td><td class="num note">not recorded in Excel</td><td class="num note">{{ fmt(detail.guest_gross, 'money') }}</td><td></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:var(--s2)">Existing source: Excel monthly aggregate (never modified). Uploaded source:
+      {% if detail.documents %}{% for d in detail.documents %}<a href="{{ url_for('documents.review', doc_id=d.id) }}">{{ d.filename }}</a>{{ ', ' if not loop.last }}{% endfor %}{% else %}none{% endif %}.
+      “Gross Booking Revenue” here is what the dashboard calculates for that tile, which today sums each reservation's net amount after platform fees.</p>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>{{ 'If you switch to the detailed bookings' if status.active == 'legacy_aggregate' else 'If you revert to the Excel history' }}</h2></div>
+    <div class="card flush">
+      <table>
+        <thead><tr><th></th><th class="num">Current dashboard</th><th class="num">After the switch</th><th class="num">Change</th></tr></thead>
+        <tbody>
+          {% for key, label, kind in impact_rows %}
+            <tr><td>{{ label }}</td><td class="num">{{ fmt(current[key], kind) }}</td><td class="num">{{ fmt(after[key], kind) }}</td><td class="num">{{ diff(after[key], current[key], kind) }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if status.has_legacy and status.has_detailed or status.explicit %}
+      {% if status.active == 'legacy_aggregate' %}
+        <form method="post" action="{{ url_for('reconcile.use_detailed', property_id=prop.id, ym=ym) }}" style="margin-top:var(--s3)">
+          <label style="display:flex; gap:8px; align-items:flex-start"><input type="checkbox" name="confirm" value="yes" style="width:auto; margin-top:4px" required>
+            <span>I've checked that the uploaded bookings cover the <strong>whole of {{ month_label }}</strong> for this property (all channels). Switching changes the figures above; the Excel data stays stored and I can switch back.</span></label>
+          <button type="submit" style="margin-top:var(--s2)">Use detailed bookings for {{ month_label }}</button>
+        </form>
+      {% else %}
+        <form method="post" action="{{ url_for('reconcile.revert', property_id=prop.id, ym=ym) }}" style="margin-top:var(--s3)"
+              onsubmit="return confirm('Switch {{ month_label }} back to the Excel history? The figures above will be restored.')">
+          <button type="submit" class="secondary">Revert to the Excel history</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Uploaded reservations touching {{ month_label }}</h2><span class="note">{{ detail.rows|length }} stored</span></div>
+    <div class="card flush">
+      {% if detail.rows %}
+        <table>
+          <thead><tr><th>Check-in</th><th>Check-out</th><th>Platform</th><th class="num">Nights in {{ month_label }}</th><th class="num">Net</th><th>Document</th></tr></thead>
+          <tbody>{% for r in detail.rows %}
+            <tr><td>{{ r.check_in }}</td><td>{{ r.check_out }}</td><td>{{ (r.platform or '—')|replace('_', ' ')|title }}</td><td class="num">{{ r.nights_in_month }}</td><td class="num">{{ '£{:,.2f}'.format(r.net_revenue) }}</td>
+              <td>{% if r.document_id %}<a href="{{ url_for('documents.review', doc_id=r.document_id) }}">{{ r.filename }}</a>{% else %}<span class="note">{{ r.source }}</span>{% endif %}</td></tr>
+          {% endfor %}</tbody>
+        </table>
+      {% else %}{{ empty_state("No uploaded reservations", "Nothing has been uploaded for this property and month.") }}{% endif %}
+    </div>
+  </section>
+
+  {% if history %}
+    <section class="section"><div class="section-head"><h2>History</h2></div>
+      <div class="card"><ol class="trail">{% for h in history %}<li><div><span class="trail-ev">{{ h.text }}</span> <span class="note">{{ h.when }}</span></div></li>{% endfor %}</ol></div>
+    </section>
+  {% endif %}
+{% endblock %}

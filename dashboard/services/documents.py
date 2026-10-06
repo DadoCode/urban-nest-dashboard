@@ -244,11 +244,10 @@ def save_upload(conn, file, doc_type, property_id, flash):
             dupes_replace += dup_default == "replace"
             dupes_kept_excel += dup_default == "exclude"
             overlap = 0.0 if duplicate_of else ingest.excel_overlap(conn, item_property, item.get("check_in"))
-            if overlap:  # Excel already has income for this property and month: adding on top could count the stay twice
-                item["_excel_overlap"] = round(overlap, 2)
+            if overlap:  # Excel history exists for this property-month: the stay is STORED, but figures stay on Excel until reconciled
                 overlap_lines += 1
                 overlap_examples[(item_property, item["check_in"][:7])] = round(overlap, 2)
-            start_ticked = not (dup_default == "exclude" or ignored or item.get("_exclude") or overlap)
+            start_ticked = not (dup_default == "exclude" or ignored or item.get("_exclude"))
             platform = item.get("platform") or result.get("platform")
             conn.execute(
                 """INSERT INTO document_items (document_id, line_index, raw_description, date, vendor, amount,
@@ -333,8 +332,8 @@ def save_upload(conn, file, doc_type, property_id, flash):
                          "message": f"{dupes_kept_excel} {noun_dup}{'s' if dupes_kept_excel != 1 else ''} match records from your Excel history. Excel is kept untouched, so these are left out (unticked)."})
     if overlap_lines:
         shown = "; ".join(f"{names_all.get(p, p)} {ingest.MONTH_ABBR[int(ym[5:])]} {ym[:4]} (Excel £{amt:,.0f})" for (p, ym), amt in list(overlap_examples.items())[:3])
-        warnings.append({"code": "excel_overlap", "level": "warn",
-                         "message": f"{overlap_lines} reservation{'s' if overlap_lines != 1 else ''} fall in months where your Excel history already has income ({shown}{'…' if len(overlap_examples) > 3 else ''}). Excel is kept as it is, and it can't be matched stay by stay, so ticking these ADDS them on top and may count a stay twice. They start unticked; tick the ones that are genuinely new."})
+        warnings.append({"code": "excel_overlap", "level": "info",
+                         "message": f"{overlap_lines} reservation{'s' if overlap_lines != 1 else ''} fall in months where your Excel history already has income ({shown}{'…' if len(overlap_examples) > 3 else ''}). Confirming STORES them but does not change those months' figures: Excel stays in charge until you compare the two on the Reconciliation page and choose."})
 
     detection = {"property": prop_info, "period": period, "warnings": warnings,
                  "method": "spreadsheet parser" if ext in SPREADSHEET_EXTS else "AI extraction",

@@ -190,6 +190,87 @@ CREATE TABLE IF NOT EXISTS property_aliases (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Which booking data feeds the KPIs for one property and month. A row exists
+-- ONLY when a person decided; importing a document never writes one. With no
+-- row: Excel history if the month has any, otherwise the detailed reservations
+-- (see services/sources.py). The Excel rows themselves are never altered.
+CREATE TABLE IF NOT EXISTS booking_source_state (
+    property_id TEXT NOT NULL REFERENCES properties(id),
+    month TEXT NOT NULL,                       -- 'YYYY-MM'
+    active_source TEXT NOT NULL,               -- 'legacy_aggregate' | 'detailed'
+    decided_at TEXT NOT NULL DEFAULT (datetime('now')),
+    decided_by TEXT,
+    note TEXT,
+    PRIMARY KEY (property_id, month)
+);
+
+-- Monthly workbook imports. A batch is one workbook applied for one month; the
+-- parsed content of the allowed sheets is kept (never the file itself, so
+-- nothing from a sheet we do not read is ever stored). import_batch_rows is the
+-- exact change log: rows the batch added and full copies of rows it removed,
+-- which is what makes "Undo import" restore the previous state exactly.
+CREATE TABLE IF NOT EXISTS import_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+    workbook_year INTEGER,
+    period TEXT,                    -- 'YYYY-MM' the batch was applied for (NULL while only staged)
+    status TEXT NOT NULL DEFAULT 'staged',   -- staged | applied | undone | cancelled
+    applied_at TEXT, undone_at TEXT,
+    properties TEXT,                -- JSON list of property ids the batch touched
+    row_count INTEGER NOT NULL DEFAULT 0,
+    before_totals TEXT, after_totals TEXT,   -- JSON per property: income / costs / days
+    parsed TEXT,                    -- JSON: parsed allowed sheets
+    validation TEXT,                -- JSON: validation report
+    reconciliation TEXT,            -- JSON: reconciliation report at apply time
+    note TEXT,
+    kind TEXT NOT NULL DEFAULT 'workbook',   -- 'workbook' | 'cleanup'
+    rows_added INTEGER NOT NULL DEFAULT 0, rows_changed INTEGER NOT NULL DEFAULT 0, rows_removed INTEGER NOT NULL DEFAULT 0,
+    new_properties TEXT                      -- JSON list of property ids this batch created
+);
+
+CREATE TABLE IF NOT EXISTS import_batch_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id),
+    op TEXT NOT NULL,               -- 'added' | 'removed' | 'source_state_added' | 'property_created' | 'property_updated' | 'alias_added' | 'sheet_map_added'
+    tbl TEXT NOT NULL,              -- 'transactions' | 'bookings' | 'booking_source_state' | 'properties' | ...
+    row_id INTEGER,                 -- id in tbl (NULL for booking_source_state)
+    row_json TEXT NOT NULL          -- the full row as it was (removed) / as written (added)
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON import_batch_rows(batch_id);
+
+-- Main Page business rows a person chose to leave out of the import for a month (a suspected duplicate of a property
+-- cost). Remembered so that importing the same workbook again still has nothing to do.
+-- Main Page business rows you have confirmed are genuine, separate expenses, so the importer stops flagging them as
+-- possible duplicates of a property cost. Keyed by what the row IS (month, label, amount), not by where it sits.
+CREATE TABLE IF NOT EXISTS import_distinct (
+    period TEXT NOT NULL, label_norm TEXT NOT NULL, amount REAL NOT NULL, label TEXT, note TEXT, batch_id INTEGER,
+    PRIMARY KEY (period, label_norm, amount)
+);
+
+CREATE TABLE IF NOT EXISTS import_exclusions (
+    period TEXT NOT NULL, source_ref TEXT NOT NULL, label TEXT, amount REAL, batch_id INTEGER,
+    PRIMARY KEY (period, source_ref)
+);
+
+-- Permanent identity of a property for the workbook import: which sheet code
+-- belongs to which property, and every name/code it is known by. The property
+-- id never changes when its display name does.
+CREATE TABLE IF NOT EXISTS workbook_sheet_map (
+    sheet_code TEXT PRIMARY KEY,          -- 'LW', 'W8', '22PW' (the sheet is '<code><yy>')
+    property_id TEXT NOT NULL REFERENCES properties(id),
+    source TEXT,                          -- 'seed' | 'import #N' | 'manual'
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS property_identity_aliases (
+    alias_norm TEXT PRIMARY KEY,          -- lower-case letters and digits only
+    alias_text TEXT NOT NULL,
+    property_id TEXT NOT NULL REFERENCES properties(id),
+    kind TEXT,                            -- 'code' | 'name' | 'previous_name' | 'sheet'
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE INDEX IF NOT EXISTS idx_document_events_doc ON document_events(document_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_property_date ON bookings(property_id, check_in);
 CREATE INDEX IF NOT EXISTS idx_transactions_property_date ON transactions(property_id, date);
@@ -213,10 +294,12 @@ def ensure_schema():
     for col, ddl in [
         ("ical_url", "TEXT"), ("ical_synced_at", "TEXT"),
         ("type", "TEXT NOT NULL DEFAULT 'flat'"), ("start_date", "TEXT"),
+        ("is_managed", "INTEGER NOT NULL DEFAULT 0"),   # managed for an owner even when the fee % is not known yet
         ("management_fee_pct", "REAL"),  # NULL/0 = fully owned; e.g. 15 = a manager keeps 85%, this business earns 15% of revenue
     ]:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE properties ADD COLUMN {col} {ddl}")
+    conn.execute("UPDATE properties SET is_managed=1 WHERE management_fee_pct>0 AND is_managed=0")     # idempotent backfill
     tx_cols = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)")}
     vendor_id_is_new = "vendor_id" not in tx_cols
     for col, ddl in [
@@ -241,6 +324,12 @@ def ensure_schema():
                 SELECT v.id FROM vendors v WHERE v.name = TRIM(transactions.vendor)
             ) WHERE vendor IS NOT NULL AND TRIM(vendor) != ''
         """)
+
+    for table in ("transactions", "bookings"):
+        cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for col, ddl in [("import_batch_id", "INTEGER"), ("source_ref", "TEXT")]:   # which workbook import wrote it, and from which cell
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
     item_cols = {row["name"] for row in conn.execute("PRAGMA table_info(document_items)")}
     for col, ddl in [
@@ -305,6 +394,13 @@ def ensure_schema():
         if col not in doc_cols:
             conn.execute(f"ALTER TABLE documents ADD COLUMN {col} {ddl}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash)")
+    batch_cols = {row["name"] for row in conn.execute("PRAGMA table_info(import_batches)")}
+    for col, ddl in [("kind", "TEXT NOT NULL DEFAULT 'workbook'"), ("rows_added", "INTEGER NOT NULL DEFAULT 0"),
+                     ("rows_changed", "INTEGER NOT NULL DEFAULT 0"), ("rows_removed", "INTEGER NOT NULL DEFAULT 0"), ("new_properties", "TEXT")]:
+        if col not in batch_cols:
+            conn.execute(f"ALTER TABLE import_batches ADD COLUMN {col} {ddl}")
+    from services.workbook import identity       # additive, idempotent: sheet codes and names for properties that already exist
+    identity.seed(conn)
     conn.commit()
     conn.close()
 

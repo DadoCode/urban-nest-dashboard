@@ -8,6 +8,7 @@ from flask import Blueprint, redirect, render_template, request, url_for
 import db
 import services.ingest as ingest
 import services.kpis as kpis
+import services.sources as src
 from services.common import METRIC_INFO, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta
 from services.context import compare_bounds, range_params, request_context
 
@@ -66,13 +67,20 @@ def index():
         "reservations": kpis.reservation_count(conn, pid, today.isoformat(), window_end.isoformat()),
     }
 
+    # Channel mix follows the same rule as every KPI: only reservations in months whose active source is the detailed bookings.
     scope, sparams = ("AND property_id=?", (pid,)) if pid else ("", ())
-    channel_rows = conn.execute(
-        f"""SELECT COALESCE(NULLIF(platform,''),'other') platform, COUNT(*) n, SUM(net_revenue) amt
-           FROM bookings WHERE status='confirmed' AND reservation_id != 'monthly-aggregate'
-             AND check_in>=? AND check_in<? {scope} GROUP BY platform ORDER BY amt DESC""",
-        (start, end, *sparams),
-    ).fetchall()
+    S = src.Sources(conn, pid, start, end)
+    mix = {}
+    for r in conn.execute(
+            f"""SELECT property_id, COALESCE(NULLIF(platform,''),'other') platform, net_revenue, check_in FROM bookings
+                WHERE status='confirmed' AND reservation_id != 'monthly-aggregate' AND check_in>=? AND check_in<? {scope}""",
+            (start, end, *sparams)):
+        if S.active(r["property_id"], r["check_in"][:7]) != src.DETAILED:
+            continue
+        m = mix.setdefault(r["platform"], {"platform": r["platform"], "n": 0, "amt": 0.0})
+        m["n"] += 1
+        m["amt"] += r["net_revenue"] or 0.0
+    channel_rows = sorted(mix.values(), key=lambda m: -m["amt"])
 
     return render_template(
         "bookings/overview.html", active="bookings", active_bookings_tab="overview",

@@ -1,0 +1,13 @@
+{# Number formatting shared by the reconciliation and figure-audit pages. #}
+{% macro fmt(v, kind) -%}
+  {%- if v is none -%}—
+  {%- elif kind == 'money' -%}£{{ '{:,.0f}'.format(v) }}
+  {%- elif kind == 'pct' -%}{{ '{:.0f}'.format(v * 100) }}%
+  {%- else -%}{{ '{:,.0f}'.format(v) }}{%- endif -%}
+{%- endmacro %}
+{% macro diff(a, b, kind) -%}
+  {%- set d = (a or 0) - (b or 0) -%}
+  {%- if kind == 'money' -%}{{ '+' if d > 0.004 else ('−' if d < -0.004 else '') }}£{{ '{:,.0f}'.format(d|abs) }}
+  {%- elif kind == 'pct' -%}{{ '+' if d > 0.0004 else ('−' if d < -0.0004 else '') }}{{ '{:.0f}'.format((d|abs) * 100) }} pts
+  {%- else -%}{{ '+' if d > 0.4 else ('−' if d < -0.4 else '') }}{{ '{:,.0f}'.format(d|abs) }}{%- endif -%}
+{%- endmacro %}

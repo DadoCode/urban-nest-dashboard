@@ -91,7 +91,7 @@
           <tbody>
             {% for r in managed_rows %}
               <tr>
-                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a> <span class="note">· {{ '%g'|format(r.fee_pct) }}% fee</span></td>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a> <span class="note">· {{ ('%g'|format(r.fee_pct) ~ '% fee') if r.fee_pct else 'fee % not set' }}</span></td>
                 <td class="num">{{ r.fee|money }}</td>
                 <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
                 <td class="num">{{ r.adr|money }}</td>

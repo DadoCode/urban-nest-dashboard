@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_head, empty_state %}
+{% from "_recon_macros.html" import fmt, diff %}
+{% block title %}Reconciliation — Urban Nest Estates{% endblock %}
+{% block content %}
+  {{ page_head("Reconciliation", "Months where the Excel history and uploaded reservations both exist. The dashboard keeps using Excel until you choose otherwise.") }}
+  <p class="note" style="margin:0 0 var(--s3)"><a href="{{ url_for('documents.index') }}">&larr; Documents</a> · <a href="{{ url_for('reconcile.figures') }}">Figure audit — where does each number come from?</a></p>
+
+  <div class="card" style="margin-bottom:var(--s4)">
+    <strong>{{ needed }} month{{ 's' if needed != 1 }} need{{ '' if needed != 1 else 's' }} a decision.</strong>
+    <span class="note">Uploading a statement never changes your figures. Excel stays in charge of a month until you switch it, after seeing exactly what would change.</span>
+  </div>
+
+  <div class="card flush">
+    {% if rows %}
+      <table>
+        <thead><tr><th>Property · month</th><th>Status</th><th class="num">Excel revenue</th><th class="num">Uploaded revenue</th><th class="num">Difference</th><th class="num">Nights (Excel / uploaded)</th><th></th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td><a href="{{ url_for('reconcile.month', property_id=r.property_id, ym=r.ym) }}">{{ r.property }} · {{ r.label_month }}</a></td>
+              <td><span class="pill {{ r.status.kind }}">{{ r.status.label }}</span><div class="note">{{ r.verdict[0] }}</div></td>
+              <td class="num">{{ fmt(r.existing.gbr, 'money') }}</td>
+              <td class="num">{{ fmt(r.uploaded.gbr, 'money') }}</td>
+              <td class="num">{{ diff(r.uploaded.gbr, r.existing.gbr, 'money') }}</td>
+              <td class="num">{{ fmt(r.existing.nights, 'int') }} / {{ fmt(r.uploaded.nights, 'int') }}</td>
+              <td class="num"><a class="btn secondary" href="{{ url_for('reconcile.month', property_id=r.property_id, ym=r.ym) }}">Review</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      {{ empty_state("Nothing to reconcile", "No month has both Excel history and uploaded reservations yet.") }}
+    {% endif %}
+  </div>
+  {% if no_excel %}
+    <p class="note" style="margin-top:var(--s3)">{{ no_excel|length }} property-month{{ 's' if no_excel|length != 1 }} with uploaded reservations have no Excel history (e.g. {{ no_excel[0].property }} · {{ no_excel[0].label }}); those use the uploaded reservations automatically, since there is nothing to protect.</p>
+  {% endif %}
+{% endblock %}

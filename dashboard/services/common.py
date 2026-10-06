@@ -47,6 +47,18 @@ def pct_delta(current, previous, min_base=0):
     return round((current - previous) / abs(previous) * 100, 1)
 
 
+def is_managed(prop):
+    """True for a property managed for an owner. Decided by the explicit flag OR a fee percentage, so a managed property
+    whose percentage is not known yet (never invented) is still managed."""
+    keys = prop.keys() if hasattr(prop, "keys") else []
+    return bool(prop["management_fee_pct"]) or ("is_managed" in keys and bool(prop["is_managed"]))
+
+
+def fee_text(prop):
+    pct = prop["management_fee_pct"]
+    return f"{pct:g}% fee" if pct else "fee % not set"
+
+
 def get_properties(conn, active_only=True, include_overhead=True):
     q = "SELECT * FROM properties"
     clauses = []

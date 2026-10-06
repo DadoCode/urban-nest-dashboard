@@ -579,23 +579,23 @@ conn.commit(); conn.close()
 AUG = ("Confirmation Code,Start date,End date,Nights,Listing,Gross earnings,Service fee,Type\n"
        "AUG1,08/28/2026,08/31/2026,3,Alpha Flat,300,50,Reservation\nSEP1,09/05/2026,09/08/2026,3,Alpha Flat,600,100,Reservation\n")
 upload("aug.csv", AUG, "booking_statement", "alpha-house"); da = last_doc(); ra = items_of(da)
-check("excel overlap: a stay in a month Excel already covers starts unticked and is flagged; a stay in a fresh month is ticked",
-      [(r["reservation_id"], r["include"]) for r in ra] == [("AUG1", 0), ("SEP1", 1)] and "excel_overlap" in warn_codes(da), [(r["reservation_id"], r["include"]) for r in ra])
+check("excel overlap: every stay starts ticked (it will be STORED); the overlap with Excel history is explained, not enforced",
+      [(r["reservation_id"], r["include"]) for r in ra] == [("AUG1", 1), ("SEP1", 1)] and "excel_overlap" in warn_codes(da), [(r["reservation_id"], r["include"]) for r in ra])
 page = client.get(f"/documents/{da['id']}/review").get_data(as_text=True)
-check("excel overlap: the review explains it and offers a one-click tick", "already covers" in page and "Tick them anyway" in page and "ticking adds on top" in page)
-client.post(f"/documents/{da['id']}/excel-overlap", data={"action": "tick"})
-check("excel overlap: 'tick them anyway' ticks the overlapping stay", [r["include"] for r in items_of(da)] == [1, 1])
+check("excel overlap: the review says figures stay on Excel until reconciled and links the Reconciliation page", "stores" in page.lower() and "Reconciliation page" in page and "unchanged until reconciled" in page)
 s_, e_ = kpis.month_bounds(2026, 8)
-rev_before = kpis.revenue(conn := db.get_conn(), "alpha-house", s_, e_); conn.close()
+conn = db.get_conn(); rev_before = kpis.revenue(conn, "alpha-house", s_, e_); nights_before = kpis.booked_nights(conn, "alpha-house", s_, e_); conn.close()
 form = []
 for it in items_of(da):
     form += [("item_id", it["id"]), ("include", it["id"]), ("property_id", "alpha-house"), ("platform", "airbnb"), ("reservation_id", it["reservation_id"]), ("check_in", it["check_in"]), ("check_out", it["check_out"]), ("gross", it["gross_revenue"]), ("fees", it["platform_fees"]), ("net", it["net_revenue"])]
 client.post(f"/documents/{da['id']}/confirm", data=MultiDict(form))
-conn = db.get_conn(); rev_after = kpis.revenue(conn, "alpha-house", s_, e_)
-check("Excel is never switched off: August = the Excel lump PLUS the new reservation (additive)", abs(rev_before - 1000) < 0.01 and abs(rev_after - (1000 + 250)) < 0.01, (rev_before, rev_after))
+conn = db.get_conn(); rev_after = kpis.revenue(conn, "alpha-house", s_, e_); nights_after = kpis.booked_nights(conn, "alpha-house", s_, e_)
+check("confirming NEVER changes a month that has Excel history: August revenue and nights are exactly what they were", abs(rev_before - 1000) < 0.01 and abs(rev_after - 1000) < 0.01 and nights_before == nights_after == 10, (rev_before, rev_after, nights_before, nights_after))
+check("the reservations are stored", conn.execute("SELECT COUNT(*) FROM bookings WHERE document_id=? AND source='upload'", (da["id"],)).fetchone()[0] == 2)
 check("Excel rows are untouched by the import", conn.execute("SELECT COUNT(*) FROM transactions WHERE source='excel_import' AND property_id='alpha-house'").fetchone()[0] == 2 and conn.execute("SELECT COUNT(*) FROM bookings WHERE source='excel_import' AND property_id='alpha-house'").fetchone()[0] == 1)
-nights_after = kpis.booked_nights(conn, "alpha-house", s_, e_); conn.close()
-check("Excel's nights are kept too (aggregate 10 nights + 3 from the stay)", nights_after == 13, nights_after)
+s2, e2 = kpis.month_bounds(2026, 9)
+check("a month with NO Excel history (September) already counts the uploaded stay (exact figures: tests/test_source_reconciliation.py)", kpis.revenue(conn, "alpha-house", s2, e2) >= 500 and kpis.booked_nights(conn, "alpha-house", s2, e2) >= 3)
+conn.close()
 
 # a corrected re-upload of the same reservation replaces it
 V2 = AUG.replace("SEP1,09/05/2026,09/08/2026,3,Alpha Flat,600,100", "SEP1,09/05/2026,09/08/2026,3,Alpha Flat,700,100")
