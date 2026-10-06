@@ -35,6 +35,19 @@ def seed_defaults(conn, property_id):
         )
 
 
+def not_active(conn, property_id, start, end):
+    """The date a property joins the portfolio if the WHOLE of [start, end) is before it, else None. Such a period is
+    out of scope: nothing is expected, so nothing is "missing"."""
+    row = conn.execute("SELECT start_date FROM properties WHERE id=?", (property_id,)).fetchone()
+    if row and row["start_date"] and row["start_date"] >= end:
+        return row["start_date"]
+    return None
+
+
+def _inactive_health(starts):
+    return {"rows": [], "missing": [], "required_total": 0, "pct": 100, "has_data": False, "not_active": True, "starts": starts}
+
+
 def has_real_data(conn, property_id, start, end):
     """Whether this property has any actual recorded transaction or
     booking for [start, end) -- independent of whether a *document* was
@@ -57,6 +70,9 @@ def completeness_for(conn, property_id, start, end):
     Overview insights use (uploaded_at, not a detected/back-dated period).
     This is about *source documents*, not whether the property has real
     operating data -- see has_real_data() for that."""
+    starts = not_active(conn, property_id, start, end)
+    if starts:
+        return {"required": [], "received": [], "missing": [], "pct": 100, "not_active": True, "starts": starts}
     reqs = conn.execute(
         "SELECT source_type, required FROM property_data_requirements WHERE property_id=?", (property_id,)
     ).fetchall()
@@ -80,6 +96,9 @@ def health_for(conn, property_id, start, end):
     period counts as received. has_data is the separate, broader signal:
     does this property have any real transaction/booking for the period
     at all, regardless of documents."""
+    starts = not_active(conn, property_id, start, end)
+    if starts:
+        return _inactive_health(starts)
     reqs = conn.execute(
         "SELECT source_type, required FROM property_data_requirements WHERE property_id=? ORDER BY required DESC, rowid",
         (property_id,),
@@ -110,6 +129,8 @@ def health_state(h, period_label):
     expected document happens to be missing."""
     if h is None:
         return "neutral", "Not set up"
+    if h.get("not_active"):
+        return "neutral", f"Not active until {h['starts']}"
     if h["pct"] == 100:
         return "pos", "Complete"
     n = len(h["missing"])

@@ -243,6 +243,13 @@ CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON import_batch_rows(batch_id);
 
 -- Main Page business rows a person chose to leave out of the import for a month (a suspected duplicate of a property
 -- cost). Remembered so that importing the same workbook again still has nothing to do.
+-- Main Page business rows you have confirmed are genuine, separate expenses, so the importer stops flagging them as
+-- possible duplicates of a property cost. Keyed by what the row IS (month, label, amount), not by where it sits.
+CREATE TABLE IF NOT EXISTS import_distinct (
+    period TEXT NOT NULL, label_norm TEXT NOT NULL, amount REAL NOT NULL, label TEXT, note TEXT, batch_id INTEGER,
+    PRIMARY KEY (period, label_norm, amount)
+);
+
 CREATE TABLE IF NOT EXISTS import_exclusions (
     period TEXT NOT NULL, source_ref TEXT NOT NULL, label TEXT, amount REAL, batch_id INTEGER,
     PRIMARY KEY (period, source_ref)

@@ -17,7 +17,7 @@
 {% macro status_pill(status) -%}
   {%- set m = {'ok': ('pos', 'Ready'), 'review': ('warn', 'Needs review'), 'error': ('neg', 'Blocked'), 'unchanged': ('', 'Already up to date'),
                'no_activity': ('', 'No activity'), 'missing_sheet': ('warn', 'Sheet missing'), 'not_in_dashboard': ('neg', 'Not in dashboard'),
-               'applied': ('pos', 'Applied'), 'undone': ('', 'Undone'), 'staged': ('warn', 'Not imported yet'), 'new_property': ('brand', 'New property')} -%}
+               'applied': ('pos', 'Applied'), 'undone': ('', 'Undone'), 'staged': ('warn', 'Not imported yet'), 'new_property': ('brand', 'New property'), 'not_active': ('', 'Not active yet')} -%}
   <span class="pill {{ m[status][0] if status in m else '' }}">{{ m[status][1] if status in m else status }}</span>
 {%- endmacro %}
 {% macro row_pill(s) -%}

@@ -134,6 +134,9 @@ def identity_map(conn, parsed):
         if not info["exists"] and code in parsed["properties"]:
             aliases = [info["name"], code, *C.PROPERTY_ALIASES.get(code, [])]
             ev = model_evidence(parsed, code, aliases)
+            decided = C.NEW_PROPERTY_DEFAULTS.get(info["pid"])
+            if decided:
+                ev = {"model": decided["model"], "pct": decided["pct"], "evidence": ev["evidence"] + [decided["note"]], "confidence": "confirmed"}
             info["proposal"] = {
                 "property_id": info["pid"], "name": info["name"], "sheet": f"{code}{parsed['year'] % 100:02d}", "code": code,
                 "aliases": sorted({code, info["name"], *C.PROPERTY_ALIASES.get(code, [])}),
@@ -207,9 +210,10 @@ def desired_business(parsed, ym, excluded=None):
     return {"rows": rows, "notes": [], "excluded": skipped}
 
 
-def business_suspects(parsed, ym):
+def business_suspects(parsed, ym, distinct_refs=None, persisted=None):
     """Main Page business rows that equal a property-level row of the same month to the penny (and are not trivial):
-    possible double counts. Flagged, never removed automatically."""
+    possible double counts. Flagged, never removed automatically. A row you have said is a genuine separate expense
+    (`distinct`, remembered by month + label + amount) is shown but no longer flagged."""
     month = parsed["main"]["months"].get(ym)
     out = []
     if not month:
@@ -224,7 +228,9 @@ def business_suspects(parsed, ym):
             continue
         hits = [(c, label) for c, label, amount in prop_rows if abs(amount - item["amount"]) < 0.005]
         if hits:
-            out.append({"ref": item["ref"], "label": item["label"], "amount": item["amount"], "matches": hits[:3]})
+            key = (_norm(item["label"]), round(item["amount"], 2))
+            is_distinct = (item["ref"] in distinct_refs) if distinct_refs is not None else (key in (persisted or set()))
+            out.append({"ref": item["ref"], "label": item["label"], "amount": item["amount"], "matches": hits[:3], "key": key, "distinct": is_distinct})
     return out
 
 
@@ -444,7 +450,10 @@ def reconcile_business(parsed, ym, want, suspects, excluded):
                                  note="echo of the property sheet's costs; NOT a business cost, not imported"))
     for s in suspects:
         where = ", ".join(f"{c}: {l}" for c, l in s["matches"])
-        if s["ref"] in excluded:
+        if s["distinct"] and s["ref"] not in excluded:
+            checks.append({"metric": f"Separate expense: {s['label']}", "workbook": s["amount"], "imported": s["amount"], "diff": None, "status": "PASS", "fmt": "money",
+                           "note": f"you have confirmed this is a genuine business cost, not a copy of a property cost (same amount as {where})", "gating": False})
+        elif s["ref"] in excluded:
             checks.append({"metric": f"Possible duplicate: {s['label']}", "workbook": s["amount"], "imported": 0.0, "diff": None, "status": "PASS", "fmt": "money",
                            "note": f"excluded from the import by you (equals a property row: {where})", "gating": False})
         else:
@@ -475,6 +484,14 @@ def _plan_item(conn, parsed, code, ym, ident, confirm=None):
         item.update(status="missing_sheet")
         item["reasons"].append(f"The workbook has no {item['sheet']} sheet -- this property is left exactly as it is.")
         return item
+    if info["exists"]:
+        starts = (conn.execute("SELECT start_date FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0]
+        if starts and ym < starts[:7]:
+            n = sum(len(parsed["properties"][code][b].get(ym, {}).get("items", [])) for b in ("opex", "capex", "income"))
+            item.update(status="not_active", starts=starts)
+            item["reasons"].append(f"NOT ACTIVE: {name} joined the portfolio on {starts}. This month is out of scope, so nothing is expected, imported, flagged or removed"
+                                   + (f" (the workbook has {n} row(s) for it, which are not imported)." if n else "."))
+            return item
     errors = [i for i in _issues_for(parsed, code, ym) if i["level"] == "error"]
     if errors:
         item.update(status="error")
@@ -506,8 +523,8 @@ def _plan_item(conn, parsed, code, ym, ident, confirm=None):
         c = (confirm or {}).get(pid)
         if c:
             prop["name"] = (c.get("name") or prop["name"]).strip()
-            prop["model"] = c.get("model") or prop["model"]
-            prop["pct"] = c.get("pct") if c.get("pct") is not None else prop["pct"]
+            prop["model"] = c.get("model") or None             # what was submitted, strictly: a cleared box is not a default
+            prop["pct"] = c.get("pct")
             prop["confirmed"] = bool(prop["name"] and prop["model"] in ("managed", "operated") and (prop["model"] == "operated" or prop["pct"]))
             item["name"] = prop["name"]
         item["new_property"] = prop
@@ -545,13 +562,15 @@ def _plan_item(conn, parsed, code, ym, ident, confirm=None):
     return item
 
 
-def plan_month(conn, parsed, ym, with_after=True, excluded=None, confirm=None):
+def plan_month(conn, parsed, ym, with_after=True, excluded=None, confirm=None, distinct=None):
     """The full preview for one month. `with_after` runs each property through the real KPI code on a rolled-back copy.
     `excluded`: Main Page business-row cells the person chose to leave out. `confirm`: {property_id: {name, model, pct}} for new properties."""
     if excluded is None:           # the person's earlier choices for this month
         excluded = [r[0] for r in conn.execute("SELECT source_ref FROM import_exclusions WHERE period=?", (ym,))]
     excluded = set(excluded)
-    plan = {"ym": ym, "year": parsed["year"], "properties": [], "business": None, "global_errors": [], "notes": [], "excluded": sorted(excluded)}
+    persisted = {(r[0], round(r[1], 2)) for r in conn.execute("SELECT label_norm, amount FROM import_distinct WHERE period=?", (ym,))}
+    plan = {"ym": ym, "year": parsed["year"], "properties": [], "business": None, "global_errors": [], "notes": [], "excluded": sorted(excluded),
+            "distinct_refs": sorted(distinct) if distinct is not None else None, "distinct_keys": []}
     if parsed["year"] is None:
         plan["global_errors"] = [i["message"] for i in parsed["issues"] if i["level"] == "error"]
         return plan
@@ -592,7 +611,8 @@ def plan_month(conn, parsed, ym, with_after=True, excluded=None, confirm=None):
         want = desired_business(parsed, ym, excluded)
         cur_tx, _ = current_rows(conn, BUSINESS_ID, ym)
         diff = diff_rows(cur_tx, want["rows"])
-        suspects = business_suspects(parsed, ym)
+        suspects = business_suspects(parsed, ym, distinct, persisted)
+        plan["distinct_keys"] = [(ym, s["key"][0], s["key"][1], s["label"]) for s in suspects if s["distinct"] and s["ref"] not in excluded]
         biz.update(rows=diff, counts=_counts(diff), checks=reconcile_business(parsed, ym, want, suspects, excluded), suspects=suspects)
         biz["change_count"] = biz["counts"]["NEW"] + biz["counts"]["CHANGED"] + biz["counts"]["REMOVED"]
         biz["bookings"] = {}
@@ -631,6 +651,9 @@ def month_overview(conn, parsed):
         for code, info in ident.items():
             if code not in parsed["properties"]:
                 continue
+            starts = (conn.execute("SELECT start_date FROM properties WHERE id=?", (info["pid"],)).fetchone() or [None])[0] if info["exists"] else None
+            if starts and ym < starts[:7]:
+                continue                                    # not active yet: nothing to import
             want = desired_property(parsed, code, ym, info["pid"])
             cur_tx, cur_agg = ([], []) if not info["exists"] else current_rows(conn, info["pid"], ym)
             d = _counts(diff_rows(cur_tx, want["rows"]))

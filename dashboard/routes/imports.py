@@ -44,7 +44,8 @@ def _choices(source):
                 pct = None
             confirm[pid] = {"name": (source.get(f"new_name:{pid}") or "").strip(), "model": source.get(key) or "", "pct": pct}
     excluded = set(source.getlist("exclude")) if "exclude_form" in source else None
-    return confirm, excluded
+    distinct = set(source.getlist("distinct")) if "exclude_form" in source else None
+    return confirm, excluded, distinct
 
 
 def fingerprint(plan):
@@ -116,8 +117,8 @@ def batch(batch_id):
     report = json.loads(row["validation"] or "{}")
     overview = P.month_overview(conn, parsed) if report.get("can_import") else []
     ym = request.args.get("month") if _valid_month(request.args.get("month")) else _default_month(overview, parsed)
-    confirm, excluded = _choices(request.args)
-    plan = P.plan_month(conn, parsed, ym, excluded=excluded, confirm=confirm) if (ym and report.get("can_import")) else None
+    confirm, excluded, distinct = _choices(request.args)
+    plan = P.plan_month(conn, parsed, ym, excluded=excluded, confirm=confirm, distinct=distinct) if (ym and report.get("can_import")) else None
     base = P.plan_month(conn, parsed, ym, with_after=False) if plan else None
     month_issues = [i for i in parsed["issues"] if i["level"] in ("error", "review") and i["month"] == ym]
     elsewhere = sum(1 for i in parsed["issues"] if i["level"] in ("error", "review") and i["month"] not in (None, ym))
@@ -159,8 +160,8 @@ def apply(batch_id):
     if request.form.get("fingerprint") != fingerprint(base):
         flash("The dashboard changed since this preview was shown. Review the updated preview before applying.", "warning")
         return redirect(url_for("imports.batch", batch_id=batch_id, month=ym))
-    confirm, excluded = _choices(request.form)
-    plan = P.plan_month(conn, parsed, ym, with_after=False, excluded=excluded, confirm=confirm)
+    confirm, excluded, distinct = _choices(request.form)
+    plan = P.plan_month(conn, parsed, ym, with_after=False, excluded=excluded, confirm=confirm, distinct=distinct)
     selected = set(request.form.getlist("include"))
     reviewed = {i["property_id"] for i in plan["properties"] + [plan["business"]] if i and (i["status"] == "review" or i.get("flagged"))} & selected
     if reviewed and request.form.get("ack") != "1":

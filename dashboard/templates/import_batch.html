@@ -97,10 +97,12 @@
             {% endif %}
             {% if business and it.suspects %}
               <div class="card" style="margin:var(--s2) 0">
-                <strong>Possible duplicates of property costs</strong>
-                <div class="note">Tick a row to leave it out of the import (it is the same expense as a property cost). Nothing is removed unless you tick it, and your choice is remembered for this month.</div>
+                <strong>Business rows that match a property cost</strong>
+                <div class="note">The same amount, to the penny, is also a property cost this month. If it is the same expense, tick <em>Leave out</em>. If it is a genuine separate expense, tick <em>Separate expense</em> and it stops being flagged. Nothing is removed unless you tick it, and your choice is remembered for this month.</div>
                 {% for s in it.suspects %}
-                  <label style="display:block;margin-top:4px"><input type="checkbox" name="exclude" value="{{ s.ref }}" {{ 'checked' if s.ref in plan.excluded }}> {{ s.label }} {{ val(s.amount, 'money') }} <span class="note">= {% for c, l in s.matches %}{{ c }}: {{ l }}{{ ', ' if not loop.last }}{% endfor %} · {{ s.ref }}</span></label>
+                  <div style="margin-top:6px"><strong>{{ s.label }}</strong> {{ val(s.amount, 'money') }} <span class="note">= {% for c, l in s.matches %}{{ c }}: {{ l }}{{ ', ' if not loop.last }}{% endfor %} · {{ s.ref }}</span>
+                    <label style="margin-left:var(--s3)"><input type="checkbox" name="exclude" value="{{ s.ref }}" {{ 'checked' if s.ref in plan.excluded }}> Leave out</label>
+                    <label style="margin-left:var(--s2)"><input type="checkbox" name="distinct" value="{{ s.ref }}" {{ 'checked' if s.distinct }}> Separate expense</label></div>
                 {% endfor %}
               </div>
             {% endif %}

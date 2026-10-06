@@ -121,7 +121,25 @@ def write_changes(conn, item, batch_id, ym):
     return added, removed
 
 
+def _save_distinct(conn, batch_id, plan):
+    """Remember which flagged rows you said are genuine separate expenses. Decisions for rows that are not flagged this time stay."""
+    ym = plan["ym"]
+    current = {(s["key"]) for s in (plan["business"] or {}).get("suspects", [])}
+    keep = {(r["label_norm"], round(r["amount"], 2)): dict(r) for r in conn.execute("SELECT * FROM import_distinct WHERE period=?", (ym,))}
+    want = {(k[1], round(k[2], 2)): k for k in plan.get("distinct_keys", [])}
+    for key, row in list(keep.items()):
+        if key in current and key not in want:                       # un-ticked: forget it
+            _log(conn, batch_id, "distinct_removed", "import_distinct", None, row)
+            conn.execute("DELETE FROM import_distinct WHERE period=? AND label_norm=? AND amount=?", (ym, row["label_norm"], row["amount"]))
+    for key, k in want.items():
+        if key not in keep:
+            conn.execute("INSERT INTO import_distinct (period, label_norm, amount, label, note, batch_id) VALUES (?,?,?,?,?,?)",
+                         (ym, k[1], k[2], k[3], "confirmed in an import preview", batch_id))
+            _log(conn, batch_id, "distinct_added", "import_distinct", None, {"period": ym, "label_norm": k[1], "amount": k[2]})
+
+
 def _save_exclusions(conn, batch_id, plan):
+    _save_distinct(conn, batch_id, plan)
     ym, wanted = plan["ym"], set(plan.get("excluded") or [])
     old = [dict(r) for r in conn.execute("SELECT * FROM import_exclusions WHERE period=?", (ym,))]
     if {o["source_ref"] for o in old} == wanted:
@@ -146,7 +164,7 @@ def apply_batch(conn, batch_id, plan, selected, user="owner"):
     """Apply the selected property ids (and/or the business cost centre) from `plan`. One transaction."""
     ym = plan["ym"]
     items = [i for i in plan["properties"] + [plan["business"]] if i and i["property_id"] in selected]
-    refused = [i["name"] for i in items if i["status"] not in ("ok", "review", "unchanged", "no_activity", "new_property")]
+    refused = [i["name"] for i in items if i["status"] not in ("ok", "review", "unchanged", "no_activity", "new_property", "not_active")]
     if refused:
         raise ImportRefused("These cannot be imported: " + ", ".join(refused))
     unconfirmed = [i["name"] for i in items if i.get("new_property") and not i["new_property"]["confirmed"]]
@@ -156,7 +174,7 @@ def apply_batch(conn, batch_id, plan, selected, user="owner"):
     added = changed = superseded = 0
     try:
         for item in items:
-            if item["status"] in ("unchanged", "no_activity") or item.get("change_count", 0) == 0:
+            if item["status"] in ("unchanged", "no_activity", "not_active") or item.get("change_count", 0) == 0:
                 continue
             pid = item["property_id"]
             new = bool(item.get("new_property"))
@@ -238,6 +256,9 @@ def undo_batch(conn, batch_id, user="owner"):
         for entry in log:
             if entry["op"] == "added":
                 conn.execute(f"DELETE FROM {entry['tbl']} WHERE id=?", (entry["row_id"],))
+            elif entry["op"] == "distinct_added":
+                row = json.loads(entry["row_json"])
+                conn.execute("DELETE FROM import_distinct WHERE period=? AND label_norm=? AND amount=?", (row["period"], row["label_norm"], row["amount"]))
             elif entry["op"] == "exclusion_added":
                 row = json.loads(entry["row_json"])
                 conn.execute("DELETE FROM import_exclusions WHERE period=? AND source_ref=?", (row["period"], row["source_ref"]))
@@ -258,6 +279,10 @@ def undo_batch(conn, batch_id, user="owner"):
                 row = json.loads(entry["row_json"])
                 conn.execute("INSERT OR REPLACE INTO import_exclusions (period, source_ref, label, amount, batch_id) VALUES (?,?,?,?,?)",
                              (row["period"], row["source_ref"], row.get("label"), row.get("amount"), row.get("batch_id")))
+            elif entry["op"] == "distinct_removed":
+                row = json.loads(entry["row_json"])
+                conn.execute("INSERT OR REPLACE INTO import_distinct (period, label_norm, amount, label, note, batch_id) VALUES (?,?,?,?,?,?)",
+                             (row["period"], row["label_norm"], row["amount"], row.get("label"), row.get("note"), row.get("batch_id")))
             elif entry["op"] == "alias_added":
                 conn.execute("DELETE FROM property_identity_aliases WHERE alias_norm=?", (json.loads(entry["row_json"])["alias_norm"],))
             elif entry["op"] == "sheet_map_added":

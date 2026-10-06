@@ -23,16 +23,16 @@ def is_blocked(sheet_name):
 # property id mapping is explicit. The importer uses the canonical id, never the sheet name.
 PROPERTY_SHEETS = {
     # code        canonical property id    canonical name
-    "CC":        ("crested-court",         "40 Crested Court"),
-    "LW":        ("lascar-wharf",          "602 Lascar Wharf"),
-    "W8":        ("campbell-hill-w8",      "7A Campden Hill"),        # the workbook calls it "7A Campbell Hill"
-    "170E":      ("170-miles-building",    "170 Miles Building"),
-    "175E":      ("175-miles-building",    "175 Miles Building"),
-    "NW4":       ("nw4",                   "Flat 3 NW4"),             # full address not found anywhere in the project: left as is, flagged
-    "TCR":       ("tottenham-court-road",  "Tottenham Court Road"),
-    "11PW":      ("11-perryfield-way",     "11 Perryfield Way"),
-    "22PW":      ("22-perryfield-way",     "22 Perryfield Way"),      # mapped, but not (yet) a dashboard property
-    "19Draycott": ("19-draycott-ave",      "19 Draycott Avenue"),
+    "CC":        ("crested-court",         "Flat 40, Crested Court, 3 Shearwater Drive, London, NW9 7AD"),
+    "LW":        ("lascar-wharf",          "Flat 602, Lascar Wharf Building, 21 Parnham Street, London, E14 7FN"),
+    "W8":        ("campbell-hill-w8",      "7A Campden Hill Road, London, W8 7DX"),        # the workbook calls it "7A Campbell Hill"
+    "170E":      ("170-miles-building",    "Flat 170, Miles Buildings, Penfold Place, London, NW1 6RP"),
+    "175E":      ("175-miles-building",    "Flat 175, Miles Buildings, Penfold Place, London, NW1 6RP"),
+    "NW4":       ("nw4",                   "Flat 3, 48 Station Road, NW4 3SX"),           
+    "TCR":       ("tottenham-court-road",  "Flats 7 & 8, Shaldon Mansions, 132 Charing Cross Road, London, WC2H 0LA"),
+    "11PW":      ("11-perryfield-way",     "Flat 11, Eider Apartments, 73 Perryfield Way, London, NW9 7FD"),
+    "22PW":      ("22-perryfield-way",     "Flat 22, Eider Apartments, 73 Perryfield Way, London, NW9 7FD"),      # not yet a dashboard property: created from the workbook when you confirm it
+    "19Draycott": ("19-draycott-ave",      "Flat 1, 19 Draycott Avenue, Chelsea, London, SW3 3BS"),
     "S10":       ("44-spooner-road",       "44 Spooner Road"),
 }
 
@@ -95,16 +95,16 @@ def categorise(label, business=False):
 # For the workbook-PREPARATION step (Claude in chat). The importer receives canonical
 # sheet names only; these spellings are what the raw documents and the owner use.
 PROPERTY_ALIASES = {
-    "CC":        ["CC", "40 Crested Court", "Crested Court", "Crested Ct"],
-    "LW":        ["LW", "602 Lascar Wharf", "Lascar Wharf", "Lascar"],
-    "W8":        ["W8", "7A Campbell Hill", "7A Campden Hill", "Campbell Hill", "Campden Hill"],
-    "170E":      ["170E", "170 Miles Building", "170 Miles", "170"],
-    "175E":      ["175E", "175 Miles Building", "175 Miles", "175"],
-    "NW4":       ["NW4", "Flat 3 NW4", "Flat 3, NW4"],
-    "TCR":       ["TCR", "Tottenham Court Road", "Tottenham"],
-    "11PW":      ["11PW", "11 Perryfield Way", "11 PW"],
-    "22PW":      ["22PW", "22 Perryfield Way", "22 PW"],
-    "19Draycott": ["19Draycott", "19 Draycott Avenue", "19 Draycott Ave", "Draycott Avenue", "Draycott"],
+    "CC":        ["CC", "40 Crested Court", "Flat 40 Crested Court", "Crested Court", "Crested Ct"],
+    "LW":        ["LW", "602 Lascar Wharf", "Flat 602 Lascar Wharf", "Lascar Wharf", "Lascar"],
+    "W8":        ["W8", "7A Campbell Hill", "7A Campden Hill", "Campbell Hill", "Campden Hill", "7A Campden Hill Road"],
+    "170E":      ["170E", "170 Miles Building", "Flat 170 Miles Buildings", "170 Miles", "170"],
+    "175E":      ["175E", "175 Miles Building", "Flat 175 Miles Buildings", "175 Miles", "175"],
+    "NW4":       ["NW4", "Flat 3 NW4", "Flat 3, NW4", "Flat 3", "48 Station Road", "Flat 3 48 Station Road"],
+    "TCR":       ["TCR", "Tottenham Court Road", "Tottenham", "Shaldon Mansions", "Flats 7 & 8 Shaldon Mansions"],
+    "11PW":      ["11PW", "11 Perryfield Way", "11 PW", "Flat 11", "Eider Apartments Flat 11"],
+    "22PW":      ["22PW", "22 Perryfield Way", "22 PW", "Flat 22", "Eider Apartments Flat 22"],
+    "19Draycott": ["19Draycott", "19 Draycott Avenue", "19 Draycott Ave", "Draycott Avenue", "Draycott", "Flat 1 19 Draycott Avenue"],
     "S10":       ["S10", "44 Spooner Road", "Spooner Road", "Spooner"],
 }
 
@@ -116,20 +116,39 @@ OCCUPANCY_TOLERANCE = 0.005
 # Names are never invented: where nothing in the workbook, the database or the project's files gives a full name
 # or address, the current name stays and the question is raised.
 CANONICAL_NAMES = {
-    "crested-court":        ("40 Crested Court",       "high",   "dashboard name + workbook sheet title", None),
-    "lascar-wharf":         ("602 Lascar Wharf",       "high",   "dashboard name + workbook sheet title", None),
-    "campbell-hill-w8":     ("7A Campden Hill",        "high",   "dashboard name + your property list (the workbook sheet says '7A Campbell Hill')", None),
-    "170-miles-building":   ("170 Miles Building",     "high",   "dashboard name + workbook sheet title", None),
-    "175-miles-building":   ("175 Miles Building",     "high",   "dashboard name + workbook sheet title", None),
-    "nw4":                  ("Flat 3 NW4",             "low",    "dashboard name + workbook sheet title only",
-                             "NW4 is a postcode district: no street address exists in the workbook, the database, the documents or the project files. Needs the address from you."),
-    "tottenham-court-road": ("Tottenham Court Road",   "medium", "dashboard name + workbook sheet title",
-                             "No street number appears anywhere; kept as is."),
-    "11-perryfield-way":    ("11 Perryfield Way",      "high",   "dashboard name + workbook sheet title", None),
-    "22-perryfield-way":    ("22 Perryfield Way",      "high",   "workbook sheet title + your property list", None),
-    "19-draycott-ave":      ("19 Draycott Avenue",     "high",   "your property list ('19 Draycott Avenue'); the workbook and dashboard say 'Ave'", None),
-    "44-spooner-road":      ("44 Spooner Road",        "high",   "dashboard name + workbook sheet title", None),
+    "crested-court":        ("Flat 40, Crested Court, 3 Shearwater Drive, London, NW9 7AD", "high", "confirmed by you, 6 Oct 2026", None),
+    "lascar-wharf":         ("Flat 602, Lascar Wharf Building, 21 Parnham Street, London, E14 7FN", "high", "confirmed by you, 6 Oct 2026", None),
+    "campbell-hill-w8":     ("7A Campden Hill Road, London, W8 7DX", "high", "confirmed by you, 6 Oct 2026", None),
+    "170-miles-building":   ("Flat 170, Miles Buildings, Penfold Place, London, NW1 6RP", "high", "confirmed by you, 6 Oct 2026", None),
+    "175-miles-building":   ("Flat 175, Miles Buildings, Penfold Place, London, NW1 6RP", "high", "confirmed by you, 6 Oct 2026", None),
+    "nw4":                  ("Flat 3, 48 Station Road, NW4 3SX", "high", "confirmed by you, 6 Oct 2026", None),
+    "tottenham-court-road": ("Flats 7 & 8, Shaldon Mansions, 132 Charing Cross Road, London, WC2H 0LA", "medium",
+                             "confirmed by you, 6 Oct 2026; matched to the Tottenham Court Road sheet by location (nothing in the files names Shaldon Mansions)",
+                             "Please confirm Shaldon Mansions is the Tottenham Court Road property."),
+    "11-perryfield-way":    ("Flat 11, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", "high", "confirmed by you, 6 Oct 2026", None),
+    "22-perryfield-way":    ("Flat 22, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", "high", "confirmed by you, 6 Oct 2026", None),
+    "19-draycott-ave":      ("Flat 1, 19 Draycott Avenue, Chelsea, London, SW3 3BS", "high", "confirmed by you, 6 Oct 2026", None),
+    "44-spooner-road":      ("44 Spooner Road", "low", "dashboard name + workbook sheet title only",
+                             "No full address was given for 44 Spooner Road (S10). Your list also has 29 Station Road, Forest Gate, which I could not match to it: "
+                             "the Main Page treats 'Forest gate' (managed) and S10 (rent-to-rent) as two different properties."),
 }
+
+# A property that is not in the dashboard yet but whose business model you have already decided: pre-fills the
+# NEW PROPERTY panel. It is still only created after you tick it and apply.
+NEW_PROPERTY_DEFAULTS = {
+    "22-perryfield-way": {"model": "managed", "pct": 15.0, "note": "confirmed by you, 6 Oct 2026: managed at 15%"},
+}
+
+# The first day a property is part of the portfolio. Earlier periods are NOT ACTIVE / out of scope (not zero, not missing).
+START_DATES = {
+    "nw4": ("2026-09-01", "taken on from 1 September 2026 (confirmed by you)"),
+}
+
+# Main Page business rows you have confirmed are genuine, separate expenses (so they are not flagged as duplicates of a
+# property cost): (period, label, amount, why, category).
+CONFIRMED_DISTINCT = [
+    ("2026-09", "Crescent B. Ads", 3000.0, "Paid to a company to create and run adverts: a genuine business marketing cost, separate from NW4's 3,000 sourcing fee. Confirmed by you, 6 Oct 2026.", "marketing"),
+]
 
 # Properties the workbook treats as rent-to-rent (operated): the person confirmed NW4 is rent-to-rent.
 MODEL_DECISIONS = {"nw4": ("operated", "Dado confirmed Flat 3 NW4 is rent-to-rent; the workbook lists it under R2R and has never recorded a management fee for it")}

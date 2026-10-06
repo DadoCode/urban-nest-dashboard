@@ -155,12 +155,22 @@ def avg_stay(conn, property_id, start, end):
     return sum(n for _r, n in real) / len(real) if real else 0.0
 
 
+def _active_days(start, end, property_start):
+    """Nights in [start, end) on or after the date the property joined the portfolio (no start date = always)."""
+    s, e = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+    if property_start:
+        s = max(s, datetime.date.fromisoformat(property_start))
+    return max((e - s).days, 0)
+
+
 def available_nights(conn, property_id, start, end):
-    days = (datetime.date.fromisoformat(end) - datetime.date.fromisoformat(start)).days
+    """Nights a property (or the portfolio) could have been booked. A property is only available from its start_date:
+    before it joined the portfolio it is NOT ACTIVE, not "empty"."""
     if property_id:
-        return days
-    n = conn.execute("SELECT COUNT(*) FROM properties WHERE type='flat' AND active=1").fetchone()[0]
-    return days * n
+        row = conn.execute("SELECT start_date FROM properties WHERE id=?", (property_id,)).fetchone()
+        return _active_days(start, end, row["start_date"] if row else None)
+    return sum(_active_days(start, end, r["start_date"])
+               for r in conn.execute("SELECT start_date FROM properties WHERE type='flat' AND active=1"))
 
 
 def occupancy(conn, property_id, start, end):

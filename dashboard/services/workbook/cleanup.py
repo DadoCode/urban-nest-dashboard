@@ -25,9 +25,13 @@ def mapping_table(conn, year=2026):
         if row and decision and decision[0] != model:
             model = f"{model} -> {decision[0]}"
         aliases = sorted({code, name, *(row["name"] for _ in [0] if row), *C.PROPERTY_ALIASES.get(code, [])} - {""})
+        start = C.START_DATES.get(pid)
+        decided = C.NEW_PROPERTY_DEFAULTS.get(pid)
+        if not row and decided:
+            model = f"{decided['model']} {decided['pct']:g}% (to be created)"
         rows.append({"property_id": pid, "current_name": row["name"] if row else "(not in the dashboard)", "canonical": name, "code": code,
                      "sheet": f"{code}{year % 100:02d}" if code else "", "model": model, "aliases": aliases, "confidence": conf,
-                     "source": source, "question": question})
+                     "source": source, "question": question, "start_date": (row["start_date"] if row else None) or (start[0] if start else None)})
     return rows
 
 
@@ -68,19 +72,27 @@ def model_impact(conn, pid, new_pct):
 
 
 def plan_cleanup(conn):
-    actions = {"renames": [], "models": [], "duplicates": [], "left_alone": [], "flags": []}
+    actions = {"renames": [], "models": [], "duplicates": [], "left_alone": [], "flags": [], "start_dates": [], "distinct": []}
     for pid, (name, conf, source, question) in C.CANONICAL_NAMES.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         if not row:
             continue
-        if row["name"] != name:
-            actions["renames"].append({"property_id": pid, "from": row["name"], "to": name, "address_follows": row["address"] == row["name"]})
+        if row["name"] != name or row["address"] != name:
+            actions["renames"].append({"property_id": pid, "from": row["name"], "to": name, "from_address": row["address"]})
         if question:
             actions["flags"].append({"property_id": pid, "question": question})
     for pid, (model, why) in C.MODEL_DECISIONS.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         if row and _model(row) != model:
             actions["models"].append({"property_id": pid, "from": _model(row), "from_pct": row["management_fee_pct"], "to": model, "why": why})
+    for pid, (date, why) in C.START_DATES.items():
+        row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
+        if row and row["start_date"] != date:
+            actions["start_dates"].append({"property_id": pid, "from": row["start_date"], "to": date, "why": why})
+    for period, label, amount, why, category in C.CONFIRMED_DISTINCT:
+        key = (" ".join(label.lower().split()), round(amount, 2))
+        if not conn.execute("SELECT 1 FROM import_distinct WHERE period=? AND label_norm=? AND amount=?", (period, key[0], key[1])).fetchone():
+            actions["distinct"].append({"period": period, "label": label, "label_norm": key[0], "amount": key[1], "why": why})
     for d in echo_duplicates(conn):
         (actions["duplicates"] if d["match"] else actions["left_alone"]).append(d)
     return actions
@@ -96,12 +108,19 @@ def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, 
         for a in actions["renames"]:
             row = conn.execute("SELECT * FROM properties WHERE id=?", (a["property_id"],)).fetchone()
             old = {"name": row["name"], "address": row["address"]}
-            new_address = a["to"] if a["address_follows"] else row["address"]
+            new_address = a["to"]                      # the canonical full name IS the address
             conn.execute("UPDATE properties SET name=?, address=? WHERE id=?", (a["to"], new_address, a["property_id"]))
             _log(conn, bid, "property_updated", "properties", None, {"id": a["property_id"], "old": old, "new": {"name": a["to"], "address": new_address}})
             for alias, kind in ((row["name"], "previous_name"), (a["to"], "name")):
                 if identity.add_alias(conn, a["property_id"], alias, kind):
                     _log(conn, bid, "alias_added", "property_identity_aliases", None, {"alias_norm": identity.norm(alias)})
+        for a in actions["start_dates"]:
+            conn.execute("UPDATE properties SET start_date=? WHERE id=?", (a["to"], a["property_id"]))
+            _log(conn, bid, "property_updated", "properties", None, {"id": a["property_id"], "old": {"start_date": a["from"]}, "new": {"start_date": a["to"]}})
+        for a in actions["distinct"]:
+            conn.execute("INSERT OR IGNORE INTO import_distinct (period, label_norm, amount, label, note, batch_id) VALUES (?,?,?,?,?,?)",
+                         (a["period"], a["label_norm"], a["amount"], a["label"], a["why"], bid))
+            _log(conn, bid, "distinct_added", "import_distinct", None, {"period": a["period"], "label_norm": a["label_norm"], "amount": a["amount"]})
         for a in actions["models"]:
             new_pct = None if a["to"] == "operated" else a.get("to_pct")
             conn.execute("UPDATE properties SET management_fee_pct=? WHERE id=?", (new_pct, a["property_id"]))
@@ -114,7 +133,8 @@ def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, 
             conn.execute("DELETE FROM transactions WHERE id=?", (row["id"],))
             removed += 1
         conn.execute("UPDATE import_batches SET properties=?, row_count=?, rows_removed=?, applied_at=datetime('now') WHERE id=?",
-                     (json.dumps(sorted({a["property_id"] for a in actions["renames"] + actions["models"]})), removed + len(actions["renames"]) + len(actions["models"]), removed, bid))
+                     (json.dumps(sorted({a["property_id"] for a in actions["renames"] + actions["models"] + actions["start_dates"]})),
+                      removed + len(actions["renames"]) + len(actions["models"]) + len(actions["start_dates"]) + len(actions["distinct"]), removed, bid))
         conn.commit()
     except Exception:
         conn.rollback()
