@@ -95,13 +95,15 @@ def main():
     actions = K.plan_cleanup(conn)
     print(f"\nrenames   : {[(a['from'], a['to']) for a in actions['renames']]}")
     print(f"model     : {[(a['property_id'], a['from'], '->', a['to']) for a in actions['models']]}")
+    print(f"start date: {[(a['property_id'], a['to']) for a in actions['start_dates']]}")
+    print(f"separate expenses recorded: {[(a['period'], a['label'], a['amount']) for a in actions['distinct']]}")
     print(f"duplicates: {len(actions['duplicates'])} business rows, total {sum(d['row']['amount'] for d in actions['duplicates']):.2f}")
     for d in actions["duplicates"]:
         print(f"    {d['row']['date']} {d['row']['description']} {d['row']['amount']:.2f} = {d['property_id']} costs {d['property_total']:.2f}")
     print(f"left alone: {len(actions['left_alone'])} business rows that name a property but do not match its costs")
     if args.apply:
         batch = K.apply_cleanup(conn, actions, "script")
-        print(f"\napplied as batch #{batch} (undo it from the Import page)")
+        print("\nnothing to change: the database already matches" if batch is None else f"\napplied as batch #{batch} (undo it from the Import page)")
         print(f"sha256 after: {sha256(path)}\nbackup to restore from: {backup}")
     else:
         print("\nDry run only. Re-run with --apply to back up and make these changes.")

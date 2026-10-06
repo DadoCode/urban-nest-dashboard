@@ -240,6 +240,7 @@ client.post(loc + "/apply", data={"month": SEP, "fingerprint": fp, "include": ti
 check("page: a CLEARED fee box is not silently replaced by the default: refused, nothing created", c.execute("SELECT COUNT(*) FROM properties").fetchone()[0] == n_props)
 fresh = db.get_conn()
 client.post(loc + "/apply", data={"month": SEP, "fingerprint": fp, "include": ticked + ["22-perryfield-way", "19-draycott-ave"], "exclude_form": "1", "ack": "1",
+                                  "distinct": re.findall(r'name="distinct" value="([^"]+)" checked', page),
                                   "new_name:22-perryfield-way": np_["name"], "new_model:22-perryfield-way": "managed", "new_pct:22-perryfield-way": "15"})
 row = fresh.execute("SELECT * FROM import_batches WHERE id=?", (bid_e2e,)).fetchone()
 check("e2e: the import was applied", row["status"] == "applied", row["status"])
@@ -250,6 +251,8 @@ check("22PW: sheet mapping and every alias saved; each resolves to it", fresh.ex
       all(identity.resolve(fresh, a)[0] == "22-perryfield-way" for a in ("22PW", "22 Perryfield Way", "Flat 22", "Eider Apartments Flat 22", "22 perryfield way", np_["name"])))
 check("22PW: September data imported and the batch records the new property and counters", fresh.execute("SELECT COUNT(*) FROM transactions WHERE property_id='22-perryfield-way' AND import_batch_id=?", (bid_e2e,)).fetchone()[0] >= 1
       and json.loads(row["new_properties"]) == ["22-perryfield-way"] and row["rows_added"] > 100)
+check("the 'Separate expense' decision for Crescent survives the apply (the box was pre-ticked in the form)", fresh.execute("SELECT COUNT(*) FROM import_distinct WHERE period='2026-09' AND label_norm='crescent b. ads' AND amount=3000").fetchone()[0] == 1 and
+      'name="distinct" value="Main Page26!S11" checked' in page)
 check("no duplicate property: exactly one Perryfield 22 and one of every other", fresh.execute("SELECT COUNT(*) FROM properties WHERE id LIKE '22-perry%'").fetchone()[0] == 1 and fresh.execute("SELECT COUNT(*) FROM properties").fetchone()[0] == n_props + 1)
 check("Crescent B. Ads landed as a business marketing row; NW4's sourcing fee as NW4 capex",
       fresh.execute("SELECT category, amount FROM transactions WHERE property_id='general-overheads' AND description='Crescent B. Ads' AND date LIKE '2026-09%'").fetchone()[:2] == ("marketing", 3000.0) and

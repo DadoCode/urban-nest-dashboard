@@ -100,6 +100,8 @@ def plan_cleanup(conn):
 
 def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, confirmed duplicate business rows"):
     """Apply a plan_cleanup() result in one transaction, as a batch that undo_batch can reverse."""
+    if not any(actions.get(k) for k in ("renames", "models", "duplicates", "start_dates", "distinct")):
+        return None                                           # nothing to do: no batch, no noise
     cur = conn.execute("INSERT INTO import_batches (filename, file_hash, status, kind, note) VALUES (?,?,?,?,?)",
                        ("cleanup: " + note, "-", "applied", "cleanup", note))
     bid = cur.lastrowid

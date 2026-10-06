@@ -61,7 +61,7 @@
           {% set cur = it.current or {} %}{% set aft = it.after or {} %}
           <tr>
             <td style="width:28px"><input type="checkbox" name="include" value="{{ it.property_id }}" {{ 'checked' if it.status == 'ok' and it.change_count }} {{ 'disabled' if not selectable }}></td>
-            <td><strong>{{ it.name }}</strong>{% if it.code and not business %} <span class="note">· {{ it.code }}</span>{% endif %}
+            <td style="min-width:17rem"><strong>{{ it.name }}</strong>{% if it.code and not business %} <span class="note">· {{ it.code }}</span>{% endif %}
               {% if it.new_property %}<div class="note">new · {{ it.new_property.model or 'model to choose' }}{% if it.new_property.model == 'managed' and it.new_property.pct %} {{ '%g'|format(it.new_property.pct) }}%{% endif %}</div>
               {% elif cur.model in ('managed', 'operated') %}<div class="note">{{ cur.model }}</div>{% endif %}</td>
             <td>{{ status_pill(it.status) }}</td>

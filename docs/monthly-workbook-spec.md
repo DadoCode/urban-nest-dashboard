@@ -241,16 +241,25 @@ Anything REVIEW is **unticked by default** in the preview and needs an explicit 
 
 ## 14. Names, model corrections and the clean-up batch
 
-- **Full names** are the primary label everywhere (`properties.name`); the short code is secondary (import preview, settings).
-  `Flat 3 NW4` and `Tottenham Court Road` could not be completed from any source (no street address / number exists in the
-  workbook, the database, the documents or the project files) and are flagged for you, not invented.
-- **Models** follow the workbook's evidence. NW4 is rent-to-rent (confirmed): operated, no management fee.
+- **Full names** are the primary label everywhere (`properties.name` and `address` both hold the canonical full address; the
+  stable id never changes; short codes and every previous name stay as aliases). The ten names you confirmed are in
+  `config.CANONICAL_NAMES`. **44 Spooner Road (S10)** has no full address yet, and **29 Station Road, Forest Gate** is not
+  matched to any property: the Main Page lists "Forest gate" (managed) and S10 (rent-to-rent) as two different properties, so
+  it is neither created nor guessed.
+- **Start date.** `properties.start_date` (an existing, previously unused column) is the first day a property is part of
+  the portfolio. Before it a property is NOT ACTIVE / out of scope: available nights are 0 (property and portfolio
+  occupancy), data health says "Not active until <date>" and lists nothing as missing, and the workbook import marks the
+  month "Not active yet" (no import, no flags, nothing removed; the workbook's own pre-start rows are reported, not
+  imported). Historical rows are never rewritten. NW4 starts 2026-09-01.
+- **Models** follow the workbook's evidence. NW4 is rent-to-rent (confirmed): operated, no management fee. 22 Perryfield Way is
+  managed at 15% (confirmed) and is created from the workbook once you tick it in the preview.
   The importer flags any property whose dashboard model disagrees with its fee rows (*Management model*), whose fee is not
   its % of income (*Management fee rate*), whose Main Page fee differs from its sheet's, or that has no workbook control.
 - **Echo / duplicate rules.** A business row whose description names a property and equals that property's total costs for the
   month to the penny is a *confirmed echo* (eight "Lascar Wharf" rows, Jan–Aug 2026). The cleanup removes only those. A
   Main Page business row ≥ £50 that equals a property row of the same month to the penny is a *possible duplicate*: flagged in
-  the preview with a tick-to-exclude box; your choice is remembered for that month.
+  the preview with **Leave out** / **Separate expense** boxes; either choice is remembered (by month, label and amount).
+  "Crescent B. Ads" £3,000 (Sept) is recorded as a genuine marketing cost, separate from NW4's £3,000 sourcing fee.
 - **Draycott.** September's purchases are formulas `=August × −1` (a reversal), the typed fee (241.94) is 23.5% of income
   against a 12% setting, the Opex block total excludes the fee row below it, and Days Booked is blank: it stays REVIEW / NO
   CONTROL until the workbook is understood. Nothing is corrected silently.
