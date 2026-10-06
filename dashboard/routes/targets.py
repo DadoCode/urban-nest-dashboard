@@ -107,7 +107,7 @@ def index():
 
     saved = {r["property_id"]: r for r in conn.execute("SELECT * FROM property_targets")}
     rows, month_set = [], set()
-    for p in get_properties(conn, include_overhead=False):
+    for p in get_properties(conn, include_overhead=False, strict=True):
         view = _property_view(conn, p, saved.get(p["id"]), months, month, cur)
         month_set.update(view["hist"])
         rows.append(view)

@@ -59,17 +59,31 @@ def fee_text(prop):
     return f"{pct:g}% fee" if pct else "fee % not set"
 
 
-def get_properties(conn, active_only=True, include_overhead=True):
+def get_properties(conn, active_only=True, include_overhead=True, period=None, strict=False):
+    """Properties to list. Three meanings of "active", never confused:
+      strict=True        only properties that are active NOW (current portfolio: targets, new-document matching);
+      period=(start,end) active now PLUS inactive ones that recorded activity in that period (a historical view still shows them);
+      default            active now PLUS inactive ones that have any history (selectable in a filter/dropdown)."""
     q = "SELECT * FROM properties"
     clauses = []
-    if active_only:
+    params = []
+    if active_only and strict:
         clauses.append("active = 1")
+    elif active_only:
+        if period:
+            data = ("EXISTS (SELECT 1 FROM transactions t WHERE t.property_id = properties.id AND t.date >= ? AND t.date < ?) OR "
+                    "EXISTS (SELECT 1 FROM bookings b WHERE b.property_id = properties.id AND b.check_in < ? AND b.check_out > ?)")
+            params += [period[0], period[1], period[1], period[0]]
+        else:
+            data = ("EXISTS (SELECT 1 FROM transactions t WHERE t.property_id = properties.id) OR "
+                    "EXISTS (SELECT 1 FROM bookings b WHERE b.property_id = properties.id)")
+        clauses.append(f"(active = 1 OR {data})")
     if not include_overhead:
         clauses.append("type != 'overhead'")
     if clauses:
         q += " WHERE " + " AND ".join(clauses)
     q += " ORDER BY (type = 'overhead'), name"
-    return conn.execute(q).fetchall()
+    return conn.execute(q, params).fetchall()
 
 
 def get_property(conn, property_id):

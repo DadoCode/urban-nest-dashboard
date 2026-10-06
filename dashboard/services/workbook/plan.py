@@ -537,13 +537,15 @@ def _plan_main_only(conn, parsed, code, ym, info, confirm):
     diff = diff_rows(cur_tx, rows)
     item["rows"], item["counts"] = diff, _counts(diff)
     item["change_count"] = item["counts"]["NEW"] + item["counts"]["CHANGED"] + item["counts"]["REMOVED"]
+    pct_known = (conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0] if exists else item["new_property"]["pct"]
     item["checks"] = [
         {"metric": "Management fee", "workbook": fee, "imported": round(sum(r["amount"] for r in rows), 4), "diff": 0.0 if fee else None,
          "status": "PASS" if fee else "NO CONTROL", "fmt": "money", "gating": False,
-         "note": "the amount the Main Page records for this month" if fee else "the Main Page records no fee for this month"},
-        {"metric": "Fee percentage", "workbook": None, "imported": None, "diff": None, "status": "NO CONTROL", "fmt": "pct", "gating": False,
-         "note": "not established by the workbook, so none is assumed. Configuration still needed (Settings, or when the property is created)."},
+         "note": "the explicit amount the Main Page records for this month (used as recorded, not estimated from a percentage)" if fee else "the Main Page records no fee for this month"},
     ]
+    if not pct_known:
+        item["checks"].append({"metric": "Fee percentage", "workbook": None, "imported": None, "diff": None, "status": "NO CONTROL", "fmt": "pct", "gating": False,
+                               "note": "not established by the workbook, so none is assumed. Configuration still needed (Settings, or when the property is created)."})
     item["reasons"].append("MAIN PAGE ONLY: this property has no sheet of its own. Only its recorded management fee is imported; no income, costs, bookings, "
                            "days or occupancy are invented.")
     item["workbook"] = {"revenue": None, "property_costs": None, "management_fee": fee, "days": None, "occupancy": None, "profit": fee}

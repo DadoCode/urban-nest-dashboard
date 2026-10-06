@@ -36,16 +36,26 @@ def seed_defaults(conn, property_id):
 
 
 def not_active(conn, property_id, start, end):
-    """The date a property joins the portfolio if the WHOLE of [start, end) is before it, else None. Such a period is
-    out of scope: nothing is expected, so nothing is "missing"."""
-    row = conn.execute("SELECT start_date FROM properties WHERE id=?", (property_id,)).fetchone()
-    if row and row["start_date"] and row["start_date"] >= end:
-        return row["start_date"]
+    """Why nothing is expected of a property in [start, end), or None when it is expected to produce data. Three different things:
+      not started  the WHOLE period is before its start date            -> "Not active until <date>"
+      ended        the whole period is after its recorded end date      -> "Inactive"
+      inactive     it is inactive now (and no end date is recorded)     -> "Inactive": it is no longer expected to send anything,
+                   so nothing is "missing" (its historical figures are untouched and still shown where they exist)."""
+    row = conn.execute("SELECT start_date, end_date, active FROM properties WHERE id=?", (property_id,)).fetchone()
+    if not row:
+        return None
+    if row["start_date"] and row["start_date"] >= end:
+        return {"kind": "not_started", "text": f"Not active until {row['start_date']}", "starts": row["start_date"]}
+    if row["end_date"] and row["end_date"] < start:
+        return {"kind": "inactive", "text": "Inactive", "starts": None}
+    if not row["active"]:
+        return {"kind": "inactive", "text": "Inactive", "starts": None}
     return None
 
 
-def _inactive_health(starts):
-    return {"rows": [], "missing": [], "required_total": 0, "pct": 100, "has_data": False, "not_active": True, "starts": starts}
+def _inactive_health(why):
+    return {"rows": [], "missing": [], "required_total": 0, "pct": 100, "has_data": False, "not_active": True,
+            "starts": why["starts"], "kind": why["kind"], "text": why["text"]}
 
 
 def has_real_data(conn, property_id, start, end):
@@ -70,9 +80,9 @@ def completeness_for(conn, property_id, start, end):
     Overview insights use (uploaded_at, not a detected/back-dated period).
     This is about *source documents*, not whether the property has real
     operating data -- see has_real_data() for that."""
-    starts = not_active(conn, property_id, start, end)
-    if starts:
-        return {"required": [], "received": [], "missing": [], "pct": 100, "not_active": True, "starts": starts}
+    why = not_active(conn, property_id, start, end)
+    if why:
+        return {"required": [], "received": [], "missing": [], "pct": 100, "not_active": True, "starts": why["starts"], "kind": why["kind"], "text": why["text"]}
     reqs = conn.execute(
         "SELECT source_type, required FROM property_data_requirements WHERE property_id=?", (property_id,)
     ).fetchall()
@@ -96,9 +106,9 @@ def health_for(conn, property_id, start, end):
     period counts as received. has_data is the separate, broader signal:
     does this property have any real transaction/booking for the period
     at all, regardless of documents."""
-    starts = not_active(conn, property_id, start, end)
-    if starts:
-        return _inactive_health(starts)
+    why = not_active(conn, property_id, start, end)
+    if why:
+        return _inactive_health(why)
     reqs = conn.execute(
         "SELECT source_type, required FROM property_data_requirements WHERE property_id=? ORDER BY required DESC, rowid",
         (property_id,),
@@ -130,7 +140,7 @@ def health_state(h, period_label):
     if h is None:
         return "neutral", "Not set up"
     if h.get("not_active"):
-        return "neutral", f"Not active until {h['starts']}"
+        return "neutral", h.get("text") or f"Not active until {h['starts']}"
     if h["pct"] == 100:
         return "pos", "Complete"
     n = len(h["missing"])

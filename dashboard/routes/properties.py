@@ -10,6 +10,7 @@ import services.kpis as kpis
 import services.sources as src
 from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta, is_managed
 from services.completeness import completeness_for, health_for, health_state, not_active, seed_defaults
+from services.kpis import _has_activity as _kpi_has_activity
 from services.context import compare_bounds, link_params, range_params, request_context
 import services.ingest as ingest
 from services.audit import record
@@ -30,13 +31,12 @@ def index():
     ctx["is_latest"] = ctx["period_is_latest"] and ctx["compare"] == "previous_period"
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
 
-    rows_q = "SELECT * FROM properties WHERE type != 'overhead'"
-    if status == "active":
-        rows_q += " AND active = 1"
-    elif status == "inactive":
-        rows_q += " AND active = 0"
-    rows_q += " ORDER BY name"
-    flats = conn.execute(rows_q).fetchall()
+    # "Active" lists what is active now PLUS properties that are inactive today but recorded activity in the selected period (a
+    # historical month still shows them, marked inactive). The headline count is only the properties that are active now.
+    flats = (get_properties(conn, include_overhead=False, period=(start, end)) if status == "active"
+             else [p for p in get_properties(conn, active_only=False, include_overhead=False) if status != "inactive" or not p["active"]])
+    active_count = sum(1 for p in flats if p["active"]) if status == "active" else len(flats)
+    inactive_with_activity = sum(1 for p in flats if not p["active"]) if status == "active" else 0
     if q:
         flats = [p for p in flats if q in p["name"].lower() or q in (p["address"] or "").lower()]
 
@@ -66,7 +66,8 @@ def index():
             "occupancy": snap["occupancy"],
             "health_kind": kind, "health_label": label,
             "managed": is_managed(p), "fee": fee,
-            "not_active": bool(not_active(conn, p["id"], start, end)),       # whole period is before it joined the portfolio
+            # nothing is expected of it in this period (not started, ended, or inactive with no activity in the period): no performance to show
+            "not_active": bool(not_active(conn, p["id"], start, end)) and not (not p["active"] and _kpi_has_activity(conn, p["id"], datetime.date.fromisoformat(start), datetime.date.fromisoformat(end))),
         })
 
     def _sorted(items, key):
@@ -80,7 +81,7 @@ def index():
     return render_template(
         "properties.html", active="properties", all_properties=get_properties(conn), active_property=None,
         operated=operated, managed=managed, q=q, status=status, sort_op=sort_op, sort_mg=sort_mg,
-        current_month=ctx["display"], total_count=len(rows),
+        current_month=ctx["display"], total_count=active_count if status == "active" else len(rows), inactive_with_activity=inactive_with_activity,
         context_bar=True, ctx=ctx, hide_property=True,
     )
 

@@ -122,8 +122,8 @@ def day_drawer(day):
            FROM bookings b JOIN properties p ON p.id = b.property_id
            WHERE b.status='confirmed' AND b.reservation_id != 'monthly-aggregate' AND b.check_in <= ? AND b.check_out > ?
            ORDER BY p.name""", (day, day)).fetchall()
-    total = len(get_properties(conn, include_overhead=False))
     d = datetime.date.fromisoformat(day)
+    total = len(get_properties(conn, include_overhead=False, period=(day, (d + datetime.timedelta(days=1)).isoformat())))
     return render_template("partials/day_drawer.html", rows=rows, total=total, label=f"{d.day} {MONTH_NAMES[d.month]} {d.year}")
 
 
@@ -134,7 +134,7 @@ def calendar_data(conn, ctx, pid):
     own Calendar tab, so the same query logic backs both."""
     year, month = ctx["end_year"], ctx["end_month"]
     start, end = kpis.month_bounds(year, month)
-    total_flats = 1 if pid else (len(get_properties(conn, include_overhead=False)) or 1)
+    total_flats = 1 if pid else (len(get_properties(conn, include_overhead=False, period=(start, end))) or 1)
     scope, sparams = ("AND b.property_id=?", (pid,)) if pid else ("", ())
 
     overlapping = conn.execute(

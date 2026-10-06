@@ -153,7 +153,7 @@ def save_upload(conn, file, doc_type, property_id, flash):
                      "No lines could be read from this document. If it's a scan or photo it may be too blurry, cropped or empty — try a clearer copy, or enter the rows manually.",
                      flash, warnings, dup_doc)
 
-    properties = [dict(p) for p in get_properties(conn, include_overhead=False)]
+    properties = [dict(p) for p in get_properties(conn, include_overhead=False, strict=True)]
     names = {p["id"]: p["name"] for p in properties}
     is_reservations = result.get("kind") == "reservation"
     overhead = conn.execute("SELECT id, name FROM properties WHERE type='overhead' LIMIT 1").fetchone()

@@ -2,7 +2,7 @@
 {% from "_components.html" import page_head, section, empty_state %}
 {% block title %}Properties — Urban Nest Estates{% endblock %}
 {% block content %}
-  {% call page_head("Properties", total_count ~ " " ~ status ~ " propert" ~ ("y" if total_count == 1 else "ies") ~ " · " ~ current_month) %}
+  {% call page_head("Properties", total_count ~ " " ~ status ~ " propert" ~ ("y" if total_count == 1 else "ies") ~ ((" + " ~ inactive_with_activity ~ " inactive with activity in this period") if inactive_with_activity else "") ~ " · " ~ current_month) %}
     <button type="button" onclick="document.getElementById('add-apartment-dialog').showModal()">+ Add property</button>
   {% endcall %}
 

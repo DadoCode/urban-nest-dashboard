@@ -88,7 +88,7 @@ def _kpi_section(conn, property_id, start, end, pstart, pend, lystart, lyend, he
 def _property_table(conn, start, end, heading="By property", use_adjusted=False):
     snap = kpis.adjusted_kpi_snapshot if use_adjusted else kpis.kpi_snapshot
     rows = []
-    for p in get_properties(conn, include_overhead=False):
+    for p in get_properties(conn, include_overhead=False, period=(start, end)):
         s = snap(conn, p["id"], start, end)
         row = [p["name"], s["revenue"], s["costs"], s["net_profit"], s["margin"] * 100, s["occupancy"] * 100, s["adr"]]
         if use_adjusted:

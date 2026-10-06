@@ -23,8 +23,11 @@ def mapping_table(conn, year=2026):
         code = code_of.get(pid, "")
         model = _model(row) if row else "not in dashboard"
         decision = C.MODEL_DECISIONS.get(pid)
-        if row and decision and decision[0] != model:
-            model = f"{model} -> {decision[0]}"
+        if row and decision and (decision[0] != model or (decision[2] and row["management_fee_pct"] != decision[2])):
+            model = f"{model} -> {decision[0]}" + (f" {decision[2]:g}%" if decision[2] else "")
+        status_decision = C.STATUS_DECISIONS.get(pid)
+        if row and status_decision and bool(row["active"]) != bool(status_decision[0]):
+            model += " | active -> INACTIVE"
         aliases = sorted({code, name, *(row["name"] for _ in [0] if row), *C.PROPERTY_ALIASES.get(code, [])} - {""})
         start = C.START_DATES.get(pid)
         decided = C.NEW_PROPERTY_DEFAULTS.get(pid)
@@ -35,7 +38,7 @@ def mapping_table(conn, year=2026):
             model = f"{main_only['model']}, fee % not known (to be created from the Main Page)"
         rows.append({"property_id": pid, "current_name": row["name"] if row else "(not in the dashboard)", "canonical": name, "code": code,
                      "sheet": ("Main Page only" if main_only else (f"{code}{year % 100:02d}" if code else "")), "model": model, "aliases": aliases, "confidence": conf,
-                     "source": source, "question": question, "start_date": (row["start_date"] if row else None) or (start[0] if start else None)})
+                     "source": source, "question": question, "active": row["active"] if row else None, "start_date": (row["start_date"] if row else None) or (start[0] if start else None)})
     return rows
 
 
@@ -92,7 +95,7 @@ def model_impact(conn, pid, new_pct):
 
 
 def plan_cleanup(conn):
-    actions = {"renames": [], "models": [], "duplicates": [], "left_alone": [], "flags": [], "start_dates": [], "distinct": [], "pre_start": [], "pre_start_left": []}
+    actions = {"renames": [], "models": [], "duplicates": [], "left_alone": [], "flags": [], "start_dates": [], "distinct": [], "pre_start": [], "pre_start_left": [], "status": []}
     for pid, (name, conf, source, question) in C.CANONICAL_NAMES.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         if not row:
@@ -101,10 +104,14 @@ def plan_cleanup(conn):
             actions["renames"].append({"property_id": pid, "from": row["name"], "to": name, "from_address": row["address"]})
         if question:
             actions["flags"].append({"property_id": pid, "question": question})
-    for pid, (model, why) in C.MODEL_DECISIONS.items():
+    for pid, (model, why, pct) in C.MODEL_DECISIONS.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
-        if row and _model(row) != model:
-            actions["models"].append({"property_id": pid, "from": _model(row), "from_pct": row["management_fee_pct"], "from_is_managed": row["is_managed"], "to": model, "why": why})
+        if row and (_model(row) != model or (model == "managed" and pct and row["management_fee_pct"] != pct)):
+            actions["models"].append({"property_id": pid, "from": _model(row), "from_pct": row["management_fee_pct"], "from_is_managed": row["is_managed"], "to": model, "to_pct": pct, "why": why})
+    for pid, (active, why) in C.STATUS_DECISIONS.items():
+        row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
+        if row and bool(row["active"]) != bool(active):
+            actions["status"].append({"property_id": pid, "from": row["active"], "to": active, "why": why})
     for pid, (date, why) in C.START_DATES.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         if row and row["start_date"] != date:
@@ -121,7 +128,7 @@ def plan_cleanup(conn):
 
 def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, confirmed duplicate business rows"):
     """Apply a plan_cleanup() result in one transaction, as a batch that undo_batch can reverse."""
-    if not any(actions.get(k) for k in ("renames", "models", "duplicates", "start_dates", "distinct", "pre_start")):
+    if not any(actions.get(k) for k in ("renames", "models", "duplicates", "start_dates", "distinct", "pre_start", "status")):
         return None                                           # nothing to do: no batch, no noise
     cur = conn.execute("INSERT INTO import_batches (filename, file_hash, status, kind, note) VALUES (?,?,?,?,?)",
                        ("cleanup: " + note, "-", "applied", "cleanup", note))
@@ -137,6 +144,9 @@ def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, 
             for alias, kind in ((row["name"], "previous_name"), (a["to"], "name")):
                 if identity.add_alias(conn, a["property_id"], alias, kind):
                     _log(conn, bid, "alias_added", "property_identity_aliases", None, {"alias_norm": identity.norm(alias)})
+        for a in actions.get("status", []):
+            conn.execute("UPDATE properties SET active=? WHERE id=?", (a["to"], a["property_id"]))
+            _log(conn, bid, "property_updated", "properties", None, {"id": a["property_id"], "old": {"active": a["from"]}, "new": {"active": a["to"]}})
         for a in actions["start_dates"]:
             conn.execute("UPDATE properties SET start_date=? WHERE id=?", (a["to"], a["property_id"]))
             _log(conn, bid, "property_updated", "properties", None, {"id": a["property_id"], "old": {"start_date": a["from"]}, "new": {"start_date": a["to"]}})
@@ -147,6 +157,7 @@ def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, 
         for a in actions["models"]:
             new_pct = None if a["to"] == "operated" else a.get("to_pct")
             new_managed = 0 if a["to"] == "operated" else 1
+            new_pct = None if a["to"] == "operated" else a.get("to_pct")
             conn.execute("UPDATE properties SET management_fee_pct=?, is_managed=? WHERE id=?", (new_pct, new_managed, a["property_id"]))
             _log(conn, bid, "property_updated", "properties", None, {"id": a["property_id"], "old": {"management_fee_pct": a["from_pct"], "is_managed": a["from_is_managed"]},
                                                                       "new": {"management_fee_pct": new_pct, "is_managed": new_managed}})
@@ -158,8 +169,8 @@ def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, 
             conn.execute("DELETE FROM transactions WHERE id=?", (row["id"],))
             removed += 1
         conn.execute("UPDATE import_batches SET properties=?, row_count=?, rows_removed=?, applied_at=datetime('now') WHERE id=?",
-                     (json.dumps(sorted({a["property_id"] for a in actions["renames"] + actions["models"] + actions["start_dates"]})),
-                      removed + len(actions["renames"]) + len(actions["models"]) + len(actions["start_dates"]) + len(actions["distinct"]), removed, bid))
+                     (json.dumps(sorted({a["property_id"] for a in actions["renames"] + actions["models"] + actions["start_dates"] + actions.get("status", [])})),
+                      removed + len(actions["renames"]) + len(actions["models"]) + len(actions["start_dates"]) + len(actions["distinct"]) + len(actions.get("status", [])), removed, bid))
         conn.commit()
     except Exception:
         conn.rollback()

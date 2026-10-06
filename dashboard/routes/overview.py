@@ -92,12 +92,12 @@ def kpi_rows(conn, property_id, ctx):
 def index():
     conn = db.get_conn()
     nav_properties = get_properties(conn)
-    flats = get_properties(conn, include_overhead=False)
     ctx = request_context(conn)
     viewing = next((p for p in nav_properties if p["id"] == ctx["property_id"]), None) if ctx["property_id"] else None
     primary_tiles, _secondary_tiles, cur = kpi_rows(conn, ctx["property_id"], ctx)
 
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+    flats = get_properties(conn, include_overhead=False, period=(start, end))      # active now + inactive ones that had activity in this period
 
     # Rent-to-rent/owned and managed flats run on different economics (see
     # services/kpis.py's adjusted_revenue/business_income) -- mixing them

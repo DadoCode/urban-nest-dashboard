@@ -155,22 +155,55 @@ def avg_stay(conn, property_id, start, end):
     return sum(n for _r, n in real) / len(real) if real else 0.0
 
 
-def _active_days(start, end, property_start):
-    """Nights in [start, end) on or after the date the property joined the portfolio (no start date = always)."""
+def _active_days(start, end, property_start, property_end=None):
+    """Nights in [start, end) on or after the date the property joined the portfolio (no start date = always) and, if an
+    end date is recorded, up to and including it."""
     s, e = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
     if property_start:
         s = max(s, datetime.date.fromisoformat(property_start))
+    if property_end:
+        e = min(e, datetime.date.fromisoformat(property_end) + datetime.timedelta(days=1))
     return max((e - s).days, 0)
+
+
+def _month_edges(start, end):
+    """[(first_day, next_first_day)] for each calendar month [start, end) touches."""
+    s, e = datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)
+    out, cur = [], s.replace(day=1)
+    while cur < e:
+        nxt = (cur.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+        out.append((cur, nxt))
+        cur = nxt
+    return out
+
+
+def _has_activity(conn, property_id, lo, hi):
+    return bool(conn.execute(
+        """SELECT 1 FROM transactions WHERE property_id=? AND date>=? AND date<?
+           UNION SELECT 1 FROM bookings WHERE property_id=? AND check_in<? AND check_out>? LIMIT 1""",
+        (property_id, lo.isoformat(), hi.isoformat(), property_id, hi.isoformat(), lo.isoformat())).fetchone())
+
+
+def _property_nights(conn, row, start, end):
+    """Available nights of one property in [start, end). Active now: every night from its start date. Inactive now with no end
+    date recorded (it was active once, we do not know until when): only the calendar months in which it recorded activity, so
+    its history still counts and today's / future months do not. An end date, when known, simply bounds it."""
+    if row["active"] or row["end_date"]:
+        return _active_days(start, end, row["start_date"], row["end_date"])
+    total = 0
+    for lo, hi in _month_edges(start, end):
+        if _has_activity(conn, row["id"], lo, hi):
+            total += _active_days(max(lo, datetime.date.fromisoformat(start)).isoformat(), min(hi, datetime.date.fromisoformat(end)).isoformat(), row["start_date"], None)
+    return total
 
 
 def available_nights(conn, property_id, start, end):
     """Nights a property (or the portfolio) could have been booked. A property is only available from its start_date:
     before it joined the portfolio it is NOT ACTIVE, not "empty"."""
     if property_id:
-        row = conn.execute("SELECT start_date FROM properties WHERE id=?", (property_id,)).fetchone()
-        return _active_days(start, end, row["start_date"] if row else None)
-    return sum(_active_days(start, end, r["start_date"])
-               for r in conn.execute("SELECT start_date FROM properties WHERE type='flat' AND active=1"))
+        row = conn.execute("SELECT id, active, start_date, end_date FROM properties WHERE id=?", (property_id,)).fetchone()
+        return _property_nights(conn, row, start, end) if row else _active_days(start, end, None)
+    return sum(_property_nights(conn, r, start, end) for r in conn.execute("SELECT id, active, start_date, end_date FROM properties WHERE type='flat'"))
 
 
 def occupancy(conn, property_id, start, end):

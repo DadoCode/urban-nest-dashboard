@@ -295,6 +295,7 @@ def ensure_schema():
         ("ical_url", "TEXT"), ("ical_synced_at", "TEXT"),
         ("type", "TEXT NOT NULL DEFAULT 'flat'"), ("start_date", "TEXT"),
         ("is_managed", "INTEGER NOT NULL DEFAULT 0"),   # managed for an owner even when the fee % is not known yet
+        ("end_date", "TEXT"),                           # last day a property was part of the portfolio (optional; never invented)
         ("management_fee_pct", "REAL"),  # NULL/0 = fully owned; e.g. 15 = a manager keeps 85%, this business earns 15% of revenue
     ]:
         if col not in existing_cols:

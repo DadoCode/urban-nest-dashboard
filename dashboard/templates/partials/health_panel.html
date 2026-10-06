@@ -2,7 +2,11 @@
 {% if health is none %}
   <div class="empty"><div class="empty-title">No expected documents set up</div><div class="empty-body">This property has no list of documents it should receive, so completeness can't be measured yet.</div></div>
 {% elif health.not_active %}
+  {% if health.kind == 'inactive' %}
+  <div class="empty"><div class="empty-title">Inactive</div><div class="empty-body">{{ prop.name }} is no longer active, so no documents are expected and nothing is missing. Its history is unchanged.</div></div>
+  {% else %}
   <div class="empty"><div class="empty-title">Not active yet</div><div class="empty-body">{{ prop.name }} joins the portfolio on {{ health.starts }}. Nothing is expected for this period, so nothing is missing.</div></div>
+  {% endif %}
 {% else %}
   {% for r in health.rows %}
     <div class="health-row">

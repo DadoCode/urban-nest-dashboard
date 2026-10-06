@@ -69,6 +69,7 @@ class Sheet:
     def __init__(self, name, cached_rows, formula_rows):
         self.name = name
         self.cells = {}
+        self.blank_results = set()          # formulas that WERE calculated and gave an empty string (not "never calculated")
         formulas = {}
         for r, row in enumerate(formula_rows, 1):
             for c, cell in enumerate(row, 1):
@@ -80,8 +81,11 @@ class Sheet:
                 v = getattr(cell, "value", None)
                 if v is not None and not (isinstance(v, str) and v.strip() == ""):
                     self.cells[(r, c)] = (v, formulas.get((r, c)))
+                elif (r, c) in formulas and getattr(cell, "data_type", None) == "str":
+                    self.blank_results.add((r, c))   # cached as an empty string: calculated, just blank
         for key, f in formulas.items():          # formula with no cached result
-            self.cells.setdefault(key, (None, f))
+            if key not in self.blank_results:
+                self.cells.setdefault(key, (None, f))
         self.max_row = max((r for r, _ in self.cells), default=0)
 
     def value(self, r, c):

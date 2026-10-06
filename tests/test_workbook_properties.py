@@ -68,7 +68,7 @@ for pid, *_rest in SEED:
     completeness.seed_defaults(conn, pid)          # the real database has these for every flat
 conn.commit()
 CANON = {pid: v[0] for pid, v in C.CANONICAL_NAMES.items()}
-NOT_IN_DB = {"22-perryfield-way", "forest-gate", "44-spooner-road"}
+NOT_IN_DB = {"22-perryfield-way", "forest-gate"}
 
 
 def tx(pid, date, desc, amount, direction="expense", cat="other", source="excel_import"):
@@ -147,7 +147,8 @@ check("mapping table: every canonical full name you gave", {pid: by[pid]["canoni
       by["nw4"]["canonical"] == "Flat 3, 48 Station Road, NW4 3SX" and by["19-draycott-ave"]["canonical"] == "Flat 1, 19 Draycott Avenue, Chelsea, London, SW3 3BS")
 check("mapping table: NW4 operated and active from 2026-09-01", "managed -> operated" in by["nw4"]["model"] and by["nw4"]["start_date"] == "2026-09-01")
 check("mapping table: 22 Perryfield is to be created managed 15%", by["22-perryfield-way"]["model"].startswith("managed 15%") and by["22-perryfield-way"]["current_name"].startswith("(not in"))
-check("mapping table: 44 Spooner Road is flagged (no full address given; Forest Gate not matched)", by["44-spooner-road"]["question"] and "Forest Gate" in by["44-spooner-road"]["question"])
+check("mapping table: 44 Spooner Road becomes 'House 44, Spooner Road, Sheffield, S10 5BN' and INACTIVE; Forest Gate is managed 15% and INACTIVE", by["44-spooner-road"]["canonical"] == "House 44, Spooner Road, Sheffield, S10 5BN" and "INACTIVE" in by["44-spooner-road"]["model"] and
+      C.MODEL_DECISIONS["forest-gate"][2] == 15.0 and C.STATUS_DECISIONS["forest-gate"][0] == 0)
 
 # --------------------------------------------------------------- cleanup (scratch)
 print("cleanup: full names, NW4 model + start date, Lascar double count, Crescent decision")
@@ -170,7 +171,10 @@ check("every property now carries its full canonical name AND address", all(conn
       for pid in CANON if pid not in NOT_IN_DB))
 check("old names and short codes still resolve (aliases drive matching)", identity.resolve(conn, "19 Draycott Ave")[0] == "19-draycott-ave" and identity.resolve(conn, "602 Lascar Wharf")[0] == "lascar-wharf" and
       identity.resolve(conn, "NW4")[0] == "nw4" and identity.resolve(conn, "Flat 40, Crested Court, 3 Shearwater Drive, London, NW9 7AD")[0] == "crested-court" and identity.resolve(conn, "TCR")[0] == "tottenham-court-road")
-check("44 Spooner Road is untouched", conn.execute("SELECT name FROM properties WHERE id='44-spooner-road'").fetchone()[0] == "44 Spooner Road")
+sp = conn.execute("SELECT name, address, active, management_fee_pct, is_managed FROM properties WHERE id='44-spooner-road'").fetchone()
+check("44 Spooner Road: renamed, INACTIVE, still operated; its id, history and old-name aliases are intact", tuple(sp) == ("House 44, Spooner Road, Sheffield, S10 5BN", "House 44, Spooner Road, Sheffield, S10 5BN", 0, None, 0) and
+      identity.resolve(conn, "44 Spooner Road")[0] == "44-spooner-road" and identity.resolve(conn, "S10")[0] == "44-spooner-road" and identity.resolve(conn, "Spooner")[0] == "44-spooner-road" and
+      conn.execute("SELECT COUNT(*) FROM transactions WHERE property_id='44-spooner-road'").fetchone()[0] == tx_counts["44-spooner-road"])
 check("NW4 is operated (flag AND percentage cleared) with start date 2026-09-01", conn.execute("SELECT management_fee_pct, is_managed, start_date FROM properties WHERE id='nw4'").fetchone()[:3] == (None, 0, "2026-09-01"))
 nw_ids_removed = sorted(d["row"]["id"] for d in acts["pre_start"])
 check("NW4 pre-start income: exactly the 5 exact copies of 175 Miles Building's rows are removed; the orphan row stays and is reported",
@@ -206,8 +210,8 @@ check("data health: NW4 in September is judged normally", not completeness.healt
 check("occupancy availability: NW4 has 0 available nights in August, 30 in September, 14 for 15 Aug - 15 Sep",
       kpis.available_nights(c, "nw4", "2026-08-01", "2026-09-01") == 0 and kpis.available_nights(c, "nw4", "2026-09-01", "2026-10-01") == 30 and
       kpis.available_nights(c, "nw4", "2026-08-15", "2026-09-15") == 14)
-check("portfolio availability excludes a property before it joined (9 flats in August, 10 in September)", kpis.available_nights(c, None, "2026-08-01", "2026-09-01") == 9 * 31 and
-      kpis.available_nights(c, None, "2026-09-01", "2026-10-01") == 10 * 30)
+check("portfolio availability excludes a property before it joined AND an inactive one with no activity (8 flats in August, 9 in September)", kpis.available_nights(c, None, "2026-08-01", "2026-09-01") == 8 * 31 and
+      kpis.available_nights(c, None, "2026-09-01", "2026-10-01") == 9 * 30)
 check("a property with no start date is unaffected (always available)", kpis.available_nights(c, "crested-court", "2026-08-01", "2026-09-01") == 31)
 plan = P.plan_month(c, parsed, SEP)
 nw = item(plan, "NW4")
@@ -294,7 +298,8 @@ for url in ("/properties", "/properties/22-perryfield-way", "/expenses?from=2026
 for k in ("/properties", "/expenses?from=2026-09-01&to=2026-09-01", "/documents", "/reports", "/targets", "/bookings"):
     t = text(client.get(k))
     shown = [pid for pid, n in names.items() if n in t]
-    check(f"{k.split('?')[0]}: property names shown are the full names ({len(shown)})", len(shown) >= 1 and (k != "/properties" or len(shown) == len(names)), len(shown))
+    inactive_now = {r_[0] for r_ in db.get_conn().execute("SELECT id FROM properties WHERE active=0")}
+    check(f"{k.split('?')[0]}: property names shown are the full names ({len(shown)})", len(shown) >= 1 and (k != "/properties" or set(shown) == set(names) - inactive_now), len(shown))
 html = " ".join(text(client.get(u)) for u in ("/", "/properties", "/expenses", "/bookings", "/documents", "/targets", "/reconciliation", f"/imports/{bid_e2e}"))
 check("QA: no page uses a bare short code as a property label", not re.findall(r">\s*(NW4|LW|CC|TCR|W8|S10|11PW|22PW|19Draycott)\s*<", html))
 check("QA: the old short names ('19 Draycott Ave', 'Flat 3 NW4', '40 Crested Court') are no longer shown as property names", not any(o in text(client.get("/properties")) for o in (">19 Draycott Ave<", ">Flat 3 NW4<", ">40 Crested Court<")))
@@ -386,28 +391,27 @@ check("before it is created, 'Forest gate' resolves to nothing (and never to 44 
 planJ = P.plan_month(cF, parsedF, "2026-06")
 fg = item(planJ, "FG")
 fgp = fg["new_property"]
-check("June: Forest Gate is a NEW PROPERTY from the Main Page alone (no sheet): canonical name, id, managed, NO percentage invented, fee % optional",
+check("June: Forest Gate is a NEW PROPERTY from the Main Page alone (no sheet): canonical name, id, managed at 15% (your decision)",
       fg["status"] == "new_property" and fg.get("main_only") and fgp["name"] == "29 Station Road, Forest Gate, London, E7 0ES" and fgp["property_id"] == "forest-gate" and fgp["model"] == "managed" and
-      fgp["pct"] is None and fgp["pct_unknown_ok"] and {"Forest gate", "Forest Gate", "29 Station Road", "FG"} <= set(fgp["aliases"]), fgp)
+      fgp["pct"] == 15.0 and not fgp["pct_unknown_ok"] and {"Forest gate", "Forest Gate", "29 Station Road", "FG"} <= set(fgp["aliases"]), fgp)
 check("June: the ONLY thing to import is the recorded fee 1155 (expense, management_fee): no income, costs, days or bookings are invented",
       [(d["status"], d["new"]["amount"], d["new"]["category"], d["new"]["direction"], d["new"]["source_ref"]) for d in fg["rows"]] == [("NEW", 1155.0, "management_fee", "expense", "Main Page26!M47")] and
       fg["days"] is None and not fg["bookings"] and fg["workbook"]["revenue"] is None and fg["workbook"]["days"] is None)
-check("the missing fee % is flagged as configuration still needed (and does not block)", any(ch["metric"] == "Fee percentage" and ch["status"] == "NO CONTROL" and "Configuration still needed" in ch["note"] for ch in fg["checks"]) and
-      any("Configuration still needed" in r for r in fg["reasons"]) and not fg.get("flagged"))
-check("S10 / 44 Spooner Road is not offered and not touched", item(planJ, "S10")["status"] == "no_activity" and cF.execute("SELECT name, is_managed FROM properties WHERE id='44-spooner-road'").fetchone()[:2] == ("44 Spooner Road", 0))
+check("the fee is the EXPLICIT recorded amount (not estimated from 15%), nothing is flagged, and no 'fee % unknown' note appears now that it is known", not any(ch["metric"] == "Fee percentage" for ch in fg["checks"]) and
+      any(ch["metric"] == "Management fee" and ch["status"] == "PASS" and "explicit" in ch["note"] for ch in fg["checks"]) and not fg.get("flagged"))
+check("S10 / 44 Spooner Road is a separate property and is never offered for Forest Gate's fee", item(planJ, "S10")["status"] == "no_activity" and cF.execute("SELECT active, is_managed FROM properties WHERE id='44-spooner-road'").fetchone()[:2] == (0, 0))
 check("September: Forest Gate has nothing to propose (no fee recorded), so no panel", item(P.plan_month(cF, parsedF, SEP, with_after=False), "FG")["status"] == "no_activity")
 locJ = f"/imports/{bidF}"
 pageJ = text(client.get(locJ + "?month=2026-06"))
-check("page: NEW PROPERTY DETECTED for Forest Gate with the fee % explained and left blank", "29 Station Road, Forest Gate, London, E7 0ES" in pageJ and "Fee % is not in the workbook, so none is invented" in pageJ and
-      re.search(r'name="new_pct:forest-gate" value=""', pageJ) is not None)
+check("page: NEW PROPERTY DETECTED for Forest Gate, managed with the 15% fee pre-filled", "29 Station Road, Forest Gate, London, E7 0ES" in pageJ and re.search(r'name="new_pct:forest-gate" value="15(\.0)?"', pageJ) is not None)
 fpJ = re.search(r'name="fingerprint" value="([^"]+)"', pageJ).group(1)
 before_other = [tuple(r) for r in cF.execute("SELECT * FROM transactions WHERE property_id!='forest-gate' ORDER BY id")]
 client.post(locJ + "/apply", data={"month": "2026-06", "fingerprint": fpJ, "include": ["forest-gate"], "exclude_form": "1", "new_name:forest-gate": "29 Station Road, Forest Gate, London, E7 0ES",
-                                   "new_model:forest-gate": "managed", "new_pct:forest-gate": ""})
+                                   "new_model:forest-gate": "managed", "new_pct:forest-gate": "15"})
 cF2 = db.get_conn()
 fgrow = cF2.execute("SELECT * FROM properties WHERE id='forest-gate'").fetchone()
-check("Forest Gate created: stable id, canonical name AND address, managed with NO percentage, no start date invented", fgrow and fgrow["name"] == fgrow["address"] == "29 Station Road, Forest Gate, London, E7 0ES" and
-      fgrow["is_managed"] == 1 and fgrow["management_fee_pct"] is None and fgrow["start_date"] is None and fgrow["type"] == "flat", dict(fgrow) if fgrow else None)
+check("Forest Gate created: stable id, canonical name AND address, managed at 15%, INACTIVE (your decision), no start date invented", fgrow and fgrow["name"] == fgrow["address"] == "29 Station Road, Forest Gate, London, E7 0ES" and
+      fgrow["is_managed"] == 1 and fgrow["management_fee_pct"] == 15.0 and fgrow["active"] == 0 and fgrow["start_date"] is None and fgrow["type"] == "flat", dict(fgrow) if fgrow else None)
 check("aliases and mapping saved: 'Forest gate', '29 Station Road', FG all resolve to it; 'Spooner' still resolves to S10", all(identity.resolve(cF2, a)[0] == "forest-gate" for a in ("Forest gate", "Forest Gate", "29 Station Road", "FG")) and
       identity.resolve(cF2, "Spooner")[0] == "44-spooner-road" and cF2.execute("SELECT property_id FROM workbook_sheet_map WHERE sheet_code='FG'").fetchone()[0] == "forest-gate")
 check("only the fee row was written (1155, workbook source, cell M47, batch id), nothing else for Forest Gate",
@@ -422,9 +426,9 @@ vv = A.verify_item(cF2, parsedF, "FG", "2026-06")
 check("workbook = ledger = dashboard for Forest Gate's fee (the only thing it has)", [r_["status"] for r_ in vv["rows"]] == ["PASS"] and vv["rows"][0]["workbook"] == vv["rows"][0]["ledger"] == vv["rows"][0]["dashboard"] == 1155.0, vv["rows"])
 for url in ("/properties", "/properties/forest-gate", "/properties/forest-gate/settings", "/expenses?from=2026-06-01&to=2026-06-01&t_scope=forest-gate", "/reconciliation", "/reports", "/targets", "/documents", "/"):
     check(f"page {url.split('?')[0]} loads with Forest Gate present", client.get(url).status_code == 200, client.get(url).status_code)
-check("Properties page lists it under Managed as 'fee % not set'; Settings says the percentage is not set and nothing is estimated",
-      "29 Station Road, Forest Gate, London, E7 0ES" in text(client.get("/properties")) and "fee % not set" in text(client.get("/properties")) and
-      "not set yet" in text(client.get("/properties/forest-gate/settings")))
+_sep = text(client.get("/properties?from=2026-09-01&to=2026-09-01")); _jun = text(client.get("/properties?from=2026-06-01&to=2026-06-01"))
+check("Properties page: September counts only active properties; June (when Forest Gate had a fee) adds '+ 1 inactive with activity in this period' and lists it; the Inactive filter shows it at 15%",
+      "inactive with activity in this period" not in _sep and "+ 1 inactive with activity in this period" in _jun and "/properties/forest-gate" in _jun and "15% fee" in text(client.get("/properties?status=inactive")))
 # July: a second month, a second import; re-import of June gives nothing
 upJ2 = client.post("/imports/upload", data={"workbook": (io.BytesIO(ORIGINAL), "Biz_Accounts_Tracker_2026_Sept_v4.xlsx")}, content_type="multipart/form-data")
 bidJ2 = int(upJ2.headers["Location"].rsplit("/", 1)[1])

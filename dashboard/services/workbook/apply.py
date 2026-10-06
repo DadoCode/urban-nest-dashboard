@@ -53,8 +53,9 @@ def create_property(conn, prop, batch_id):
     if conn.execute("SELECT 1 FROM properties WHERE code=?", (code,)).fetchone():
         code = pid.upper()[:10]
     pct = prop["pct"] if prop["model"] == "managed" else None
-    conn.execute("INSERT INTO properties (id, code, name, address, type, management_fee_pct, is_managed) VALUES (?,?,?,?,'flat',?,?)",
-                 (pid, code, prop["name"], prop["name"], pct, 1 if prop["model"] == "managed" else 0))
+    active = C.STATUS_DECISIONS.get(pid, (1, ""))[0]            # a property you have said is not active is created inactive
+    conn.execute("INSERT INTO properties (id, code, name, address, type, management_fee_pct, is_managed, active) VALUES (?,?,?,?,'flat',?,?,?)",
+                 (pid, code, prop["name"], prop["name"], pct, 1 if prop["model"] == "managed" else 0, active))
     seed_defaults(conn, pid)
     _log(conn, batch_id, "property_created", "properties", None, {"id": pid, "code": code, "name": prop["name"], "model": prop["model"], "pct": pct})
     conn.execute("INSERT OR IGNORE INTO workbook_sheet_map (sheet_code, property_id, source) VALUES (?,?,?)",

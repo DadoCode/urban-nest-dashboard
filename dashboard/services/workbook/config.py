@@ -66,7 +66,7 @@ MAIN_FEE_LABELS = {
 # updated from what the Main Page actually records (its management fee), and nothing is invented: no income, costs,
 # bookings, days or occupancy, and no fee percentage unless the workbook establishes one.
 MAIN_ONLY_PROPERTIES = {
-    "FG": {"pid": "forest-gate", "name": "29 Station Road, Forest Gate, London, E7 0ES", "model": "managed", "pct": None,
+    "FG": {"pid": "forest-gate", "name": "29 Station Road, Forest Gate, London, E7 0ES", "model": "managed", "pct": 15.0,
            "aliases": ["Forest gate", "Forest Gate", "29 Station Road", "29 Station Road Forest Gate", "FG"],
            "note": "separate from S10 / 44 Spooner Road (confirmed by you, 6 Oct 2026)"},
 }
@@ -114,7 +114,7 @@ PROPERTY_ALIASES = {
     "11PW":      ["11PW", "11 Perryfield Way", "11 PW", "Flat 11", "Eider Apartments Flat 11"],
     "22PW":      ["22PW", "22 Perryfield Way", "22 PW", "Flat 22", "Eider Apartments Flat 22"],
     "19Draycott": ["19Draycott", "19 Draycott Avenue", "19 Draycott Ave", "Draycott Avenue", "Draycott", "Flat 1 19 Draycott Avenue"],
-    "S10":       ["S10", "44 Spooner Road", "Spooner Road", "Spooner"],
+    "S10":       ["S10", "44 Spooner Road", "Spooner Road", "Spooner", "House 44 Spooner Road"],
 }
 
 TOLERANCE = 0.01          # money, in pounds
@@ -137,9 +137,7 @@ CANONICAL_NAMES = {
     "22-perryfield-way":    ("Flat 22, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", "high", "confirmed by you, 6 Oct 2026", None),
     "19-draycott-ave":      ("Flat 1, 19 Draycott Avenue, Chelsea, London, SW3 3BS", "high", "confirmed by you, 6 Oct 2026", None),
     "forest-gate":          ("29 Station Road, Forest Gate, London, E7 0ES", "high", "confirmed by you, 6 Oct 2026; your website's Forest Gate page", None),
-    "44-spooner-road":      ("44 Spooner Road", "low", "dashboard name + workbook sheet title only",
-                             "No full address was given for 44 Spooner Road (S10), and it is not on your website. It is NOT the Forest Gate property: the Main Page lists "
-                             "'Forest gate' (managed) and S10 (rent-to-rent) separately, and your site has a separate Forest Gate page."),
+    "44-spooner-road":      ("House 44, Spooner Road, Sheffield, S10 5BN", "high", "confirmed by you, 7 Oct 2026", None),
 }
 
 # A property that is not in the dashboard yet but whose business model you have already decided: pre-fills the
@@ -164,4 +162,15 @@ CONFIRMED_DISTINCT = [
 ]
 
 # Properties the workbook treats as rent-to-rent (operated): the person confirmed NW4 is rent-to-rent.
-MODEL_DECISIONS = {"nw4": ("operated", "Dado confirmed Flat 3 NW4 is rent-to-rent; the workbook lists it under R2R and has never recorded a management fee for it")}
+MODEL_DECISIONS = {
+    # property id: (model, why, fee % when managed)
+    "nw4": ("operated", "Dado confirmed Flat 3 NW4 is rent-to-rent; the workbook lists it under R2R and has never recorded a management fee for it", None),
+    "forest-gate": ("managed", "Dado confirmed Forest Gate is managed at 15% (7 Oct 2026); the Main Page records explicit fees for June (1,155) and July (210)", 15.0),
+}
+
+# Properties that are NOT ACTIVE today (properties.active = 0): excluded from the current portfolio, availability expectations and data-health
+# warnings, but every historical row is kept and still shown where it exists. No dates are invented.
+STATUS_DECISIONS = {
+    "forest-gate": (0, "a one-time management arrangement, not active now (confirmed by you, 7 Oct 2026)"),
+    "44-spooner-road": (0, "not active now (confirmed by you, 7 Oct 2026)"),
+}
