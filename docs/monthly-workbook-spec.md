@@ -266,3 +266,25 @@ Anything REVIEW is **unticked by default** in the preview and needs an explicit 
 - **Clean-up** (`scripts/apply_property_cleanup.py --db PATH [--apply]`): dry-run by default; `--apply` takes a timestamped backup
   first, prints the SHA-256, verifies the backup, runs the additive migration and applies the clean-up as one undoable batch.
 
+## 15. Main-Page-only properties, pre-opening costs, and the workbook's own totals
+
+- **Main-Page-only managed properties** (`config.MAIN_ONLY_PROPERTIES`; today **29 Station Road, Forest Gate, London, E7 0ES**, alias
+  "Forest gate"): a property does not need its own sheet to exist. Its row in the Main Page *Management SA* block is the only thing
+  imported: the recorded management fee for each month, as a `management_fee` expense (Forest Gate: June 1,155 at `Main Page26!M47`,
+  July 210 at `O47`). No income, costs, bookings, days or occupancy are invented, and no fee percentage unless the workbook
+  establishes one. It is created, after you tick it in the preview, as **managed with no percentage**: `properties.is_managed = 1`,
+  `management_fee_pct` empty. Management Fee Earned is then the recorded fee only (never an estimate), and the missing percentage
+  is flagged as configuration still needed. It is separate from S10 / 44 Spooner Road.
+- **`is_managed`** is the explicit managed flag (backfilled from the existing percentages); `management_fee_pct` may be empty for a
+  managed property whose percentage is not known. Every managed/operated decision goes through `services.common.is_managed`.
+- **Pre-opening costs.** Before a property's `start_date`, a month that has cost rows imports **costs only** (labelled PRE-OPENING):
+  no income, no booking aggregate, no booking-source decision, and the property stays NOT ACTIVE (0 available nights, "Not active"
+  in data health and on the Properties page). A month with no costs is "Not active yet" and imports nothing. NW4: August has
+  six purchases totalling 78.71.
+- **The workbook's own totals decide what a block contains.** A labelled row that the block's `=SUM(...)` does not count is reported
+  ("Rows the workbook's own total does not count") and **not imported**: NW4 August's `lenor crease` 0.30 and `sponge eraser` 0.7475,
+  Draycott August's `memory foam topper taken to w8` and Draycott September's fee row (the fee still comes from the Main Page).
+- **Wrongly attached history.** Income dated before a property's start date is removed only when it is an exact copy (date, description,
+  amount) of another property's row and the property is listed in `PRE_START_DUPLICATE_CLEANUP` (NW4: 17 rows, July 5,284.27 and
+  August 3,483.97, all copies of 175 Miles Building's income). Rows with no twin are left and reported. Undoable.
+
