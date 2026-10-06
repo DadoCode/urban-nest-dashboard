@@ -10,13 +10,14 @@ from .apply import _log
 
 
 def _model(row):
-    return "managed" if row["management_fee_pct"] else "operated"
+    return "managed" if (row["management_fee_pct"] or row["is_managed"]) else "operated"
 
 
 def mapping_table(conn, year=2026):
     """CURRENT NAME / CANONICAL FULL NAME / SHORT CODE / WORKBOOK SHEET / MODEL / ALIASES / CONFIDENCE / SOURCE OF NAME."""
     rows = []
     code_of = {pid: code for code, (pid, _n) in C.PROPERTY_SHEETS.items()}
+    code_of.update({cfg["pid"]: code for code, cfg in C.MAIN_ONLY_PROPERTIES.items()})
     for pid, (name, conf, source, question) in C.CANONICAL_NAMES.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         code = code_of.get(pid, "")
@@ -27,10 +28,13 @@ def mapping_table(conn, year=2026):
         aliases = sorted({code, name, *(row["name"] for _ in [0] if row), *C.PROPERTY_ALIASES.get(code, [])} - {""})
         start = C.START_DATES.get(pid)
         decided = C.NEW_PROPERTY_DEFAULTS.get(pid)
+        main_only = next((cfg for cfg in C.MAIN_ONLY_PROPERTIES.values() if cfg["pid"] == pid), None)
         if not row and decided:
             model = f"{decided['model']} {decided['pct']:g}% (to be created)"
+        elif not row and main_only:
+            model = f"{main_only['model']}, fee % not known (to be created from the Main Page)"
         rows.append({"property_id": pid, "current_name": row["name"] if row else "(not in the dashboard)", "canonical": name, "code": code,
-                     "sheet": f"{code}{year % 100:02d}" if code else "", "model": model, "aliases": aliases, "confidence": conf,
+                     "sheet": ("Main Page only" if main_only else (f"{code}{year % 100:02d}" if code else "")), "model": model, "aliases": aliases, "confidence": conf,
                      "source": source, "question": question, "start_date": (row["start_date"] if row else None) or (start[0] if start else None)})
     return rows
 
@@ -50,6 +54,22 @@ def echo_duplicates(conn):
     return out
 
 
+def pre_start_copies(conn):
+    """Income dated before a property's start date that is an EXACT copy (same date, description and amount) of another property's
+    row: an earlier sync attached it to the wrong property. Only listed properties (you confirmed NW4) are considered, and only
+    rows with a twin are returned as removable; rows without a twin are reported and left."""
+    removable, left = [], []
+    for pid in sorted(C.PRE_START_DUPLICATE_CLEANUP):
+        start = (C.START_DATES.get(pid) or (None,))[0] or (conn.execute("SELECT start_date FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0]
+        if not start:
+            continue
+        for r in conn.execute(f"""SELECT * FROM transactions WHERE property_id=? AND direction='income' AND date<? AND source IN {P._AGG_IN} ORDER BY date, id""", (pid, start)):
+            twin = conn.execute("""SELECT id, property_id FROM transactions WHERE property_id!=? AND direction='income' AND date=? AND COALESCE(description,'')=COALESCE(?,'')
+                                   AND ABS(amount-?)<0.005 ORDER BY id LIMIT 1""", (pid, r["date"], r["description"], r["amount"])).fetchone()
+            (removable if twin else left).append({"row": dict(r), "twin": dict(twin) if twin else None})
+    return removable, left
+
+
 def suspect_rows(conn, min_amount=50.0):
     """Business rows that equal a property row of the same month to the penny but are NOT an echo of the whole month: for review only."""
     out = []
@@ -66,13 +86,13 @@ def model_impact(conn, pid, new_pct):
         "SELECT DISTINCT substr(date,1,7) FROM transactions WHERE property_id=? UNION SELECT DISTINCT substr(check_in,1,7) FROM bookings WHERE property_id=? ORDER BY 1", (pid, pid))]
     before = {m: P.dashboard_view(conn, pid, m) for m in months}
     with P.simulate(conn):
-        conn.execute("UPDATE properties SET management_fee_pct=? WHERE id=?", (new_pct, pid))
+        conn.execute("UPDATE properties SET management_fee_pct=?, is_managed=? WHERE id=?", (new_pct, 1 if new_pct else 0, pid))
         after = {m: P.dashboard_view(conn, pid, m) for m in months}
     return [{"month": m, "before": before[m], "after": after[m]} for m in months]
 
 
 def plan_cleanup(conn):
-    actions = {"renames": [], "models": [], "duplicates": [], "left_alone": [], "flags": [], "start_dates": [], "distinct": []}
+    actions = {"renames": [], "models": [], "duplicates": [], "left_alone": [], "flags": [], "start_dates": [], "distinct": [], "pre_start": [], "pre_start_left": []}
     for pid, (name, conf, source, question) in C.CANONICAL_NAMES.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         if not row:
@@ -84,7 +104,7 @@ def plan_cleanup(conn):
     for pid, (model, why) in C.MODEL_DECISIONS.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         if row and _model(row) != model:
-            actions["models"].append({"property_id": pid, "from": _model(row), "from_pct": row["management_fee_pct"], "to": model, "why": why})
+            actions["models"].append({"property_id": pid, "from": _model(row), "from_pct": row["management_fee_pct"], "from_is_managed": row["is_managed"], "to": model, "why": why})
     for pid, (date, why) in C.START_DATES.items():
         row = conn.execute("SELECT * FROM properties WHERE id=?", (pid,)).fetchone()
         if row and row["start_date"] != date:
@@ -93,6 +113,7 @@ def plan_cleanup(conn):
         key = (" ".join(label.lower().split()), round(amount, 2))
         if not conn.execute("SELECT 1 FROM import_distinct WHERE period=? AND label_norm=? AND amount=?", (period, key[0], key[1])).fetchone():
             actions["distinct"].append({"period": period, "label": label, "label_norm": key[0], "amount": key[1], "why": why})
+    actions["pre_start"], actions["pre_start_left"] = pre_start_copies(conn)
     for d in echo_duplicates(conn):
         (actions["duplicates"] if d["match"] else actions["left_alone"]).append(d)
     return actions
@@ -100,7 +121,7 @@ def plan_cleanup(conn):
 
 def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, confirmed duplicate business rows"):
     """Apply a plan_cleanup() result in one transaction, as a batch that undo_batch can reverse."""
-    if not any(actions.get(k) for k in ("renames", "models", "duplicates", "start_dates", "distinct")):
+    if not any(actions.get(k) for k in ("renames", "models", "duplicates", "start_dates", "distinct", "pre_start")):
         return None                                           # nothing to do: no batch, no noise
     cur = conn.execute("INSERT INTO import_batches (filename, file_hash, status, kind, note) VALUES (?,?,?,?,?)",
                        ("cleanup: " + note, "-", "applied", "cleanup", note))
@@ -125,9 +146,11 @@ def apply_cleanup(conn, actions, user="owner", note="property names, NW4 model, 
             _log(conn, bid, "distinct_added", "import_distinct", None, {"period": a["period"], "label_norm": a["label_norm"], "amount": a["amount"]})
         for a in actions["models"]:
             new_pct = None if a["to"] == "operated" else a.get("to_pct")
-            conn.execute("UPDATE properties SET management_fee_pct=? WHERE id=?", (new_pct, a["property_id"]))
-            _log(conn, bid, "property_updated", "properties", None, {"id": a["property_id"], "old": {"management_fee_pct": a["from_pct"]}, "new": {"management_fee_pct": new_pct}})
-        for d in actions["duplicates"]:
+            new_managed = 0 if a["to"] == "operated" else 1
+            conn.execute("UPDATE properties SET management_fee_pct=?, is_managed=? WHERE id=?", (new_pct, new_managed, a["property_id"]))
+            _log(conn, bid, "property_updated", "properties", None, {"id": a["property_id"], "old": {"management_fee_pct": a["from_pct"], "is_managed": a["from_is_managed"]},
+                                                                      "new": {"management_fee_pct": new_pct, "is_managed": new_managed}})
+        for d in actions["duplicates"] + actions["pre_start"]:
             row = conn.execute("SELECT * FROM transactions WHERE id=?", (d["row"]["id"],)).fetchone()
             if row is None:
                 continue

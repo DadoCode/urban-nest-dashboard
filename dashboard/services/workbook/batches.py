@@ -51,7 +51,7 @@ def validation_report(parsed, conn=None):
     missing = []
     mapped = identity.mapping(conn) if conn is not None else {c: {"name": n} for c, (_p, n) in C.PROPERTY_SHEETS.items()}
     for code, info in mapped.items():
-        if code not in parsed["properties"]:
+        if code not in parsed["properties"] and not info.get("main_only"):
             missing.append({"sheet": f"{code}{yy}", "property": info["name"]})
     names = [n.strip().lower() for n in roles]
     duplicates = sorted({n for n in names if names.count(n) > 1})

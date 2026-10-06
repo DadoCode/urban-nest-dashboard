@@ -11,7 +11,7 @@ import db
 import services.kpis as kpis
 import services.reconcile as rc
 import services.sources as src
-from services.common import get_properties, get_property
+from services.common import get_properties, get_property, is_managed
 from routes.expenses import _costs
 
 bp = Blueprint("reconcile", __name__)
@@ -113,7 +113,7 @@ def figure_rows(conn, property_id=None, first=None, last=None):
             c = _counts(conn, p["id"], ym)
             if not any(c.values()) and not kpis.costs(conn, p["id"], s, e):
                 continue
-            managed = bool(p["management_fee_pct"])
+            managed = is_managed(p)
             adj = kpis.adjusted_kpi_snapshot(conn, p["id"], s, e)
             rows.append({
                 "property": p["name"], "model": "managed" if managed else "operated", "ym": ym, "active": active, "explicit": explicit,

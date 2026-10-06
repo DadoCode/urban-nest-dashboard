@@ -204,11 +204,11 @@ def business_income(conn, property_id, start, end):
     (property_id=None) sums this per flat rather than netting on the total,
     since owned and managed flats are computed differently."""
     if property_id:
-        row = conn.execute("SELECT management_fee_pct, type FROM properties WHERE id=?", (property_id,)).fetchone()
+        row = conn.execute("SELECT management_fee_pct, is_managed, type FROM properties WHERE id=?", (property_id,)).fetchone()
         if not row or row["type"] == "overhead":
             return 0.0
         fee = row["management_fee_pct"]
-        if fee:
+        if fee or row["is_managed"]:
             recorded = conn.execute(
                 """SELECT COALESCE(SUM(amount),0) FROM transactions
                    WHERE property_id=? AND direction='expense' AND category='management_fee' AND date>=? AND date<?""",
@@ -216,7 +216,7 @@ def business_income(conn, property_id, start, end):
             ).fetchone()[0]
             if recorded:
                 return recorded
-            return revenue(conn, property_id, start, end) * fee / 100
+            return revenue(conn, property_id, start, end) * fee / 100 if fee else 0.0      # no % known: never estimate
         return net_profit(conn, property_id, start, end)
     total = 0.0
     for p in conn.execute("SELECT id FROM properties WHERE type='flat'"):
@@ -233,9 +233,9 @@ def adjusted_revenue(conn, property_id, start, end):
     rather than scaling one combined total, since owned and managed flats
     aren't adjusted by the same factor."""
     if property_id:
-        row = conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (property_id,)).fetchone()
-        fee = row["management_fee_pct"] if row else None
-        return business_income(conn, property_id, start, end) if fee else revenue(conn, property_id, start, end)
+        row = conn.execute("SELECT management_fee_pct, is_managed FROM properties WHERE id=?", (property_id,)).fetchone()
+        managed = bool(row and (row["management_fee_pct"] or row["is_managed"]))
+        return business_income(conn, property_id, start, end) if managed else revenue(conn, property_id, start, end)
     return sum(adjusted_revenue(conn, p["id"], start, end) for p in conn.execute("SELECT id FROM properties WHERE type='flat'"))
 
 

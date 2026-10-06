@@ -53,8 +53,8 @@ def create_property(conn, prop, batch_id):
     if conn.execute("SELECT 1 FROM properties WHERE code=?", (code,)).fetchone():
         code = pid.upper()[:10]
     pct = prop["pct"] if prop["model"] == "managed" else None
-    conn.execute("INSERT INTO properties (id, code, name, address, type, management_fee_pct) VALUES (?,?,?,?,'flat',?)",
-                 (pid, code, prop["name"], prop["name"], pct))
+    conn.execute("INSERT INTO properties (id, code, name, address, type, management_fee_pct, is_managed) VALUES (?,?,?,?,'flat',?,?)",
+                 (pid, code, prop["name"], prop["name"], pct, 1 if prop["model"] == "managed" else 0))
     seed_defaults(conn, pid)
     _log(conn, batch_id, "property_created", "properties", None, {"id": pid, "code": code, "name": prop["name"], "model": prop["model"], "pct": pct})
     conn.execute("INSERT OR IGNORE INTO workbook_sheet_map (sheet_code, property_id, source) VALUES (?,?,?)",
@@ -94,8 +94,8 @@ def write_changes(conn, item, batch_id, ym):
             row["id"] = _insert(conn, "transactions", _TX_COLS, row)
             _log(conn, batch_id, "added", "transactions", row["id"], row)
             added += 1
-    if pid == P.BUSINESS_ID:
-        return added, removed
+    if pid == P.BUSINESS_ID or item.get("main_only") or item.get("pre_opening"):
+        return added, removed          # no bookings to write: Main-Page-only properties and pre-opening costs have none
     # monthly aggregate: the workbook's Days Booked, stored the way the history stores it
     _tx, agg = P.current_rows(conn, pid, ym)
     days = int(item.get("days") or 0)
@@ -307,11 +307,26 @@ def undo_batch(conn, batch_id, user="owner"):
 def verify_item(conn, parsed, code, ym):
     """WORKBOOK = IMPORTED LEDGER = DASHBOARD KPI, for one property-month, after an import."""
     pid = P.pid_for(conn, parsed, code)
-    prop = parsed["properties"][code]
-    summary = prop["summary"].get(ym, {})
     s, e = P.bounds(ym)
     view = P.dashboard_view(conn, pid, ym)
     q = lambda sql, *a: conn.execute(sql, a).fetchone()[0] or 0.0
+    if code not in parsed["properties"]:                   # Main-Page-only property: the only thing the workbook records is its fee
+        fee = parsed["main"]["months"].get(ym, {}).get("fees", {}).get(code)
+        led = q(f"SELECT SUM(amount) FROM transactions WHERE property_id=? AND direction='expense' AND category='management_fee' AND date>=? AND date<? AND source IN {P._AGG_IN}", pid, s, e)
+        agree = fee is not None and abs(led - fee) <= C.TOLERANCE and abs(view["management_fee"] - fee) <= C.TOLERANCE
+        return {"code": code, "property_id": pid, "model": view["model"], "rows": [
+            {"metric": "Management fee earned (Main Page only)", "workbook": fee, "ledger": led, "dashboard": view["management_fee"],
+             "status": "NO CONTROL" if fee is None else ("PASS" if agree else "REVIEW"), "gating": fee is not None and not agree, "note": "no sheet: nothing else is recorded or imported"}]}
+    prop = parsed["properties"][code]
+    summary = prop["summary"].get(ym, {})
+    starts = (conn.execute("SELECT start_date FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0]
+    if starts and ym < starts[:7]:                        # pre-opening month: costs only, the property is not active
+        wb_costs = sum((prop[b].get(ym, {}).get("total") or 0) for b in ("opex", "capex"))
+        led_costs = q(f"SELECT SUM(amount) FROM transactions WHERE property_id=? AND direction='expense' AND date>=? AND date<? AND source IN {P._AGG_IN}", pid, s, e)
+        ok = abs(led_costs - wb_costs) <= C.TOLERANCE and abs(view["property_costs"] - wb_costs) <= C.TOLERANCE
+        return {"code": code, "property_id": pid, "model": view["model"], "rows": [
+            {"metric": "Pre-opening costs", "workbook": round(wb_costs, 4), "ledger": led_costs, "dashboard": view["property_costs"], "status": "PASS" if ok else "REVIEW",
+             "gating": not ok, "note": f"not active until {starts}: no revenue, occupancy or profit is expected"}]}
     ledger_income = q(f"SELECT SUM(amount) FROM transactions WHERE property_id=? AND direction='income' AND date>=? AND date<? AND source IN {P._AGG_IN}", pid, s, e)
     ledger_costs = q(f"SELECT SUM(amount) FROM transactions WHERE property_id=? AND direction='expense' AND category!='management_fee' AND date>=? AND date<? AND source IN {P._AGG_IN}", pid, s, e)
     ledger_fee = q(f"SELECT SUM(amount) FROM transactions WHERE property_id=? AND direction='expense' AND category='management_fee' AND date>=? AND date<? AND source IN {P._AGG_IN}", pid, s, e)

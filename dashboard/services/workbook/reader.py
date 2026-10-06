@@ -228,9 +228,15 @@ def read_block(sheet, header_row, end_row, months, issues, scope, year):
         total_row = _block_total_row(sheet, lc, vc, header_row + 1, end_row)
         stop = total_row if total_row else end_row + 1
         counted = _coeffs(sheet.formula(total_row, vc), vc) if total_row else None   # rows the block's own SUM counts
-        items = []
+        items, excluded = [], []
         for r in range(header_row + 1, stop):
             label = sheet.value(r, lc)
+            if label is not None and counted is not None and counted.get(r, 0) <= 0 and sheet.cells.get((r, vc)) is not None:
+                # a labelled row the block's OWN total does not count: the workbook does not treat it as part of the month
+                amount = read_amount(sheet, r, vc, issues, scope, key, what=render_label(label)[:20])
+                if amount is not None:
+                    excluded.append({"label": render_label(label), "amount": round(amount, 4), "ref": sheet.ref(r, vc)})
+                continue
             if label is None:
                 # an amount with no label that the block's own total counts is real money: keep it, visibly
                 if counted and counted.get(r, 0) > 0 and _is_number(sheet.value(r, vc)):
@@ -246,7 +252,7 @@ def read_block(sheet, header_row, end_row, months, issues, scope, year):
             items.append({"label": render_label(label), "amount": round(amount, 4), "ref": sheet.ref(r, vc)})
         total = read_amount(sheet, total_row, vc, issues, scope, key, "block total") if total_row else None
         out[key] = {"items": items, "total": None if total is None else round(total, 4),
-                    "total_ref": sheet.ref(total_row, vc) if total_row else None}
+                    "total_ref": sheet.ref(total_row, vc) if total_row else None, "excluded": excluded}
     return out
 
 
@@ -443,7 +449,7 @@ def parse_main(sheet, year, issues):
             amount = read_amount(sheet, r, vc, issues, "MAIN", key, render_label(label)[:20])
             if amount is not None:
                 salaries.append({"label": render_label(label), "amount": round(amount, 4), "ref": sheet.ref(r, vc), "kind": "salary"})
-        out[key] = {"items": biz, "salaries": salaries, "echoes": echoes,
+        out[key] = {"items": biz, "salaries": salaries, "echoes": echoes, "fee_refs": {},
                     "general_total": read_amount(sheet, gen, vc, issues, "MAIN", key, "General") if gen else None,
                     "total": read_amount(sheet, total_row, vc, issues, "MAIN", key, "total") if total_row else None,
                     "fees": {}}
@@ -462,6 +468,7 @@ def parse_main(sheet, year, issues):
                     amount = read_amount(sheet, r, vc, issues, "MAIN", key, "management fee")
                     if amount is not None:
                         out[key]["fees"][code] = round(out[key]["fees"].get(code, 0) + amount, 4)
+                        out[key]["fee_refs"].setdefault(code, sheet.ref(r, vc))
     # which section of the Gross Income block each property sits in (R2R = operated, Management SA = managed): model evidence
     sections = {}
     if inc_head is not None and hdr:

@@ -294,10 +294,12 @@ def ensure_schema():
     for col, ddl in [
         ("ical_url", "TEXT"), ("ical_synced_at", "TEXT"),
         ("type", "TEXT NOT NULL DEFAULT 'flat'"), ("start_date", "TEXT"),
+        ("is_managed", "INTEGER NOT NULL DEFAULT 0"),   # managed for an owner even when the fee % is not known yet
         ("management_fee_pct", "REAL"),  # NULL/0 = fully owned; e.g. 15 = a manager keeps 85%, this business earns 15% of revenue
     ]:
         if col not in existing_cols:
             conn.execute(f"ALTER TABLE properties ADD COLUMN {col} {ddl}")
+    conn.execute("UPDATE properties SET is_managed=1 WHERE management_fee_pct>0 AND is_managed=0")     # idempotent backfill
     tx_cols = {row["name"] for row in conn.execute("PRAGMA table_info(transactions)")}
     vendor_id_is_new = "vendor_id" not in tx_cols
     for col, ddl in [

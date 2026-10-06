@@ -68,7 +68,7 @@ SEED = [("11-perryfield-way", "11PW", "11 Perryfield Way", 10.0), ("170-miles-bu
         ("crested-court", "CC", "40 Crested Court", 15.0), ("lascar-wharf", "LW", "602 Lascar Wharf", None),
         ("nw4", "NW4", "Flat 3 NW4", 15.0), ("tottenham-court-road", "TCR", "Tottenham Court Road", 15.0)]
 for pid, code, name, fee in SEED:
-    conn.execute("INSERT INTO properties (id, code, name, address, type, management_fee_pct) VALUES (?,?,?,?, 'flat', ?)", (pid, code, name, name, fee))
+    conn.execute("INSERT INTO properties (id, code, name, address, type, management_fee_pct, is_managed) VALUES (?,?,?,?, 'flat', ?, ?)", (pid, code, name, name, fee, 1 if fee else 0))
 conn.execute("INSERT INTO properties (id, code, name, address, type) VALUES ('general-overheads','GEN','Portfolio General Expenses','-','overhead')")
 identity.seed(conn)
 
@@ -336,7 +336,7 @@ check("H NW4 capex rows flagged capex=1 (Sourcing Fee, Furniture)", sorted(r["de
 check("H CC capex 21.27 comes from the breakdown's own formula range", abs(sum(r[0] for r in db.get_conn().execute("SELECT amount FROM transactions WHERE property_id='crested-court' AND date LIKE '2026-09%' AND capex=1")) - 21.27) < 0.001)
 check("H purchases lump replaced by the itemised breakdown (no lump row)", not db.get_conn().execute("SELECT 1 FROM transactions WHERE property_id='crested-court' AND date LIKE '2026-09%' AND lower(description)='purchases' AND source='workbook'").fetchone())
 dr = {ch["metric"]: ch for ch in item(plan, "19Draycott")["checks"]}
-check("H Draycott: block total excludes its fee row -> flagged, never silent", dr["Detail rows vs block totals"]["status"] == "REVIEW")
+check("H Draycott: its fee row sits outside the block's own total -> reported as not counted (never silent)", dr["Rows the workbook's own total does not count"]["status"] == "REVIEW" and "FG Mngmt Fee" in dr["Rows the workbook's own total does not count"]["note"])
 
 # ------------------------------------------------------------------ I
 print("I  undo")

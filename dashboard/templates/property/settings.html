@@ -57,12 +57,12 @@
 
   {% call section("Model", "What this business actually earns from " ~ prop.name) %}
   <div class="card">
-    {% if fee_pct %}
-      <p class="note" style="margin-top:0">This property is managed for an owner. Urban Nest earns the agreed management fee -- currently <strong>{{ '%g'|format(fee_pct) }}%</strong> of {{ prop.name }}'s revenue -- while the remaining booking revenue belongs to the owner.</p>
+    {% if managed %}
+      <p class="note" style="margin-top:0">This property is managed for an owner. Urban Nest earns the agreed management fee -- {% if fee_pct %}currently <strong>{{ '%g'|format(fee_pct) }}%</strong> of {{ prop.name }}'s revenue{% else %}<strong>the fee percentage is not set yet</strong>, so only recorded fees count and nothing is estimated{% endif %} -- while the remaining booking revenue belongs to the owner.</p>
     {% else %}
       <p class="note" style="margin-top:0">This property is operated directly by Urban Nest. Urban Nest records the full property revenue and the property's direct operating costs.</p>
     {% endif %}
-    <form method="post" action="{{ url_for('properties.save_ownership', property_id=prop.id) }}" x-data="{ kind: '{{ 'managed' if fee_pct else 'owned' }}' }">
+    <form method="post" action="{{ url_for('properties.save_ownership', property_id=prop.id) }}" x-data="{ kind: '{{ 'managed' if managed else 'owned' }}' }">
       <p class="note" style="margin:0 0 6px">To change this property's model:</p>
       <div style="display:flex; gap:var(--s5); margin-bottom:var(--s3)">
         <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="owned" x-model="kind" style="width:auto"> Operated by Urban Nest</label>

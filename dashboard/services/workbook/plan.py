@@ -116,7 +116,7 @@ def identity_map(conn, parsed):
     mapped = identity.mapping(conn)
     out = {}
     for code, m in mapped.items():
-        out[code] = {"pid": m["pid"], "name": m["name"], "exists": m["exists"], "candidate": False}
+        out[code] = {"pid": m["pid"], "name": m["name"], "exists": m["exists"], "candidate": False, "main_only": m.get("main_only", False)}
     for code, prop in parsed["properties"].items():
         if code not in out:
             name = _clean_title(prop.get("title"), code)
@@ -131,17 +131,21 @@ def identity_map(conn, parsed):
             out[code] = {"pid": db.unique_slug(conn, db.slugify(name)), "name": name, "exists": False, "candidate": True,
                          "name_source": "the sheet's title cell (not confirmed)"}
     for code, info in out.items():
-        if not info["exists"] and code in parsed["properties"]:
-            aliases = [info["name"], code, *C.PROPERTY_ALIASES.get(code, [])]
+        if not info["exists"] and (code in parsed["properties"] or info.get("main_only")):
+            cfg = C.MAIN_ONLY_PROPERTIES.get(code)
+            aliases = [info["name"], code, *C.PROPERTY_ALIASES.get(code, []), *(cfg["aliases"] if cfg else [])]
             ev = model_evidence(parsed, code, aliases)
             decided = C.NEW_PROPERTY_DEFAULTS.get(info["pid"])
+            if cfg:
+                decided = {"model": cfg["model"], "pct": cfg["pct"], "note": "confirmed by you, 6 Oct 2026: " + cfg["note"]}
             if decided:
                 ev = {"model": decided["model"], "pct": decided["pct"], "evidence": ev["evidence"] + [decided["note"]], "confidence": "confirmed"}
             info["proposal"] = {
-                "property_id": info["pid"], "name": info["name"], "sheet": f"{code}{parsed['year'] % 100:02d}", "code": code,
-                "aliases": sorted({code, info["name"], *C.PROPERTY_ALIASES.get(code, [])}),
+                "property_id": info["pid"], "name": info["name"], "sheet": ("Main Page only" if code in C.MAIN_ONLY_PROPERTIES else f"{code}{parsed['year'] % 100:02d}"), "code": code,
+                "aliases": sorted(set(aliases)),
                 "model": ev["model"], "pct": ev["pct"], "evidence": ev["evidence"], "confidence": ev["confidence"],
-                "name_source": info.get("name_source") or "Dado's property list (built into the importer)",
+                "name_source": info.get("name_source") or "confirmed by you, 6 Oct 2026",
+                "pct_unknown_ok": bool(cfg and cfg["pct"] is None), "main_only": bool(cfg),
                 "confirmed": False}
     return out
 
@@ -157,14 +161,14 @@ def _tx(pid, ym, direction, description, amount, category, capex=0, vendor=None,
             "capex": int(capex), "source": "workbook", "source_ref": ref}
 
 
-def desired_property(parsed, code, ym, pid=None):
+def desired_property(parsed, code, ym, pid=None, expenses_only=False):
     """The ledger rows and operating days the workbook asks for, for one property-month."""
     pid = pid or C.PROPERTY_SHEETS[code][0]
     prop = parsed["properties"][code]
     rows, notes = [], []
     detail = (parsed.get("breakdown", {}).get(code) or {}).get(ym)
     has_detail = bool(detail and detail["items"])
-    for item in prop["income"].get(ym, {}).get("items", []):
+    for item in ([] if expenses_only else prop["income"].get(ym, {}).get("items", [])):
         rows.append(_tx(pid, ym, "income", item["label"], item["amount"], "booking_income", 0, None, item["ref"]))
     for block, capex in (("opex", 0), ("capex", 1)):
         for item in prop[block].get(ym, {}).get("items", []):
@@ -176,7 +180,7 @@ def desired_property(parsed, code, ym, pid=None):
         for item in detail["items"]:
             rows.append(_tx(pid, ym, "expense", item["description"] or item["vendor"] or "purchase", item["amount"],
                             "purchase", int(item["capex"]), item["vendor"], item["ref"]))
-    fee_main = parsed["main"]["months"].get(ym, {}).get("fees", {}).get(code)
+    fee_main = None if expenses_only else parsed["main"]["months"].get(ym, {}).get("fees", {}).get(code)
     if fee_main and not any(r["category"] == "management_fee" for r in rows):
         # the sheet has no fee row but the Main Page records the month's fee: record it, so Management Fee Earned is the
         # workbook's figure rather than the property's percentage applied to income
@@ -185,8 +189,8 @@ def desired_property(parsed, code, ym, pid=None):
         rows.append(fee)
         notes.append("management fee taken from the Main Page (the property sheet has no fee row)")
     summary = prop["summary"].get(ym, {})
-    days, derived = summary.get("days"), False
-    if days is None and summary.get("occupancy"):
+    days, derived = (None if expenses_only else summary.get("days")), False
+    if days is None and summary.get("occupancy") and not expenses_only:
         days, derived = round(summary["occupancy"] * days_in(ym)), True
         notes.append(f"Days Booked blank; derived {days} from occupancy")
     return {"rows": rows, "days": days, "days_derived": derived, "notes": notes, "has_detail": has_detail}
@@ -289,14 +293,14 @@ def diff_rows(current, desired):
 def dashboard_view(conn, pid, ym):
     """The figures the dashboard itself shows for a property-month, from the real KPI code."""
     s, e = bounds(ym)
-    prop = conn.execute("SELECT type, management_fee_pct FROM properties WHERE id=?", (pid,)).fetchone()
+    prop = conn.execute("SELECT type, management_fee_pct, is_managed FROM properties WHERE id=?", (pid,)).fetchone()
     expense = lambda cond="": conn.execute(
         f"SELECT COALESCE(SUM(amount),0) FROM transactions WHERE property_id=? AND direction='expense' AND date>=? AND date<? {cond}",
         (pid, s, e)).fetchone()[0]
     if prop and prop["type"] == "overhead":
         return {"model": "business", "business_costs": _r2(expense()), "revenue": 0.0, "property_costs": 0.0, "management_fee": 0.0,
                 "days": 0, "occupancy": 0.0, "profit": 0.0, "total_expenses": _r2(expense())}
-    managed = bool(prop and prop["management_fee_pct"])
+    managed = bool(prop and (prop["management_fee_pct"] or prop["is_managed"]))
     snap = kpis.adjusted_kpi_snapshot(conn, pid, s, e)
     return {
         "model": "managed" if managed else "operated",
@@ -350,7 +354,8 @@ def _gates(check):
     return check["status"] == "REVIEW" or (check["status"] == "NO CONTROL" and check.get("gating", True))
 
 
-def reconcile_property(parsed, code, ym, want, conn=None, pid=None, pct=None):
+def reconcile_property(parsed, code, ym, want, conn=None, pid=None, pct=None, managed=None):
+    managed = bool(pct) if managed is None else managed
     prop = parsed["properties"][code]
     summary = prop["summary"].get(ym, {})
     rows = want["rows"]
@@ -407,14 +412,20 @@ def reconcile_property(parsed, code, ym, want, conn=None, pid=None, pct=None):
         checks.append({"metric": "Management fee rate", "workbook": round(rate / 100, 4), "imported": round(pct / 100, 4), "diff": round((rate - pct) / 100, 4),
                        "status": "PASS" if abs(rate - pct) <= 0.05 else "REVIEW", "fmt": "pct", "gating": True,
                        "note": f"the fee is {rate:.2f}% of the imported income; the property's setting is {pct:g}%"})
-    elif fee_wb and not sheet_fee and not pct:
+    elif fee_wb and not sheet_fee and not managed:
         checks.append({"metric": "Management fee", "workbook": fee_wb, "imported": 0.0, "diff": -fee_wb, "status": "REVIEW", "fmt": "money", "gating": True,
                        "note": "Main Page lists a fee but the property has no management model"})
-    elif pct and inc > 0 and not fee_used:
+    elif managed and pct and inc > 0 and not fee_used:
         checks.append({"metric": "Management model", "workbook": 0.0, "imported": round(inc * pct / 100, 4), "diff": round(inc * pct / 100, 4),
                        "status": "REVIEW", "fmt": "money", "gating": True,
                        "note": f"the dashboard models this property as managed at {pct:g}% and would show a fee of {inc * pct / 100:.2f}, "
                                "but the workbook records no management fee for it"})
+    # labelled rows the workbook's own total does not count are not imported: say so, with the money
+    skipped = [(b, e) for b in ("opex", "capex", "income") for e in prop[b].get(ym, {}).get("excluded", [])]
+    if skipped:
+        checks.append({"metric": "Rows the workbook's own total does not count", "workbook": None, "imported": 0.0, "diff": round(sum(e["amount"] for _b, e in skipped), 4),
+                       "status": "REVIEW", "fmt": "money", "gating": True,
+                       "note": "not imported (outside the block's own SUM): " + "; ".join(f"{e['label']} {e['amount']:.2f} ({e['ref']})" for _b, e in skipped)})
     # sign-flipped copy of last month's rows (a reversal / credit, not new spending)
     prev = prev_month(ym)
     prev_items = [(i["label"].strip().lower(), round(i["amount"], 2)) for blk in ("opex", "capex") for i in prop[blk].get(prev, {}).get("items", [])]
@@ -475,84 +486,167 @@ def _counts(diff):
     return c
 
 
+def _starts(conn, info):
+    if not info["exists"]:
+        return None
+    return (conn.execute("SELECT start_date FROM properties WHERE id=?", (info["pid"],)).fetchone() or [None])[0]
+
+
+def _apply_confirmation(info, confirm, item):
+    """The NEW PROPERTY proposal, overlaid with what the person submitted (strictly: a cleared box is not a default)."""
+    prop = dict(info["proposal"])
+    c = (confirm or {}).get(info["pid"])
+    if c:
+        prop["name"] = (c.get("name") or prop["name"]).strip()
+        prop["model"] = c.get("model") or None
+        prop["pct"] = c.get("pct")
+        prop["confirmed"] = bool(prop["name"] and prop["model"] in ("managed", "operated")
+                                 and (prop["model"] == "operated" or prop["pct"] or prop.get("pct_unknown_ok")))
+        item["name"] = prop["name"]
+    item["new_property"] = prop
+    return prop
+
+
+def _new_property_reasons(item):
+    prop = item["new_property"]
+    item["reasons"].append("NEW PROPERTY DETECTED. Nothing is created until you confirm and apply.")
+    if not prop["model"]:
+        item["reasons"].append("The workbook does not say whether this is managed or operated: choose below.")
+    elif prop["model"] == "managed" and not prop["pct"]:
+        if prop.get("pct_unknown_ok"):
+            item["reasons"].append("The management fee percentage is not in the workbook, so none is invented: it is created as managed with NO percentage "
+                                   "(only recorded fees count; nothing is estimated). Configuration still needed: its fee %.")
+        else:
+            item["reasons"].append("It looks managed, but no fee percentage can be read from the workbook: enter it below.")
+
+
+def _plan_main_only(conn, parsed, code, ym, info, confirm):
+    """A managed property that exists only on the Main Page: import what the Main Page actually records (its management fee) and nothing else."""
+    pid, name = info["pid"], info["name"]
+    item = {"code": code, "property_id": pid, "name": name, "sheet": "Main Page only", "main_only": True, "reasons": [], "rows": [], "checks": [], "counts": {},
+            "current": None, "after": None, "days": None, "bookings": {}, "new_property": None}
+    fee = parsed["main"]["months"].get(ym, {}).get("fees", {}).get(code)
+    ref = parsed["main"]["months"].get(ym, {}).get("fee_refs", {}).get(code)
+    rows = []
+    if fee:
+        rows.append(_tx(pid, ym, "expense", "Management fee (Main Page)", fee, "management_fee", 0, None, ref))
+    exists = info["exists"]
+    cur_tx = current_rows(conn, pid, ym)[0] if exists else []
+    if not exists:
+        prop = _apply_confirmation(info, confirm, item)
+    diff = diff_rows(cur_tx, rows)
+    item["rows"], item["counts"] = diff, _counts(diff)
+    item["change_count"] = item["counts"]["NEW"] + item["counts"]["CHANGED"] + item["counts"]["REMOVED"]
+    item["checks"] = [
+        {"metric": "Management fee", "workbook": fee, "imported": round(sum(r["amount"] for r in rows), 4), "diff": 0.0 if fee else None,
+         "status": "PASS" if fee else "NO CONTROL", "fmt": "money", "gating": False,
+         "note": "the amount the Main Page records for this month" if fee else "the Main Page records no fee for this month"},
+        {"metric": "Fee percentage", "workbook": None, "imported": None, "diff": None, "status": "NO CONTROL", "fmt": "pct", "gating": False,
+         "note": "not established by the workbook, so none is assumed. Configuration still needed (Settings, or when the property is created)."},
+    ]
+    item["reasons"].append("MAIN PAGE ONLY: this property has no sheet of its own. Only its recorded management fee is imported; no income, costs, bookings, "
+                           "days or occupancy are invented.")
+    item["workbook"] = {"revenue": None, "property_costs": None, "management_fee": fee, "days": None, "occupancy": None, "profit": fee}
+    if not rows and not cur_tx:
+        item["status"] = "no_activity"
+        item["new_property"] = None                        # nothing in this month: nothing to propose
+        return item
+    item["flagged"] = False
+    item["status"] = "ok"
+    if not exists:
+        item["status"] = "new_property"
+        _new_property_reasons(item)
+    elif item["change_count"] == 0:
+        item["status"] = "unchanged"
+    return item
+
+
 def _plan_item(conn, parsed, code, ym, ident, confirm=None):
     info = ident[code]
     pid, name = info["pid"], info["name"]
+    if info.get("main_only") and code not in parsed["properties"]:
+        return _plan_main_only(conn, parsed, code, ym, info, confirm)
     item = {"code": code, "property_id": pid, "name": name, "sheet": f"{code}{parsed['year'] % 100:02d}", "reasons": [], "rows": [],
             "checks": [], "counts": {}, "current": None, "after": None, "days": None, "bookings": {}, "new_property": None}
     if code not in parsed["properties"]:
         item.update(status="missing_sheet")
         item["reasons"].append(f"The workbook has no {item['sheet']} sheet -- this property is left exactly as it is.")
         return item
-    if info["exists"]:
-        starts = (conn.execute("SELECT start_date FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0]
-        if starts and ym < starts[:7]:
-            n = sum(len(parsed["properties"][code][b].get(ym, {}).get("items", [])) for b in ("opex", "capex", "income"))
+    starts = _starts(conn, info)
+    pre_opening = bool(starts and ym < starts[:7])
+    if pre_opening:
+        prop_data = parsed["properties"][code]
+        costs = sum(len(prop_data[b].get(ym, {}).get("items", [])) for b in ("opex", "capex"))
+        income_rows = len(prop_data["income"].get(ym, {}).get("items", []))
+        if not costs:
             item.update(status="not_active", starts=starts)
             item["reasons"].append(f"NOT ACTIVE: {name} joined the portfolio on {starts}. This month is out of scope, so nothing is expected, imported, flagged or removed"
-                                   + (f" (the workbook has {n} row(s) for it, which are not imported)." if n else "."))
+                                   + (f" (the workbook has {income_rows} income row(s) for it, which are not imported)." if income_rows else "."))
             return item
+        item["pre_opening"] = True
+        item["starts"] = starts
     errors = [i for i in _issues_for(parsed, code, ym) if i["level"] == "error"]
     if errors:
         item.update(status="error")
         item["reasons"] += [i["message"] for i in errors]
         return item
-    want = desired_property(parsed, code, ym, pid)
+    want = desired_property(parsed, code, ym, pid, expenses_only=pre_opening)
     summary = parsed["properties"][code]["summary"].get(ym, {})
     occ, days = summary.get("occupancy"), want["days"]
     problems = []
-    if occ is not None and (occ < 0 or occ > 1.0001):
-        problems.append(f"Occupancy {occ:.0%} is outside 0-100%.")
-    if days is not None and days < 0:
-        problems.append(f"Days Booked is negative ({days}).")
-    if days is not None and days > days_in(ym):
-        problems.append(f"Days Booked ({days}) is more than the days in the month ({days_in(ym)}).")
-    if days is not None and float(days) != int(days):
-        problems.append(f"Days Booked ({days}) is not a whole number.")
+    if not pre_opening:
+        if occ is not None and (occ < 0 or occ > 1.0001):
+            problems.append(f"Occupancy {occ:.0%} is outside 0-100%.")
+        if days is not None and days < 0:
+            problems.append(f"Days Booked is negative ({days}).")
+        if days is not None and days > days_in(ym):
+            problems.append(f"Days Booked ({days}) is more than the days in the month ({days_in(ym)}).")
+        if days is not None and float(days) != int(days):
+            problems.append(f"Days Booked ({days}) is not a whole number.")
     if problems:
         item.update(status="error")
         item["reasons"] += problems
         return item
     exists = info["exists"]
-    pct = None
+    pct, managed = None, False
     if exists:
-        pct = (conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (pid,)).fetchone() or [None])[0]
+        pr = conn.execute("SELECT management_fee_pct, is_managed FROM properties WHERE id=?", (pid,)).fetchone()
+        pct, managed = (pr["management_fee_pct"], bool(pr["management_fee_pct"] or pr["is_managed"])) if pr else (None, False)
         cur_tx, cur_agg = current_rows(conn, pid, ym)
     else:
-        prop = dict(info["proposal"])
-        c = (confirm or {}).get(pid)
-        if c:
-            prop["name"] = (c.get("name") or prop["name"]).strip()
-            prop["model"] = c.get("model") or None             # what was submitted, strictly: a cleared box is not a default
-            prop["pct"] = c.get("pct")
-            prop["confirmed"] = bool(prop["name"] and prop["model"] in ("managed", "operated") and (prop["model"] == "operated" or prop["pct"]))
-            item["name"] = prop["name"]
-        item["new_property"] = prop
+        prop = _apply_confirmation(info, confirm, item)
         pct = prop["pct"] if prop["model"] == "managed" else None
+        managed = prop["model"] == "managed"
         cur_tx, cur_agg = [], []
     diff = diff_rows(cur_tx, want["rows"])
     item["rows"], item["counts"] = diff, _counts(diff)
-    item["checks"] = reconcile_property(parsed, code, ym, want, conn, pid, pct)
-    item["days"], item["notes"] = days or 0, want["notes"]
+    checks = reconcile_property(parsed, code, ym, want, conn, pid, pct, managed)
+    if pre_opening:
+        keep = ("Opex", "Capex", "Total costs", "Detail rows vs block totals", "Rows the workbook's own total does not count", "Purchases detail vs sheet lump",
+                "Breakdown subtotals vs rows")
+        checks = [ch for ch in checks if ch["metric"] in keep]
+    item["checks"] = checks
+    item["days"], item["notes"] = (0 if pre_opening else (days or 0)), want["notes"]
     item["bookings"] = {"current_nights": agg_nights(cur_agg), "workbook_nights": int(days or 0)}
-    item["bookings"]["changed"] = item["bookings"]["current_nights"] != item["bookings"]["workbook_nights"]
+    item["bookings"]["changed"] = False if pre_opening else item["bookings"]["current_nights"] != item["bookings"]["workbook_nights"]
     changed = item["counts"]["NEW"] + item["counts"]["CHANGED"] + item["counts"]["REMOVED"]
     item["change_count"] = changed + (1 if item["bookings"]["changed"] else 0)
-    item["workbook"] = workbook_view(parsed, code, ym, want, bool(pct))
+    item["workbook"] = workbook_view(parsed, code, ym, want, managed)
+    if pre_opening:
+        n = len(parsed["properties"][code]["income"].get(ym, {}).get("items", []))
+        item["reasons"].append(f"PRE-OPENING COSTS: {name} joined the portfolio on {starts}. Only costs are imported for this month; the property stays NOT ACTIVE "
+                               "for revenue, occupancy and data health."
+                               + (f" {n} income row(s) in the workbook before the start date are not imported." if n else ""))
     if not want["rows"] and not (days or 0) and not cur_tx and not cur_agg:
         item["status"] = "no_activity"
+        item["new_property"] = None
         return item
     item["flagged"] = any(_gates(ch) for ch in item["checks"])
     item["status"] = "review" if item["flagged"] else "ok"
     if not exists:
         item["status"] = "new_property"
-        item["reasons"].append("NEW PROPERTY DETECTED. Nothing is created until you confirm and apply.")
-        prop = item["new_property"]
-        if not prop["model"]:
-            item["reasons"].append("The workbook does not say whether this is managed or operated: choose below.")
-        elif prop["model"] == "managed" and not prop["pct"]:
-            item["reasons"].append("It looks managed, but no fee percentage can be read from the workbook: enter it below.")
-        if any(_gates(ch) for ch in item["checks"]):
+        _new_property_reasons(item)
+        if item["flagged"]:
             item["reasons"].append("Some checks are flagged (see the details).")
     elif not want["rows"] and (cur_tx or cur_agg):
         item["status"] = "review"
@@ -585,7 +679,7 @@ def plan_month(conn, parsed, ym, with_after=True, excluded=None, confirm=None, d
             item["current"] = dashboard_view(conn, item["property_id"], ym) if exists else None
             new = item["new_property"]
             simulate_it = with_after and (item["status"] in ("ok", "review") or (
-                item["status"] == "new_property" and new["model"] in ("managed", "operated") and (new["model"] == "operated" or new["pct"])))
+                item["status"] == "new_property" and new["model"] in ("managed", "operated") and (new["model"] == "operated" or new["pct"] or new.get("pct_unknown_ok"))))
             if simulate_it:
                 with simulate(conn):
                     A.write_changes(conn, item, None, ym)
@@ -649,15 +743,27 @@ def month_overview(conn, parsed):
             continue
         changed, props, new = 0, [], []
         for code, info in ident.items():
+            if info.get("main_only") and code not in parsed["properties"]:
+                fee = parsed["main"]["months"].get(ym, {}).get("fees", {}).get(code)
+                rows = [_tx(info["pid"], ym, "expense", "Management fee (Main Page)", fee, "management_fee", 0)] if fee else []
+                d = _counts(diff_rows(current_rows(conn, info["pid"], ym)[0] if info["exists"] else [], rows))
+                n = d["NEW"] + d["CHANGED"] + d["REMOVED"]
+                if n:
+                    changed += n
+                    props.append(info["name"])
+                    if not info["exists"]:
+                        new.append(info["name"])
+                continue
             if code not in parsed["properties"]:
                 continue
             starts = (conn.execute("SELECT start_date FROM properties WHERE id=?", (info["pid"],)).fetchone() or [None])[0] if info["exists"] else None
-            if starts and ym < starts[:7]:
-                continue                                    # not active yet: nothing to import
-            want = desired_property(parsed, code, ym, info["pid"])
+            pre = bool(starts and ym < starts[:7])
+            if pre and not any(parsed["properties"][code][b].get(ym, {}).get("items") for b in ("opex", "capex")):
+                continue                                    # not active yet and no pre-opening costs: nothing to import
+            want = desired_property(parsed, code, ym, info["pid"], expenses_only=pre)
             cur_tx, cur_agg = ([], []) if not info["exists"] else current_rows(conn, info["pid"], ym)
             d = _counts(diff_rows(cur_tx, want["rows"]))
-            n = d["NEW"] + d["CHANGED"] + d["REMOVED"] + (1 if agg_nights(cur_agg) != int(want["days"] or 0) else 0)
+            n = d["NEW"] + d["CHANGED"] + d["REMOVED"] + (1 if (not pre and agg_nights(cur_agg) != int(want["days"] or 0)) else 0)
             if n:
                 changed += n
                 props.append(info["name"])

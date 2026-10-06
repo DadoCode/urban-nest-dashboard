@@ -59,7 +59,16 @@ MAIN_SUBTOTAL_LABEL = "general"          # the sum of the itemised rows above it
 # Labels in the Gross Income block -> the property whose management fee they carry (control totals only).
 MAIN_FEE_LABELS = {
     "170": "170E", "175": "175E", "w8": "W8", "crested court": "CC", "tottenham": "TCR",
-    "11 pw": "11PW", "22 pw": "22PW", "draycott": "19Draycott",
+    "11 pw": "11PW", "22 pw": "22PW", "draycott": "19Draycott", "forest gate": "FG",
+}
+
+# Managed properties that appear ONLY on the Main Page (no property sheet of their own yet). They can be created and
+# updated from what the Main Page actually records (its management fee), and nothing is invented: no income, costs,
+# bookings, days or occupancy, and no fee percentage unless the workbook establishes one.
+MAIN_ONLY_PROPERTIES = {
+    "FG": {"pid": "forest-gate", "name": "29 Station Road, Forest Gate, London, E7 0ES", "model": "managed", "pct": None,
+           "aliases": ["Forest gate", "Forest Gate", "29 Station Road", "29 Station Road Forest Gate", "FG"],
+           "note": "separate from S10 / 44 Spooner Road (confirmed by you, 6 Oct 2026)"},
 }
 
 # ------------------------------------------------------------------ categories
@@ -127,6 +136,7 @@ CANONICAL_NAMES = {
     "11-perryfield-way":    ("Flat 11, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", "high", "confirmed by you, 6 Oct 2026", None),
     "22-perryfield-way":    ("Flat 22, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", "high", "confirmed by you, 6 Oct 2026", None),
     "19-draycott-ave":      ("Flat 1, 19 Draycott Avenue, Chelsea, London, SW3 3BS", "high", "confirmed by you, 6 Oct 2026", None),
+    "forest-gate":          ("29 Station Road, Forest Gate, London, E7 0ES", "high", "confirmed by you, 6 Oct 2026; your website's Forest Gate page", None),
     "44-spooner-road":      ("44 Spooner Road", "low", "dashboard name + workbook sheet title only",
                              "No full address was given for 44 Spooner Road (S10), and it is not on your website. It is NOT the Forest Gate property: the Main Page lists "
                              "'Forest gate' (managed) and S10 (rent-to-rent) separately, and your site has a separate Forest Gate page."),
@@ -137,6 +147,10 @@ CANONICAL_NAMES = {
 NEW_PROPERTY_DEFAULTS = {
     "22-perryfield-way": {"model": "managed", "pct": 15.0, "note": "confirmed by you, 6 Oct 2026: managed at 15%"},
 }
+
+# Properties whose income dated BEFORE their start date came from an earlier wrong sync (you confirmed this for NW4). Only rows
+# that are exact copies of another property's rows are removed; anything without a twin is left and reported.
+PRE_START_DUPLICATE_CLEANUP = {"nw4"}
 
 # The first day a property is part of the portfolio. Earlier periods are NOT ACTIVE / out of scope (not zero, not missing).
 START_DATES = {

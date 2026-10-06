@@ -82,6 +82,7 @@
                 <strong>NEW PROPERTY DETECTED</strong> <span class="note">Nothing is created until you tick it and apply. It is created with a permanent id and these identities.</span>
                 <div class="note" style="margin-top:4px">Workbook sheet <strong>{{ np.sheet }}</strong> · id <strong>{{ np.property_id }}</strong> · aliases {{ np.aliases|join(', ') }} · name from {{ np.name_source }}</div>
                 <div class="note">Evidence for the model: {{ np.evidence|join('; ') }}.</div>
+                {% if np.pct_unknown_ok %}<div class="note"><strong>Fee % is not in the workbook, so none is invented.</strong> Leave it blank to create the property as managed with no percentage (only recorded fees count; nothing is estimated). It is flagged as configuration still needed.</div>{% endif %}
                 <div class="filter-bar" style="margin:var(--s2) 0 0">
                   <label class="note">Name <input type="text" name="new_name:{{ it.property_id }}" value="{{ np.name }}" style="min-width:16rem"></label>
                   <label class="note">Model
@@ -90,7 +91,7 @@
                       <option value="managed" {{ 'selected' if np.model == 'managed' }}>Managed (Urban Nest earns a fee)</option>
                       <option value="operated" {{ 'selected' if np.model == 'operated' }}>Operated (rent-to-rent)</option>
                     </select></label>
-                  <label class="note">Fee % <input type="number" step="0.1" min="0" max="100" name="new_pct:{{ it.property_id }}" value="{{ np.pct if np.pct is not none else '' }}" style="width:5rem"></label>
+                  <label class="note">Fee % <input type="number" step="0.1" min="0" max="100" name="new_pct:{{ it.property_id }}" value="{{ np.pct if np.pct is not none else '' }}" placeholder="{{ 'not known' if np.pct_unknown_ok else '' }}" style="width:6rem"></label>
                   <button type="submit" class="secondary" formmethod="get" formaction="{{ url_for('imports.batch', batch_id=batch.id) }}">Refresh preview with these choices</button>
                 </div>
               </div>

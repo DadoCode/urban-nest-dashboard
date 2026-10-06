@@ -30,9 +30,17 @@ def add_alias(conn, property_id, text, kind="name"):
     return True
 
 
+def _configured():
+    """(code, property id, canonical name, aliases, main_only) for every property the importer knows by code."""
+    for code, (pid, name) in C.PROPERTY_SHEETS.items():
+        yield code, pid, name, C.PROPERTY_ALIASES.get(code, []), False
+    for code, cfg in C.MAIN_ONLY_PROPERTIES.items():
+        yield code, cfg["pid"], cfg["name"], cfg["aliases"], True
+
+
 def seed(conn):
     """Idempotent: for every configured property that already exists, store its sheet code, names and aliases."""
-    for code, (pid, name) in C.PROPERTY_SHEETS.items():
+    for code, pid, name, aliases, _main_only in _configured():
         row = conn.execute("SELECT name FROM properties WHERE id=?", (pid,)).fetchone()
         if not row:
             continue
@@ -40,7 +48,7 @@ def seed(conn):
         add_alias(conn, pid, code, "code")
         add_alias(conn, pid, name, "name")
         add_alias(conn, pid, row["name"], "name")
-        for alias in C.PROPERTY_ALIASES.get(code, []):
+        for alias in aliases:
             add_alias(conn, pid, alias, "name")
 
 
@@ -48,12 +56,13 @@ def mapping(conn):
     """{sheet_code: {"pid", "name", "exists"}} -- the database first, then the built-in list for properties
     that are mapped but not (yet) in the dashboard."""
     out = {}
+    main_only = {code for code, *_rest, mo in _configured() if mo}
     for r in conn.execute("""SELECT m.sheet_code, m.property_id, p.name FROM workbook_sheet_map m JOIN properties p ON p.id=m.property_id"""):
-        out[r["sheet_code"]] = {"pid": r["property_id"], "name": r["name"], "exists": True}
-    for code, (pid, name) in C.PROPERTY_SHEETS.items():
+        out[r["sheet_code"]] = {"pid": r["property_id"], "name": r["name"], "exists": True, "main_only": r["sheet_code"] in main_only}
+    for code, pid, name, _aliases, mo in _configured():
         if code not in out:
             exists = bool(conn.execute("SELECT 1 FROM properties WHERE id=?", (pid,)).fetchone())
-            out[code] = {"pid": pid, "name": name, "exists": exists}
+            out[code] = {"pid": pid, "name": name, "exists": exists, "main_only": mo}
     return out
 
 

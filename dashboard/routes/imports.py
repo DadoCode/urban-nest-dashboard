@@ -135,7 +135,7 @@ def _applied(conn, row, parsed, ctx):
     verification = []
     if row["status"] == "applied" and parsed:
         for code, info in P.identity_map(conn, parsed).items():
-            if info["pid"] in after and code in parsed["properties"] and info["exists"]:
+            if info["pid"] in after and (code in parsed["properties"] or info.get("main_only")) and info["exists"]:
                 v = A.verify_item(conn, parsed, code, row["period"])
                 checks = recon.get(info["pid"], [])
                 flagged = [c for c in checks if c["status"] == "REVIEW" or (c["status"] == "NO CONTROL" and c["imported"] not in (0, 0.0, None))]

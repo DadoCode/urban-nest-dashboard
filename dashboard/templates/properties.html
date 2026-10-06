@@ -54,9 +54,12 @@
             {% for r in operated %}
               <tr>
                 <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}<div class="health-inline">{{ health_btn(r) }}</div></td>
+                {% if r.not_active %}<td class="num note" colspan="3" title="This property had not joined the portfolio in this period, so there is no performance to show">Not active in this period</td>
+                {% else %}
                 <td class="num">{{ r.revenue|money }}</td>
                 <td class="num c-secondary">{{ r.profit|money }}</td>
                 <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                {% endif %}
                 {{ health_cell(r) }}
               </tr>
             {% endfor %}
@@ -81,9 +84,12 @@
           <tbody>
             {% for r in managed %}
               <tr>
-                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %} <span class="note" title="Urban Nest earns {{ '%g'|format(r.fee) }}% of this property's booking revenue">· {{ '%g'|format(r.fee) }}% fee</span><div class="health-inline">{{ health_btn(r) }}</div></td>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %} <span class="note" title="Urban Nest earns {{ ('%g%%'|format(r.fee) ~ ' of this') if r.fee else 'the recorded management fee on this' }} property's booking revenue">· {{ ('%g'|format(r.fee) ~ '% fee') if r.fee else 'fee % not set' }}</span><div class="health-inline">{{ health_btn(r) }}</div></td>
+                {% if r.not_active %}<td class="num note" colspan="2" title="This property had not joined the portfolio in this period, so there is no performance to show">Not active in this period</td>
+                {% else %}
                 <td class="num">{{ r.revenue|money }}</td>
                 <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                {% endif %}
                 {{ health_cell(r) }}
               </tr>
             {% endfor %}
