@@ -97,7 +97,7 @@ def snapshot(c):
     parts = []
     for table, order in (("transactions", "id"), ("bookings", "id"), ("booking_source_state", "property_id, month"), ("properties", "id"),
                          ("property_identity_aliases", "alias_norm"), ("workbook_sheet_map", "sheet_code"), ("import_exclusions", "period, source_ref"),
-                         ("import_distinct", "period, label_norm, amount")):
+                         ("import_distinct", "period, label_norm, amount"), ("vendors", "id")):
         parts.append(json.dumps([tuple(r) for r in c.execute(f"SELECT * FROM {table} ORDER BY {order}")], default=str))
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
@@ -106,7 +106,7 @@ def tables(c):
     out = {}
     for table, order in (("transactions", "id"), ("bookings", "id"), ("booking_source_state", "property_id, month"), ("properties", "id"),
                          ("property_identity_aliases", "alias_norm"), ("workbook_sheet_map", "sheet_code"), ("import_exclusions", "period, source_ref"),
-                         ("import_distinct", "period, label_norm, amount"), ("property_data_requirements", "property_id, source_type")):
+                         ("import_distinct", "period, label_norm, amount"), ("property_data_requirements", "property_id, source_type"), ("vendors", "id")):
         out[table] = [tuple(r) for r in c.execute(f"SELECT * FROM {table} ORDER BY {order}")]
     return out
 

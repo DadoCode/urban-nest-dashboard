@@ -75,6 +75,19 @@ def _map_sheet_if_needed(conn, item, batch_id):
         _log(conn, batch_id, "sheet_map_added", "workbook_sheet_map", None, {"sheet_code": code})
 
 
+def _vendor_id(conn, batch_id, name):
+    """The vendor's id; a vendor created by this import is logged so undo can remove it again."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    row = conn.execute("SELECT id FROM vendors WHERE name=?", (name,)).fetchone()
+    if row:
+        return row["id"]
+    vid = vendors.get_or_create_vendor(conn, name)
+    _log(conn, batch_id, "vendor_added", "vendors", vid, {"id": vid, "name": name})
+    return vid
+
+
 def write_changes(conn, item, batch_id, ym):
     """Make the ledger match the workbook for one plan item. Returns how many rows were added/removed."""
     added = removed = 0
@@ -90,7 +103,7 @@ def write_changes(conn, item, batch_id, ym):
         if d["status"] in ("NEW", "CHANGED"):
             row = dict(d["new"])
             row["import_batch_id"] = batch_id
-            row["vendor_id"] = vendors.get_or_create_vendor(conn, row.get("vendor"))
+            row["vendor_id"] = _vendor_id(conn, batch_id, row.get("vendor"))
             row["id"] = _insert(conn, "transactions", _TX_COLS, row)
             _log(conn, batch_id, "added", "transactions", row["id"], row)
             added += 1
@@ -287,6 +300,9 @@ def undo_batch(conn, batch_id, user="owner"):
                 conn.execute("DELETE FROM property_identity_aliases WHERE alias_norm=?", (json.loads(entry["row_json"])["alias_norm"],))
             elif entry["op"] == "sheet_map_added":
                 conn.execute("DELETE FROM workbook_sheet_map WHERE sheet_code=?", (json.loads(entry["row_json"])["sheet_code"],))
+        for entry in log:                                   # vendors this import created, if nothing refers to them any more
+            if entry["op"] == "vendor_added":
+                conn.execute("DELETE FROM vendors WHERE id=? AND NOT EXISTS (SELECT 1 FROM transactions WHERE vendor_id=?)", (entry["row_id"], entry["row_id"]))
         for pid in created:
             for table in ("property_data_requirements", "booking_source_state", "property_identity_aliases", "workbook_sheet_map"):
                 conn.execute(f"DELETE FROM {table} WHERE property_id=?", (pid,))
