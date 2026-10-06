@@ -354,7 +354,7 @@ def _gates(check):
     return check["status"] == "REVIEW" or (check["status"] == "NO CONTROL" and check.get("gating", True))
 
 
-def reconcile_property(parsed, code, ym, want, conn=None, pid=None, pct=None, managed=None):
+def reconcile_property(parsed, code, ym, want, conn=None, pid=None, pct=None, managed=None, pre_opening=False):
     managed = bool(pct) if managed is None else managed
     prop = parsed["properties"][code]
     summary = prop["summary"].get(ym, {})
@@ -364,11 +364,19 @@ def reconcile_property(parsed, code, ym, want, conn=None, pid=None, pct=None, ma
     opex = sum(r["amount"] for r in own if r["direction"] == "expense" and not r["capex"])
     capex = sum(r["amount"] for r in own if r["direction"] == "expense" and r["capex"])
     days = want["days"] or 0
+    ctl_opex, ctl_capex = summary.get("opex"), summary.get("capex")
+    ctl_total = None if summary.get("total_costs") is None else -summary["total_costs"]
+    if pre_opening:             # before the property opened its summary row is blank by design: the blocks' own totals are the controls
+        ob, cb = prop["opex"].get(ym, {}).get("total"), prop["capex"].get(ym, {}).get("total")
+        ctl_opex = ob if ctl_opex is None else ctl_opex
+        ctl_capex = (cb if cb is not None else 0.0) if ctl_capex is None and ob is not None else ctl_capex
+        if ctl_total is None and ob is not None:
+            ctl_total = (ctl_opex or 0) + (ctl_capex or 0)
     checks = [
         _check("Income", summary.get("income"), round(inc, 4)),
-        _check("Opex", summary.get("opex"), round(opex, 4)),
-        _check("Capex", summary.get("capex"), round(capex, 4)),
-        _check("Total costs", None if summary.get("total_costs") is None else -summary["total_costs"], round(opex + capex, 4)),
+        _check("Opex", ctl_opex, round(opex, 4), note="the block's own total (pre-opening: the summary row is blank by design)" if pre_opening and summary.get("opex") is None else ""),
+        _check("Capex", ctl_capex, round(capex, 4)),
+        _check("Total costs", ctl_total, round(opex + capex, 4)),
         _check("Net profit (control)", summary.get("net"), round(inc - opex - capex, 4), note="control only, not imported"),
         _check("Operating profit (control)", summary.get("operating"), round(inc - opex, 4), note="control only, not imported"),
         _check("Days booked", summary.get("days"), days, tol=0, fmt="int", note=("derived from occupancy" if want["days_derived"] else "")),
@@ -622,7 +630,7 @@ def _plan_item(conn, parsed, code, ym, ident, confirm=None):
         cur_tx, cur_agg = [], []
     diff = diff_rows(cur_tx, want["rows"])
     item["rows"], item["counts"] = diff, _counts(diff)
-    checks = reconcile_property(parsed, code, ym, want, conn, pid, pct, managed)
+    checks = reconcile_property(parsed, code, ym, want, conn, pid, pct, managed, pre_opening=pre_opening)
     if pre_opening:
         keep = ("Opex", "Capex", "Total costs", "Detail rows vs block totals", "Rows the workbook's own total does not count", "Purchases detail vs sheet lump",
                 "Breakdown subtotals vs rows")
