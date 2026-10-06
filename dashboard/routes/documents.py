@@ -70,7 +70,7 @@ _DOC_SORTS = {
 def _last_import(conn):
     """The most recently applied workbook import, for the Documents page's primary card."""
     try:
-        row = conn.execute("SELECT id, period, applied_at FROM import_batches WHERE status='applied' ORDER BY id DESC LIMIT 1").fetchone()
+        row = conn.execute("SELECT id, period, applied_at FROM import_batches WHERE status='applied' AND kind='workbook' AND period IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
     except Exception:                       # a demo database that predates the import tables
         return None
     if not row:

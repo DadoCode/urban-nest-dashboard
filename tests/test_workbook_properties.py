@@ -246,6 +246,8 @@ check("...and the refusal wrote nothing", snapshot(c) == snap_clean)
 from app import create_app  # noqa: E402
 
 client = create_app().test_client()
+check("Documents and Import pages load when the ONLY applied batch is the cleanup (no period): the real-database state right after the cleanup",
+      client.get("/documents").status_code == 200 and client.get("/imports").status_code == 200 and client.get("/properties").status_code == 200)
 up = client.post("/imports/upload", data={"workbook": (io.BytesIO(ORIGINAL), "Biz_Accounts_Tracker_2026_Sept_v4.xlsx")}, content_type="multipart/form-data")
 loc = up.headers["Location"]
 bid_e2e = int(loc.rsplit("/", 1)[1])
