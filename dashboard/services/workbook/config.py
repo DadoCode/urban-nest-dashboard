@@ -74,14 +74,15 @@ MAIN_ONLY_PROPERTIES = {
 # ------------------------------------------------------------------ categories
 # Label -> dashboard category, using the vocabulary the Excel history already uses.
 _CATEGORY_RULES = [
-    (r"m(?:a)?n?g?e?m?n?t.*fee|mngm.*fee|management fee|fee.*\(\d+%\)", "management_fee"),
-    (r"cleaning", "cleaning"),
+    # a management fee row: "FG Mngmt Fee (15%)", "Management Fee (15%)", but also "Management Faris 15%" (TCR's sheet has no word "fee")
+    (r"m(?:a)?n?g?e?m?n?t.*fee|mngm.*fee|management fee|fee.*\(\d+%\)|^\s*(?:fg |faris )?manage(?:ment|r)\b|^\s*mngm", "management_fee"),
+    (r"cleaning|\bcleaner\b|\bclean(?:s)?\b", "cleaning"),
     (r"council tax", "council_tax"),
     (r"\b(wifi|wi-fi|broadband|electricity|electric|water|gas|heating)\b", "utilities"),
     (r"\brent\b", "rent"),
     (r"deposit", "deposit"),
     (r"furniture|\btv\b|sofa|mattress", "furniture"),
-    (r"plumber|repair|maintenance|boiler|aircon", "maintenance"),
+    (r"plumb|repair|maintenance|boiler", "maintenance"),
     (r"purchases?|amazon|temu", "purchase"),
 ]
 _BUSINESS_RULES = [
@@ -95,6 +96,8 @@ _BUSINESS_RULES = [
 def categorise(label, business=False):
     text = (label or "").strip().lower()
     for pattern, category in (_BUSINESS_RULES if business else []) + _CATEGORY_RULES:
+        if business and category == "management_fee":
+            continue                    # a management fee is a property-sheet concept; never hide a business cost behind it
         if re.search(pattern, text):
             return category
     return "other"

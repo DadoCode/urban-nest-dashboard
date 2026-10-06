@@ -278,7 +278,9 @@ def diff_rows(current, desired):
                     cur.remove(o)
                     break
 
-    take(lambda o, n: kk(o) == kk(n) and _r2(o["amount"]) == _r2(n["amount"]), "UNCHANGED")
+    # a row is unchanged only if its category matches too: a re-classification (e.g. a management fee that had been booked as a
+    # plain cost) is a real change and must be previewed, not silently kept
+    take(lambda o, n: kk(o) == kk(n) and _r2(o["amount"]) == _r2(n["amount"]) and o["category"] == n["category"], "UNCHANGED")
     take(lambda o, n: kk(o) == kk(n), "CHANGED")
     take(lambda o, n: (o["direction"], int(o["capex"]), _r2(o["amount"])) == (n["direction"], int(n["capex"]), _r2(n["amount"])),
          "UNCHANGED", "label differs; existing row kept")
