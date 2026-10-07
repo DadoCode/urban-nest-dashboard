@@ -105,8 +105,10 @@ check("no documents uploaded and none required: nothing is reported missing", co
 check("an undone workbook batch no longer counts; the month has data from before -> 'Earlier import'", st("live", "2026-06-01", "2026-07-01", "June") == ("neutral", "Earlier import"))
 check("a month with neither workbook nor data -> 'Not imported yet' (never 'Partial'/'missing')", st("live", "2026-10-01", "2026-11-01", "October") == ("neutral", "Not imported yet"))
 check("a range partly covered says how many months", st("live", "2026-09-01", "2026-12-01", "range") == ("neutral", "Workbook · 1 of 3 months"))
-panel = create_app().test_client().get("/properties/live/health?from=2026-09-01&to=2026-09-01").data.decode()
-check("drawer says imported from the workbook and offers no 'Missing' / required Upload buttons", "Monthly workbook" in panel and "Missing" not in panel and "Booking platform" not in panel)
+panel = create_app().test_client().get("/properties/live/documents?from=2026-09-01&to=2026-09-01").data.decode()
+check("source panel says imported from the workbook and shows no 'Missing' rows or required-document Upload buttons", "Monthly workbook" in panel and "Missing" not in panel and "Booking platform" not in panel and "should have" not in panel)
+_idx = client.get("/properties?from=2026-09-01&to=2026-09-01").data.decode()
+check("Properties table has no Data Health column and says Status / Model", "Data Health" not in _idx and ">Status<" in _idx and ">Model<" in _idx)
 
 june = client.get("/properties?from=2026-06-01&to=2026-06-01").data.decode()
 sept = client.get("/properties?from=2026-09-01&to=2026-09-01").data.decode()

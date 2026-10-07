@@ -51,7 +51,7 @@
       </tbody>
     </table>
   {% else %}
-    {{ empty_state("No upcoming reservations", "Reservations come from booking statements. Upload one to see check-ins and check-outs here.", "Upload a statement", url_for('documents.index')) }}
+    {{ empty_state("No upcoming reservations", "Reservations come from the monthly workbook. Import it to see check-ins and check-outs here.", "Import workbook", url_for('imports.index')) }}
   {% endif %}
 </div>
 {% endcall %}

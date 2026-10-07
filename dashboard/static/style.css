@@ -282,27 +282,25 @@ tr.focus-row:hover td { background: var(--brand-dim); }
 td.truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Properties index: the stacked Operated and Managed tables share
-   Occupancy / Data Health column positions so the page scans as one grid. */
+   Model / Occupancy / Status column positions so the page scans as one grid. */
 @media (min-width: 1181px) {
   .prop-table { table-layout: fixed; }
   .prop-table th.c-metric { width: 205px; }
   .prop-table th.c-occ { width: 110px; }
-  .prop-table th.c-health { width: 250px; }
+  .prop-table th.c-model { width: 150px; }
+  .prop-table th.c-status { width: 170px; }
 }
 
-/* Properties index below 1180px: let headers and the Data Health pill wrap
+/* Properties index below 1180px: let headers and the Status pill wrap
    so the Property name keeps its room instead of the table scrolling. */
 .prop-table td:first-child .note { white-space: nowrap; }
 @media (max-width: 1180px) {
   .prop-table th { white-space: normal; letter-spacing: 0.02em; }
   .prop-table td:first-child, .prop-table th:first-child { min-width: 170px; }
-  .prop-table td.health-cell button.pill { white-space: normal; text-align: left; line-height: 1.25; padding-top: 4px; padding-bottom: 4px; }
+  .prop-table td.c-status .pill { white-space: normal; text-align: left; line-height: 1.25; }
 }
-.prop-table .health-inline { display: none; }
 @media (max-width: 560px) {
-  .prop-table .c-secondary, .prop-table .c-health, .prop-table td.health-cell { display: none; }
-  .prop-table .health-inline { display: block; margin-top: 4px; }
-  .prop-table .health-inline button.pill { white-space: normal; text-align: left; line-height: 1.25; padding-top: 3px; padding-bottom: 3px; font-size: var(--fs-small); }
+  .prop-table .c-secondary, .prop-table .c-model { display: none; }
   .prop-table td:first-child { max-width: none; }
 }
 @media (max-width: 760px) {

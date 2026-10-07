@@ -11,7 +11,7 @@
       </div>
     {% endif %}
   {% else %}
-    <div class="card">{{ empty_state("No " ~ ctx.display ~ " data for " ~ prop.name, ("Add an expense on the Expenses tab to start tracking shared costs." if is_overhead else "Upload a booking statement or an invoice, or choose a different period."), "Upload documents", url_for('documents.index', property=prop.id)) }}</div>
+    <div class="card">{{ empty_state("No " ~ ctx.display ~ " data for " ~ prop.name, ("Add an expense on the Expenses tab to start tracking shared costs." if is_overhead else "Import the monthly workbook, or choose a different period."), "Import workbook", url_for('imports.index')) }}</div>
   {% endif %}
 
   {% if is_overhead %}

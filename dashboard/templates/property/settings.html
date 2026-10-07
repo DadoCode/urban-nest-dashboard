@@ -8,7 +8,7 @@
       {% if not is_overhead %}
         <li style="color: {{ 'var(--accent-ink)' if checklist.has_calendar else 'var(--ink-soft)' }}">{{ '✓' if checklist.has_calendar else '○' }} Add a booking calendar</li>
       {% endif %}
-      <li style="color: {{ 'var(--accent-ink)' if checklist.has_documents else 'var(--ink-soft)' }}">{{ '✓' if checklist.has_documents else '○' }} Upload a document</li>
+      <li style="color: {{ 'var(--accent-ink)' if checklist.has_import else 'var(--ink-soft)' }}">{{ '✓' if checklist.has_import else '○' }} Monthly workbook imported</li>
     </ul>
   </div>
   {% endcall %}

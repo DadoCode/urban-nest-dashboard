@@ -9,7 +9,7 @@ import services.ical_sync as ical_sync
 import services.kpis as kpis
 import services.sources as src
 from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta, is_managed
-from services.completeness import completeness_for, health_for, health_state, not_active, seed_defaults
+from services.completeness import completeness_for, health_for, not_active, seed_defaults
 from services.kpis import _has_activity as _kpi_has_activity
 from services.context import compare_bounds, link_params, range_params, request_context
 import services.ingest as ingest
@@ -40,8 +40,6 @@ def index():
     if q:
         flats = [p for p in flats if q in p["name"].lower() or q in (p["address"] or "").lower()]
 
-    single = (ctx["start_year"], ctx["start_month"]) == (ctx["end_year"], ctx["end_month"])
-    period_word = MONTH_NAMES[ctx["end_month"]] if single else ctx["display"]
     # Each business-model section sorts on its own param, so ranking
     # operated properties by Urban Nest Revenue never reshuffles the
     # managed table (and vice versa).
@@ -58,13 +56,12 @@ def index():
         # for a managed one. Occupancy/ADR/RevPAR describe the flat itself
         # and are unaffected.
         snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
-        kind, label = health_state(health_for(conn, p["id"], start, end), period_word)
         fee = p["management_fee_pct"]
         rows.append({
             "id": p["id"], "name": p["name"], "active": p["active"],
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"],
-            "health_kind": kind, "health_label": label,
+            "model": "Managed" if is_managed(p) else "Operated",
             "managed": is_managed(p), "fee": fee,
             # nothing is expected of it in this period (not started, ended, or inactive with no activity in the period): no performance to show
             "not_active": bool(not_active(conn, p["id"], start, end)) and not (not p["active"] and _kpi_has_activity(conn, p["id"], datetime.date.fromisoformat(start), datetime.date.fromisoformat(end))),
@@ -131,8 +128,8 @@ def _range(ctx):
 
 def _checklist(conn, property_id, is_overhead, year, month):
     has_calendar = bool(conn.execute("SELECT ical_url FROM properties WHERE id=?", (property_id,)).fetchone()["ical_url"])
-    has_documents = bool(conn.execute("SELECT 1 FROM documents WHERE property_id=? LIMIT 1", (property_id,)).fetchone())
-    return {"has_calendar": has_calendar, "has_documents": has_documents}
+    has_import = any(property_id in json.loads(b["properties"] or "[]") for b in conn.execute("SELECT properties FROM import_batches WHERE kind='workbook' AND status='applied'"))
+    return {"has_calendar": has_calendar, "has_import": has_import}
 
 
 def _overview_tiles(conn, prop, ctx):
@@ -491,20 +488,6 @@ def documents_tab(property_id):
     if not is_overhead:
         _remember_visit(resp, property_id)
     return resp
-
-
-@bp.route("/properties/<property_id>/health")
-def health_drawer(property_id):
-    """The "what exactly is missing?" drawer: each expected source for the
-    selected period, received or missing, with an Upload beside each gap."""
-    conn = db.get_conn()
-    prop, is_overhead, ctx = _load(conn, property_id)
-    if not prop or is_overhead:
-        return "<p class='note'>No data requirements for this property.</p>", 404
-    start, end = _range(ctx)
-    health = health_for(conn, property_id, start, end)
-    return render_template("partials/health_drawer.html", prop=prop, health=health, health_period=ctx["display"],
-                           health_title=health_title(ctx))
 
 
 @bp.route("/properties/<property_id>/settings")

@@ -9,7 +9,7 @@
     <div class="tile"><div class="label" title="{{ METRIC_INFO.adr }}">ADR</div><div class="value">{{ adr|money }}</div></div>
   </div>
 
-  <p class="note" style="margin-top:var(--s3)">Reservations come from the booking statements you upload. <a href="{{ url_for('documents.index', property=prop.id, type='booking_statement') }}#upload">Upload a statement</a> and they are added to the figures already here (your Excel history is never replaced).</p>
+  <p class="note" style="margin-top:var(--s3)">Reservations and booked nights come from the monthly workbook. <a href="{{ url_for('imports.index') }}">Import a workbook</a>. Booking statements are optional supporting evidence only.</p>
 
   {% call section("Reservations", (total_rows ~ ' in this view') if total_rows else None) %}
     {% if inactive_stored %}
@@ -77,7 +77,7 @@
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No bookings imported for " ~ ctx.display, "There are no reservations for " ~ prop.name ~ " in this view. Upload a booking-platform statement, choose a different period, or clear a filter.", "Upload a statement", url_for('documents.index', property=prop.id, type='booking_statement') ~ '#upload') }}
+        {{ empty_state("No bookings imported for " ~ ctx.display, "There are no reservations for " ~ prop.name ~ " in this view. Import the monthly workbook, choose a different period, or clear a filter.", "Import workbook", url_for('imports.index')) }}
       {% endif %}
     </div>
     {% if total_rows > bookings|length %}<p class="note" style="margin-top:var(--s2)">Showing the first {{ bookings|length }} of {{ total_rows }} reservations in this order.</p>{% endif %}

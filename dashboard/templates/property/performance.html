@@ -6,7 +6,7 @@
       {% for t in tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
     </div>
   {% else %}
-    <div class="card">{{ empty_state("No " ~ ctx.display ~ " booking data for " ~ prop.name, "Upload a booking statement or choose a different period.", "Upload documents", url_for('documents.index', property=prop.id)) }}</div>
+    <div class="card">{{ empty_state("No " ~ ctx.display ~ " booking data for " ~ prop.name, "Import the monthly workbook or choose a different period.", "Import workbook", url_for('imports.index')) }}</div>
   {% endif %}
 
   {% call section("Financial performance", "Gross Booking Revenue and Management Fee Earned over time" if managed else "Urban Nest Revenue, costs and Property Profit over time") %}

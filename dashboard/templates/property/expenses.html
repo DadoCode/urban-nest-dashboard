@@ -42,7 +42,7 @@
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No expenses in " ~ ctx.display, "Nothing has been recorded for " ~ prop.name ~ " in this period. Add one above, upload an invoice, or choose a different period.", "Upload documents", url_for('documents.index', property=prop.id)) }}
+        {{ empty_state("No expenses in " ~ ctx.display, "Nothing has been recorded for " ~ prop.name ~ " in this period. Add one above, import the monthly workbook, or choose a different period.", "Import workbook", url_for('imports.index')) }}
       {% endif %}
     </div>
   {% endcall %}

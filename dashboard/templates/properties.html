@@ -26,15 +26,11 @@
       href="{{ cx('properties.index', q=q or None, status=status, sort_op=(key if param == 'sort_op' else sort_op), sort_mg=(key if param == 'sort_mg' else sort_mg)) }}">{{ label }}{% if current == key and key != 'name' %} ↓{% endif %}</a></th>
   {%- endmacro %}
 
-  {% macro health_btn(r) -%}
-    <button type="button" class="pill {{ r.health_kind }}" title="See exactly what is missing"
-            hx-get="{{ cx('properties.health_drawer', property_id=r.id) }}" hx-target="#drawer" hx-swap="innerHTML">{{ r.health_label }} ›</button>
-  {%- endmacro %}
-
-  {# Data Health is its own column on wide screens; below 560px the same
-     button sits under the property name instead (see .health-inline). #}
-  {% macro health_cell(r) -%}
-    <td class="health-cell">{{ health_btn(r) }}</td>
+  {# Status is about the property in this period: Active / Inactive / Not active in this period. #}
+  {% macro status_cell(r) -%}
+    <td class="c-status">{% if not r.active %}<span class="pill neutral" title="No longer active. Its history is kept.">Inactive</span>
+      {% elif r.not_active %}<span class="pill neutral" title="This property had not joined the portfolio in this period">Not active in this period</span>
+      {% else %}<span class="pill pos">Active</span>{% endif %}</td>
   {%- endmacro %}
 
   {% if operated %}
@@ -44,23 +40,25 @@
           <thead>
             <tr>
               {{ sort_th('Property', 'name', sort_op, 'sort_op', num=False) }}
+              <th class="c-model">Model</th>
               {{ sort_th('Urban Nest Revenue', 'revenue', sort_op, 'sort_op', info="Full revenue Urban Nest earns from an operated property.", col='c-metric') }}
               {{ sort_th('Property Profit', 'profit', sort_op, 'sort_op', info="Urban Nest Revenue minus this property's own costs. Business Costs are not included.", col='c-metric c-secondary') }}
               {{ sort_th('Occupancy', 'occupancy', sort_op, 'sort_op', col='c-occ') }}
-              <th class="c-health">Data Health</th>
+              <th class="c-status">Status</th>
             </tr>
           </thead>
           <tbody>
             {% for r in operated %}
               <tr>
-                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %}<div class="health-inline">{{ health_btn(r) }}</div></td>
-                {% if r.not_active %}<td class="num note" colspan="3" title="This property had not joined the portfolio in this period, so there is no performance to show">Not active in this period</td>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+                <td class="c-model">Operated</td>
+                {% if r.not_active %}<td class="num note" colspan="3" title="No performance to show: this property was not active in this period">—</td>
                 {% else %}
                 <td class="num">{{ r.revenue|money }}</td>
                 <td class="num c-secondary">{{ r.profit|money }}</td>
                 <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
                 {% endif %}
-                {{ health_cell(r) }}
+                {{ status_cell(r) }}
               </tr>
             {% endfor %}
           </tbody>
@@ -76,21 +74,23 @@
           <thead>
             <tr>
               {{ sort_th('Property', 'name', sort_mg, 'sort_mg', num=False) }}
+              <th class="c-model">Model</th>
               {{ sort_th('Management Fee Earned', 'revenue', sort_mg, 'sort_mg', info=METRIC_INFO.fee, col='c-metric') }}
               {{ sort_th('Occupancy', 'occupancy', sort_mg, 'sort_mg', col='c-occ') }}
-              <th class="c-health">Data Health</th>
+              <th class="c-status">Status</th>
             </tr>
           </thead>
           <tbody>
             {% for r in managed %}
               <tr>
-                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a>{% if not r.active %} <span class="note">(inactive)</span>{% endif %} <span class="note" title="Urban Nest earns {{ ('%g%%'|format(r.fee) ~ ' of this') if r.fee else 'the recorded management fee on this' }} property's booking revenue">· {{ ('%g'|format(r.fee) ~ '% fee') if r.fee else 'fee % not set' }}</span><div class="health-inline">{{ health_btn(r) }}</div></td>
-                {% if r.not_active %}<td class="num note" colspan="2" title="This property had not joined the portfolio in this period, so there is no performance to show">Not active in this period</td>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+                <td class="c-model" title="Urban Nest earns {{ ('%g%%'|format(r.fee) ~ ' of this') if r.fee else 'the recorded management fee on this' }} property's booking revenue">Managed · {{ ('%g'|format(r.fee) ~ '% fee') if r.fee else 'fee % not set' }}</td>
+                {% if r.not_active %}<td class="num note" colspan="2" title="No performance to show: this property was not active in this period">—</td>
                 {% else %}
                 <td class="num">{{ r.revenue|money }}</td>
                 <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
                 {% endif %}
-                {{ health_cell(r) }}
+                {{ status_cell(r) }}
               </tr>
             {% endfor %}
           </tbody>
