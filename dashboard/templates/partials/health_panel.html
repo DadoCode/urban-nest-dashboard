@@ -1,27 +1,44 @@
-{# Itemised data health for one property + period. Vars: health, prop, health_title; upload_mode = 'page' | 'inline' #}
+{# Where one property's figures for a period come from. Vars: health, prop, health_title; upload_mode = 'page' | 'inline' #}
 {% if health is none %}
-  <div class="empty"><div class="empty-title">No expected documents set up</div><div class="empty-body">This property has no list of documents it should receive, so completeness can't be measured yet.</div></div>
+  <div class="empty"><div class="empty-title">Not set up</div><div class="empty-body">Nothing to show for this property yet.</div></div>
 {% elif health.not_active %}
   {% if health.kind == 'inactive' %}
-  <div class="empty"><div class="empty-title">Inactive</div><div class="empty-body">{{ prop.name }} is no longer active, so no documents are expected and nothing is missing. Its history is unchanged.</div></div>
+  <div class="empty"><div class="empty-title">Inactive</div><div class="empty-body">{{ prop.name }} is no longer active, so nothing is expected and nothing is missing. Its history is unchanged.</div></div>
   {% else %}
   <div class="empty"><div class="empty-title">Not active yet</div><div class="empty-body">{{ prop.name }} joins the portfolio on {{ health.starts }}. Nothing is expected for this period, so nothing is missing.</div></div>
   {% endif %}
 {% else %}
+  {% set wb = health.workbook %}
+  <div class="health-row">
+    {% if wb.months and wb.covered|length == wb.months|length %}
+      <span class="hk ok">✓</span>
+      <span class="health-name">Monthly workbook
+        <span class="note">imported for {{ wb.covered|join(', ') }} · <a href="{{ url_for('imports.batch', batch_id=wb.batches[-1]) }}">view import</a></span></span>
+      <span></span>
+    {% elif wb.covered %}
+      <span class="hk opt">Part</span>
+      <span class="health-name">Monthly workbook <span class="note">imported for {{ wb.covered|join(', ') }} of {{ wb.months|join(', ') }}</span></span>
+      <span></span>
+    {% elif health.has_data %}
+      <span class="hk opt">Earlier</span>
+      <span class="health-name">Earlier import <span class="note">this period has recorded figures from before the monthly workbook flow; nothing is wrong, it just did not come from the workbook</span></span>
+      <span></span>
+    {% else %}
+      <span class="hk opt">None</span>
+      <span class="health-name">Not imported yet <span class="note">the monthly workbook has not been imported for this period</span></span>
+      <a class="btn secondary" style="height:26px" href="{{ url_for('documents.index') }}">Import workbook</a>
+    {% endif %}
+  </div>
+  {% if health.rows %}
+  <div class="note" style="margin-top:var(--s3)">Supporting documents (optional evidence)</div>
   {% for r in health.rows %}
     <div class="health-row">
-      {% if r.received %}
-        <span class="hk ok">✓</span>
-        <span class="health-name">{{ r.label }}
-          <span class="note">{% for d in r.docs %}<a href="{{ url_for('documents.review', doc_id=d.id) }}">{{ d.filename }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>
-        </span>
-        <span></span>
-      {% else %}
-        <span class="hk {{ 'miss' if r.required else 'opt' }}">{{ 'Missing' if r.required else 'Optional' }}</span>
-        <span class="health-name">{{ r.label }}{% if not r.required %} <span class="note">not uploaded for this period</span>{% endif %}</span>
-        {% set up = url_for('properties.documents_tab', property_id=prop.id, type=r.source) ~ '#upload' if upload_mode == 'inline' else url_for('documents.index', property=prop.id, type=r.source) ~ '#upload' %}
-        <a class="btn {{ '' if r.required else 'secondary' }}" style="height:26px" href="{{ up }}">Upload</a>
-      {% endif %}
+      <span class="hk ok">✓</span>
+      <span class="health-name">{{ r.label }}
+        <span class="note">{% for d in r.docs %}<a href="{{ url_for('documents.review', doc_id=d.id) }}">{{ d.filename }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>
+      </span>
+      <span></span>
     </div>
   {% endfor %}
+  {% endif %}
 {% endif %}

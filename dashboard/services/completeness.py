@@ -1,8 +1,8 @@
-"""Per-property data completeness -- judged against what *that* property is
-actually expected to produce (property_data_requirements), not one
-hardcoded checklist every flat gets measured against regardless of which
-platforms/vendors it actually uses. See the V2 plan's amendment on this:
-"92% complete" is only meaningful once the requirement itself is real."""
+"""Per-property data health. The monthly workbook import is the source of truth for a property-month; uploaded
+documents are supporting evidence only and are never reported as missing. (Legacy per-document requirements are
+kept in the database but no longer drive any status.)"""
+import datetime
+import json
 
 DEFAULT_REQUIRED = ["booking_statement", "cleaning_invoice", "bank_statement"]
 DEFAULT_OPTIONAL = ["amazon_order", "utility_bill"]
@@ -98,52 +98,60 @@ def completeness_for(conn, property_id, start, end):
     return {"required": required, "received": list(received_types), "missing": missing, "pct": pct}
 
 
+def _months_in(start, end):
+    """['YYYY-MM', ...] for every calendar month touched by [start, end)."""
+    y, m = int(start[:4]), int(start[5:7])
+    last = datetime.date.fromisoformat(end) - datetime.timedelta(days=1)
+    out = []
+    while (y, m) <= (last.year, last.month):
+        out.append(f"{y:04d}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def workbook_cover(conn, property_id, start, end):
+    """Which months of [start, end) were imported for this property from the monthly workbook (applied, not undone).
+    The workbook is the source of truth for a month's figures; uploaded documents are only supporting evidence."""
+    months = _months_in(start, end)
+    covered, batches = [], []
+    for b in conn.execute("SELECT id, period, properties FROM import_batches WHERE kind='workbook' AND status='applied' AND period IS NOT NULL ORDER BY id"):
+        if b["period"] in months and property_id in json.loads(b["properties"] or "[]"):
+            if b["period"] not in covered:
+                covered.append(b["period"])
+            batches.append(b["id"])
+    return {"months": months, "covered": sorted(covered), "batches": batches}
+
+
 def health_for(conn, property_id, start, end):
-    """Every source this property is expected to produce, and whether each
-    one has arrived for [start, end) -- the itemised version of
-    completeness_for(), for the "what exactly is missing?" views. Uses the
-    same rule as completeness_for: a document of that type uploaded in the
-    period counts as received. has_data is the separate, broader signal:
-    does this property have any real transaction/booking for the period
-    at all, regardless of documents."""
+    """Where this property's figures for [start, end) come from. The monthly workbook import is the source of truth;
+    uploaded documents are supporting evidence only and are never "missing". has_data is the broader signal: any real
+    transaction/booking for the period at all."""
     why = not_active(conn, property_id, start, end)
     if why:
         return _inactive_health(why)
-    reqs = conn.execute(
-        "SELECT source_type, required FROM property_data_requirements WHERE property_id=? ORDER BY required DESC, rowid",
-        (property_id,),
-    ).fetchall()
-    if not reqs:
-        return None
+    cover = workbook_cover(conn, property_id, start, end)
     docs = conn.execute(
         "SELECT id, filename, doc_type, status FROM documents WHERE property_id=? AND uploaded_at>=? AND uploaded_at<? ORDER BY uploaded_at",
         (property_id, start, end),
     ).fetchall()
-    rows = []
-    for r in reqs:
-        mine = [d for d in docs if d["doc_type"] == r["source_type"]]
-        rows.append({"source": r["source_type"], "label": DOC_TYPE_LABELS.get(r["source_type"], r["source_type"]),
-                     "required": bool(r["required"]), "received": bool(mine), "docs": mine})
-    required = [x for x in rows if x["required"]]
-    missing = [x for x in required if not x["received"]]
-    pct = round((len(required) - len(missing)) / len(required) * 100) if required else 100
-    return {"rows": rows, "missing": missing, "required_total": len(required), "pct": pct,
+    rows = [{"source": d["doc_type"], "label": DOC_TYPE_LABELS.get(d["doc_type"], d["doc_type"]), "required": False, "received": True, "docs": [d]} for d in docs]
+    full = bool(cover["months"]) and len(cover["covered"]) == len(cover["months"])
+    return {"rows": rows, "missing": [], "required_total": 0, "pct": 100 if full else 0, "workbook": cover,
             "has_data": has_real_data(conn, property_id, start, end)}
 
 
 def health_state(h, period_label):
-    """(pill kind, human wording) for a health summary -- no vague words.
-    "No {period} data" is reserved for when there's genuinely nothing
-    recorded for the property that period; a property with real data but
-    missing source documents is "Partial", never "No data", even if every
-    expected document happens to be missing."""
+    """(pill kind, human wording) for a property-period: imported from the monthly workbook, partly, an earlier
+    (pre-workbook) import, or nothing yet. Supporting documents never make a period "partial"."""
     if h is None:
         return "neutral", "Not set up"
     if h.get("not_active"):
         return "neutral", h.get("text") or f"Not active until {h['starts']}"
-    if h["pct"] == 100:
-        return "pos", "Complete"
-    n = len(h["missing"])
-    if not h.get("has_data") and h["required_total"] and n == h["required_total"]:
-        return "neutral", f"No {period_label} data"
-    return "warn", f"Partial · {n} source{'s' if n != 1 else ''} missing"
+    wb = h.get("workbook") or {"months": [], "covered": []}
+    if wb["months"] and len(wb["covered"]) == len(wb["months"]):
+        return "pos", "Imported from workbook"
+    if wb["covered"]:
+        return "neutral", f"Workbook · {len(wb['covered'])} of {len(wb['months'])} months"
+    if h.get("has_data"):
+        return "neutral", "Earlier import"
+    return "neutral", f"Not imported yet"

@@ -1,7 +1,7 @@
 {% extends "property/_shell.html" %}
 {% from "_components.html" import section, empty_state %}
 {% block tab_content %}
-  {% call section(health_title_text, "Documents this property should have for the period") %}
+  {% call section(health_title_text, "Where the figures for this period come from") %}
     <div class="card">
       {% set upload_mode = 'inline' %}
       {% include "partials/health_panel.html" %}
@@ -9,7 +9,7 @@
   {% endcall %}
 
   <span id="upload"></span>
-  {% call section("Upload a document") %}
+  {% call section("Upload a supporting document (optional)") %}
   <div class="card">
     <p class="note" style="margin-top:0">Amazon/Temu orders, cleaning invoices, booking-platform statements, bank statements, receipts — PDF or photo. Upload whatever came in, review the extracted lines, confirm, and this property's numbers update automatically.
       {% if not extraction_available %}Spreadsheets and CSV files are read automatically. PDFs and photos need automatic extraction, which isn't configured, so for those you enter the rows manually.{% else %}Claude will pull out the line items for you to review before anything's added to the ledger.{% endif %} Up to {{ max_upload_mb }} MB per file.</p>

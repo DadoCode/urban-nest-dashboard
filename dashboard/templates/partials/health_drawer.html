@@ -9,5 +9,5 @@
   {% set upload_mode = 'page' %}
   {% include "partials/health_panel.html" %}
 </div>
-<p class="note" style="margin-top:var(--s3)">A source counts as received once a document of that type has been uploaded for the property in this period.
+<p class="note" style="margin-top:var(--s3)">Figures come from the monthly workbook you import (Documents → Import monthly workbook). Uploaded documents are optional supporting evidence and are never counted as missing.
   <a href="{{ cx('properties.documents_tab', property_id=prop.id) }}">Open {{ prop.name }} documents</a></p>

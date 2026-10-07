@@ -9,6 +9,7 @@ Run: .venv/bin/python tests/test_active_status.py
 """
 import datetime
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -93,12 +94,26 @@ print("pages")
 from app import create_app  # noqa: E402
 
 client = create_app().test_client()
+
+print("workbook-first data health (documents are never 'missing')")
+c.execute("INSERT INTO import_batches (filename, file_hash, uploaded_at, applied_at, status, period, kind, properties) VALUES ('wb.xlsx','h','2026-10-01','2026-10-01 10:00:00','applied','2026-09','workbook',?)", ('["live", "late"]',))
+c.execute("INSERT INTO import_batches (filename, file_hash, uploaded_at, applied_at, status, period, kind, properties) VALUES ('wb2.xlsx','h2','2026-10-02','2026-10-02 10:00:00','undone','2026-06','workbook',?)", ('["live"]',))
+c.commit()
+st = lambda pid, a, b, w: completeness.health_state(completeness.health_for(c, pid, a, b), w)
+check("covered by an applied workbook batch -> 'Imported from workbook'", st("live", "2026-09-01", "2026-10-01", "September") == ("pos", "Imported from workbook"))
+check("no documents uploaded and none required: nothing is reported missing", completeness.health_for(c, "live", "2026-09-01", "2026-10-01")["missing"] == [])
+check("an undone workbook batch no longer counts; the month has data from before -> 'Earlier import'", st("live", "2026-06-01", "2026-07-01", "June") == ("neutral", "Earlier import"))
+check("a month with neither workbook nor data -> 'Not imported yet' (never 'Partial'/'missing')", st("live", "2026-10-01", "2026-11-01", "October") == ("neutral", "Not imported yet"))
+check("a range partly covered says how many months", st("live", "2026-09-01", "2026-12-01", "range") == ("neutral", "Workbook · 1 of 3 months"))
+panel = create_app().test_client().get("/properties/live/health?from=2026-09-01&to=2026-09-01").data.decode()
+check("drawer says imported from the workbook and offers no 'Missing' / required Upload buttons", "Monthly workbook" in panel and "Missing" not in panel and "Booking platform" not in panel)
+
 june = client.get("/properties?from=2026-06-01&to=2026-06-01").data.decode()
 sept = client.get("/properties?from=2026-09-01&to=2026-09-01").data.decode()
 inactive = client.get("/properties?status=inactive").data.decode()
 check("June: the count is the ACTIVE properties plus a separate note for the inactive one with activity", "3 active properties + 1 inactive with activity in this period" in june, june[june.find("active propert") - 20:june.find("active propert") + 80] if "active propert" in june else "")
-check("September: only active properties are counted, no inactive note", "3 active properties" in sept and "inactive with activity" not in sept)
-check("the Inactive filter lists the inactive properties (2) regardless of period", "2 inactive propert" in inactive and "Gone flat" in inactive and "Never active" in inactive)
+check("September: only active properties are counted, no inactive note", "3 active properties" in sept and "inactive with activity" not in sept, re.findall(r"[^<>]{0,30}propert[^<>]{0,50}", sept)[:6])
+check("the Inactive filter lists the inactive properties (2) regardless of period", "2 inactive propert" in inactive and "Gone flat" in inactive and "Never active" in inactive, re.findall(r"[^<>]{0,30}propert[^<>]{0,50}", inactive)[:6])
 check("the business cost centre is never counted as a property", "Portfolio" not in sept.split("prop-table")[1] if "prop-table" in sept else True)
 
 print(f"\n{COUNT - len(FAILS)}/{COUNT} checks passed" + ("" if not FAILS else f"; FAILED: {FAILS}"))
