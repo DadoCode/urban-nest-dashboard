@@ -288,3 +288,23 @@ Anything REVIEW is **unticked by default** in the preview and needs an explicit 
   amount) of another property's row and the property is listed in `PRE_START_DUPLICATE_CLEANUP` (NW4: 17 rows, July 5,284.27 and
   August 3,483.97, all copies of 175 Miles Building's income). Rows with no twin are left and reported. Undoable.
 
+
+## 16. Active, not started, inactive; how the Properties count is calculated
+
+Three different things are kept apart:
+
+| | Meaning | Where it lives | Effect |
+|---|---|---|---|
+| A. Not started | `start_date` is after the period | `properties.start_date` | "Not active until <date>": no availability, no operating KPIs; pre-opening costs may still be imported (NW4 August) |
+| B. Active now | `active = 1` | `properties.active` | always expected to produce data; counted in the header |
+| C. Inactive | `active = 0` (optionally `end_date`) | `properties.active`, `properties.end_date` | "Inactive": never "missing documents"; kept in history, and counted for availability only in months with recorded activity (Forest Gate Jun/Jul, Spooner history) |
+
+`end_date` is optional and is never invented.
+
+**Properties count** (header on the Properties page): active flats only. In a historical period it adds "+ N inactive with activity in this period". The business cost centre ("Portfolio General Expenses") is never a property. Current records: 13 = 12 flats (10 active, 2 inactive: Forest Gate, Spooner) + 1 business cost centre.
+
+**Final configuration (Sept v4 workbook):** Forest Gate = 15% managed, inactive, explicit fee rows kept (June £1,155, July £210), no estimates. Spooner = "House 44, Spooner Road, Sheffield, S10 5BN", operated, inactive, history preserved. NW4 starts 2026-09-01.
+
+**Fee-label rule:** a row whose label is a management fee (including "Management Faris 15%", "FG Mngmt Fee (12%)", "Mngmnt Fee") on a property sheet is category `management_fee`; business-cost rows never become management fees. The row diff is category-aware: a row whose category changes shows as CHANGED, not UNCHANGED.
+
+**Calculated-blank formulas:** a formula cell whose cached result is an empty string is blank by design, not an "uncalculated" error.
