@@ -157,7 +157,7 @@ tx_counts = {pid: conn.execute("SELECT COUNT(*) FROM transactions WHERE property
 snap0 = snapshot(conn)
 acts = K.plan_cleanup(conn)
 check("plan: every property except 44 Spooner Road is renamed to its full name", {a["property_id"]: a["to"] for a in acts["renames"]} == {p: n for p, n in CANON.items() if p not in NOT_IN_DB}, [a["property_id"] for a in acts["renames"]])
-check("plan: NW4 managed -> operated", [(a["property_id"], a["from"], a["to"]) for a in acts["models"]] == [("nw4", "managed", "operated")])
+check("plan: NW4 managed -> operated (and 11PW follows the workbook's 12%, still managed)", sorted((a["property_id"], a["from"], a["to"], a["to_pct"]) for a in acts["models"]) == [("11-perryfield-way", "managed", "managed", 12.0), ("nw4", "managed", "operated", None)])
 check("plan: NW4 start date 2026-09-01", [(a["property_id"], a["to"]) for a in acts["start_dates"]] == [("nw4", "2026-09-01")])
 check("plan: Crescent B. Ads is recorded as a separate expense", [(a["period"], a["label"], a["amount"]) for a in acts["distinct"]] == [("2026-09", "Crescent B. Ads", 3000.0)])
 check("plan: exactly the 3 Lascar months equal to the penny are confirmed duplicates; the odd row is left alone", len(acts["duplicates"]) == 3 and len(acts["left_alone"]) == 1)
@@ -269,7 +269,7 @@ client.post(loc + "/apply", data={"month": SEP, "fingerprint": fp, "include": ti
                                   "new_name:22-perryfield-way": np_["name"], "new_model:22-perryfield-way": "managed", "new_pct:22-perryfield-way": ""})
 check("page: a CLEARED fee box is not silently replaced by the default: refused, nothing created", c.execute("SELECT COUNT(*) FROM properties").fetchone()[0] == n_props)
 fresh = db.get_conn()
-client.post(loc + "/apply", data={"month": SEP, "fingerprint": fp, "include": ticked + ["22-perryfield-way", "19-draycott-ave"], "exclude_form": "1", "ack": "1",
+client.post(loc + "/apply", data={"month": SEP, "fingerprint": fp, "include": ticked + ["22-perryfield-way", "19-draycott-ave", "11-perryfield-way"], "exclude_form": "1", "ack": "1",
                                   "distinct": re.findall(r'name="distinct" value="([^"]+)" checked', page),
                                   "new_name:22-perryfield-way": np_["name"], "new_model:22-perryfield-way": "managed", "new_pct:22-perryfield-way": "15"})
 row = fresh.execute("SELECT * FROM import_batches WHERE id=?", (bid_e2e,)).fetchone()

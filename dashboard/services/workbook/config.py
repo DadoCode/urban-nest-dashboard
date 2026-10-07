@@ -169,6 +169,7 @@ MODEL_DECISIONS = {
     # property id: (model, why, fee % when managed)
     "nw4": ("operated", "Dado confirmed Flat 3 NW4 is rent-to-rent; the workbook lists it under R2R and has never recorded a management fee for it", None),
     "forest-gate": ("managed", "Dado confirmed Forest Gate is managed at 15% (7 Oct 2026); the Main Page records explicit fees for June (1,155) and July (210)", 15.0),
+    "11-perryfield-way": ("managed", "Dado decided to follow the final workbook (7 Oct 2026): Flat 11 is managed at 12% (was configured 10%); recorded fee rows stay authoritative", 12.0),
 }
 
 # Properties that are NOT ACTIVE today (properties.active = 0): excluded from the current portfolio, availability expectations and data-health
