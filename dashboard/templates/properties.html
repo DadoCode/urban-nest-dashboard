@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, section, empty_state %}
+{% from "_components.html" import page_head, section, empty_state, mlink %}
 {% block title %}Properties — Urban Nest Estates{% endblock %}
 {% block content %}
   {% call page_head("Properties", total_count ~ " " ~ status ~ " propert" ~ ("y" if total_count == 1 else "ies") ~ ((" + " ~ inactive_with_activity ~ " inactive with activity in this period") if inactive_with_activity else "") ~ " · " ~ current_month) %}
@@ -18,6 +18,13 @@
     <button type="submit" class="secondary">Search</button>
     {% if q %}<a class="clear-link" href="{{ cx('properties.index', status=status) }}">Clear</a>{% endif %}
   </form>
+
+  {% if summary %}
+    <div class="sum-line">
+      <span><strong>Urban Nest Revenue {{ summary.revenue|money2 }}</strong> = operated {{ summary.op_revenue|money2 }} + management fees {{ summary.fees|money2 }}</span>
+      <span><strong>Property Profit {{ summary.profit|money2 }}</strong> = operated {{ summary.op_profit|money2 }} + management fees {{ summary.fees|money2 }}</span>
+    </div>
+  {% endif %}
 
   {# Each section sorts on its own param (sort_op / sort_mg) so ranking one
      business model never reshuffles the other. #}
@@ -54,9 +61,9 @@
                 <td class="c-model">Operated</td>
                 {% if r.not_active %}<td class="num note" colspan="3" title="No performance to show: this property was not active in this period">—</td>
                 {% else %}
-                <td class="num">{{ r.revenue|money }}</td>
-                <td class="num c-secondary">{{ r.profit|money }}</td>
-                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                <td class="num">{% if r.revenue %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#revenue-records', r.revenue|money, 'Revenue records for ' ~ r.name) }}{% else %}{{ r.revenue|money }}{% endif %}{% if r.review %} <a class="pill warn review-link" href="/imports/{{ r.review }}#prop-{{ r.id }}" title="Left in REVIEW by the import. Open the reason.">REVIEW ›</a>{% endif %}</td>
+                <td class="num c-secondary">{% if r.revenue or r.profit %}{{ mlink(wsurl(ctx, 'properties.detail', r.id), r.profit|money, 'Property Profit breakdown for ' ~ r.name) }}{% else %}{{ r.profit|money }}{% endif %}</td>
+                <td class="num">{% if r.occupancy %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#booked-nights', '%.0f'|format(r.occupancy * 100) ~ '%', 'Booked nights for ' ~ r.name) }}{% else %}0%{% endif %}</td>
                 {% endif %}
                 {{ status_cell(r) }}
               </tr>
@@ -87,8 +94,8 @@
                 <td class="c-model" title="Urban Nest earns {{ ('%g%%'|format(r.fee) ~ ' of this') if r.fee else 'the recorded management fee on this' }} property's booking revenue">Managed · {{ ('%g'|format(r.fee) ~ '% fee') if r.fee else 'fee % not set' }}</td>
                 {% if r.not_active %}<td class="num note" colspan="2" title="No performance to show: this property was not active in this period">—</td>
                 {% else %}
-                <td class="num">{{ r.revenue|money }}</td>
-                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                <td class="num">{% if r.revenue %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#fees', r.revenue|money, 'Management fee record for ' ~ r.name) }}{% else %}{{ r.revenue|money }}{% endif %}{% if r.review %} <a class="pill warn review-link" href="/imports/{{ r.review }}#prop-{{ r.id }}" title="Left in REVIEW by the import. Open the reason.">REVIEW ›</a>{% endif %}</td>
+                <td class="num">{% if r.occupancy %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#booked-nights', '%.0f'|format(r.occupancy * 100) ~ '%', 'Booked nights for ' ~ r.name) }}{% else %}0%{% endif %}</td>
                 {% endif %}
                 {{ status_cell(r) }}
               </tr>

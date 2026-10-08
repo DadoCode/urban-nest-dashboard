@@ -164,6 +164,14 @@ def range_params(ctx, **extra):
     return p
 
 
+def workspace_params(ctx, **extra):
+    """Period and comparison only, spelled out in the URL (never left to the cookie), for a link into a property workspace
+    where the property itself is part of the path."""
+    p = {"from": ctx["from_input"] + "-01", "to": ctx["to_input"] + "-01", "compare": ctx["compare"]}
+    p.update(extra)
+    return p
+
+
 def compare_bounds(ctx):
     """(start, end) ISO bounds of the comparison period, or None."""
     a = (ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])

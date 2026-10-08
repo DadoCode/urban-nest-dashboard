@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, section, kpi_tile, empty_state %}
+{% from "_components.html" import page_head, section, kpi_tile, empty_state, mlink %}
 {% block title %}{{ ctx.display }} Overview — Urban Nest Estates{% endblock %}
 {% block content %}
   {{ page_head(ctx.display ~ " Overview", flats_count ~ " properties" ~ (" · " ~ viewing.name if viewing else "")) }}
@@ -12,23 +12,22 @@
     {% endfor %}
   </div>
 
-  {# Only metrics whose destination genuinely explains them are links. #}
-  {% set drill = {
-    'revenue': [xurl(ctx_params, 'properties.index', sort='revenue'), 'See revenue by property'],
-    'net_profit': [xurl(ctx_params, 'properties.index', sort='profit'), 'See profit by property'],
-    'occupancy': [xurl(ctx_params, 'bookings.performance'), 'See occupancy by property and month'],
-    'revpar': [xurl(ctx_params, 'bookings.performance'), 'See occupancy and rates by property'],
-  } %}
   <div class="tiles">
-    {% for t in primary_tiles %}{% set d = drill.get(t.key) %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=d[0] if d else None, hint=d[1] if d else None, sparkline_id='tile-spark-' ~ t.key) }}{% endfor %}
+    {% for t in primary_tiles %}{% set href = drill.get(t.key) %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=href, hint=hints.get(t.key), sparkline_id='tile-spark-' ~ t.key) }}{% endfor %}
+  </div>
+  <div class="cost-line">
+    {% for key, label in [('property', 'Property Costs'), ('business', 'Business Costs')] if cost_line.get(key) %}
+      {% set c = cost_line[key] %}
+      <a href="{{ c.href }}" title="{{ c.title }}" aria-label="{{ label }} {{ '£{:,.0f}'.format(c.value) }}: open the expenses behind it">{{ label }} <strong>£{{ '{:,.0f}'.format(c.value) }}</strong> ›</a>
+    {% endfor %}
   </div>
 
-  {% call section("Portfolio performance", "Click a month to view it · click a costs bar to see its transactions") %}
+  {% call section("Portfolio performance", "Click a month to view it · click a costs bar for the operated-property costs behind it") %}
     <div class="card">
       <div class="chart-tools">
         <div class="seg" id="series-seg">
           <button type="button" class="on" data-series="0"><span class="sw" style="background:var(--series-revenue)"></span>Urban Nest Revenue</button>
-          <button type="button" class="on" data-series="1"><span class="sw" style="background:var(--neg)"></span>Costs</button>
+          <button type="button" class="on" data-series="1"><span class="sw" style="background:var(--neg)"></span>Operated Property Costs</button>
           <button type="button" class="on" data-series="2"><span class="sw" style="background:var(--series-profit)"></span>Property Profit</button>
         </div>
         <div style="display:flex; align-items:center; gap:var(--s2)">
@@ -64,15 +63,15 @@
     <div class="card flush">
       {% if rtr_rows %}
         <table>
-          <thead><tr><th>Property</th><th class="num">Revenue</th><th class="num">Total costs</th><th class="num" title="Revenue minus this property's own costs.">Property profit</th><th class="num">Occupancy</th><th class="num" title="Average nightly rate actually achieved on booked nights.">ADR</th></tr></thead>
+          <thead><tr><th>Property</th><th class="num">Urban Nest Revenue</th><th class="num">Property costs</th><th class="num" title="Revenue minus this property's own costs.">Property profit</th><th class="num">Occupancy</th><th class="num" title="Average nightly rate actually achieved on booked nights.">ADR</th></tr></thead>
           <tbody>
             {% for r in rtr_rows %}
               <tr>
                 <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
-                <td class="num">{{ r.revenue|money }}</td>
-                <td class="num">{{ r.costs|money }}</td>
+                <td class="num">{% if r.revenue %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#revenue-records', r.revenue|money, 'Revenue records for ' ~ r.name) }}{% else %}{{ r.revenue|money }}{% endif %}</td>
+                <td class="num">{% if r.costs %}{{ mlink(wsurl(ctx, 'properties.expenses_tab', r.id), r.costs|money, 'Expenses for ' ~ r.name) }}{% else %}{{ r.costs|money }}{% endif %}</td>
                 <td class="num">{{ r.profit|money }}</td>
-                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                <td class="num">{% if r.occupancy %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#booked-nights', '%.0f'|format(r.occupancy * 100) ~ '%', 'Booked nights for ' ~ r.name) }}{% else %}0%{% endif %}</td>
                 <td class="num">{{ r.adr|money }}</td>
               </tr>
             {% endfor %}
@@ -92,8 +91,8 @@
             {% for r in managed_rows %}
               <tr>
                 <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a> <span class="note">· {{ ('%g'|format(r.fee_pct) ~ '% fee') if r.fee_pct else 'fee % not set' }}</span></td>
-                <td class="num">{{ r.fee|money }}</td>
-                <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
+                <td class="num">{% if r.fee %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#fees', r.fee|money, 'Management fee record for ' ~ r.name) }}{% else %}{{ r.fee|money }}{% endif %}</td>
+                <td class="num">{% if r.occupancy %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#booked-nights', '%.0f'|format(r.occupancy * 100) ~ '%', 'Booked nights for ' ~ r.name) }}{% else %}0%{% endif %}</td>
                 <td class="num">{{ r.adr|money }}</td>
               </tr>
             {% endfor %}
@@ -156,7 +155,7 @@
         labels: [],
         datasets: [
           { type: 'bar', label: 'Urban Nest Revenue', data: [], stack: 'rev', backgroundColor: UN.revenue, order: 2 },
-          { type: 'bar', label: 'Costs', data: [], stack: 'rev', backgroundColor: '#c2413a', order: 2 }, // matches --neg
+          { type: 'bar', label: 'Operated Property Costs', data: [], stack: 'rev', backgroundColor: '#c2413a', order: 2 }, // matches --neg
           { type: 'line', label: 'Property Profit', data: [], backgroundColor: UN.profit, borderColor: UN.profit, tension: 0.3, pointHoverRadius: 4, order: 1 },
         ],
       },
@@ -169,8 +168,10 @@
           const idx = hit ? hit.index : (els[0] ? els[0].index : null);
           if (idx === null || idx === undefined) return;
           const ym = chart.data.labels[idx];
-          const onCosts = hit && chart.data.datasets[hit.datasetIndex].label === 'Costs';
+          const onCosts = hit && chart.data.datasets[hit.datasetIndex].label === 'Operated Property Costs';
           const params = new URLSearchParams(Object.assign({}, CTX, { from: ym + '-01', to: ym + '-01' }));
+          // The bar is operated-property costs only, so open exactly that slice of Expenses (a single property is already in the URL).
+          if (onCosts && CTX.property === 'all') { params.set('scope', 'property'); params.set('model', 'operated'); }
           location.href = (onCosts ? EXPENSES : location.pathname) + '?' + params.toString();
         },
         scales: (() => {
@@ -184,7 +185,7 @@
             callbacks: {
               label: (item) => {
                 const i = S.months.indexOf(item.label);
-                if (item.dataset.label === 'Costs') return `Costs: ${moneyFull(S.costs[i])}`;
+                if (item.dataset.label === 'Operated Property Costs') return `Operated Property Costs: ${moneyFull(S.costs[i])}`;
                 if (item.dataset.label === 'Urban Nest Revenue') return `Urban Nest Revenue: ${moneyFull(S.income[i])}`;
                 return `Property Profit: ${moneyFull(S.profit[i])}`;
               },

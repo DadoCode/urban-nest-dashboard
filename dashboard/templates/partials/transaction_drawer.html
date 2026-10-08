@@ -12,8 +12,8 @@
 
 <div class="drawer-section">
   <div class="drawer-field"><span>Property</span><strong>{{ tx.property_name }}</strong></div>
-  <div class="drawer-field"><span>Classification</span><strong>{{ 'Capex' if tx.capex else 'Opex' }}</strong></div>
-  <div class="drawer-field"><span>Source</span><strong>{{ tx.source|replace('_', ' ')|title }}</strong></div>
+  <div class="drawer-field"><span>Classification</span><strong>{% if tx.category == 'management_fee' %}Management fee (Urban Nest income){% elif tx.direction == 'income' %}{{ 'Booking income' if tx.category == 'booking_income' else 'Income' }}{% else %}{{ 'Capex' if tx.capex else 'Opex' }}{% endif %}</strong></div>
+  <div class="drawer-field"><span>Recorded by</span><strong>{{ tx.source|replace('_', ' ')|title }}</strong></div>
   {% include 'partials/provenance.html' %}
   {% if tx.edited_at %}
     <div class="drawer-field"><span>Last edited</span><strong>{{ tx.edited_at }}</strong></div>
@@ -29,7 +29,7 @@
   </div>
 {% endif %}
 
-{% if tx.category != 'reconciliation' %}
+{% if tx.category != 'reconciliation' and not workbook_row %}
   <form method="post" action="{{ url_for('expenses.edit_transaction', tx_id=tx.id) }}" class="drawer-form">
     <label>Property
       <select name="property_id">
@@ -51,4 +51,8 @@
   <form method="post" action="{{ url_for('expenses.delete_transaction', tx_id=tx.id) }}" onsubmit="return confirm('Delete this transaction? This cannot be undone.')" style="margin-top:8px">
     <button type="submit" class="danger">Delete transaction</button>
   </form>
+{% endif %}
+{% if workbook_row %}
+  <p class="note" style="margin-top:var(--s3)">This row was written by a monthly workbook import, so it can't be edited or deleted one row at a time: the workbook, the ledger and the dashboard have to stay identical.
+    To correct it, fix the workbook and re-import (you will see a preview first), or undo the import{% if wb %} (<a href="{{ url_for('imports.batch', batch_id=wb.batch_id) }}#{{ wb.anchor }}">batch #{{ wb.batch_id }}</a>){% endif %}.</p>
 {% endif %}

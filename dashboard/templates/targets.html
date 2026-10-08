@@ -72,7 +72,7 @@
             {% for r in rows %}
               {% set rv = r.metrics.revenue %}{% set pf = r.metrics.profit %}{% set oc = r.metrics.occupancy %}
               <tr id="target-row-{{ r.id }}" class="clickable {{ 'focus-row' if r.id == focus_property }}" hx-get="{{ url_for('targets.edit', property_id=r.id, basis=basis, month=month) }}" hx-target="#drawer" hx-swap="innerHTML">
-                <td>{{ r.name }}</td>
+                <td>{{ r.name }} <a class="mlink note" href="{{ url_for('properties.performance_tab', property_id=r.id, **{'from': month ~ '-01', 'to': month ~ '-01', 'compare': 'previous_period'}) }}" onclick="event.stopPropagation()" aria-label="Open Performance for {{ r.name }}, {{ month_label }}">Performance ›</a></td>
                 <td class="num">{{ rv.actual|money if rv.actual is not none else '—' }}</td>
                 <td class="num">{% if rv.target %}{{ rv.target|money }}{% else %}<span class="muted">—</span>{% endif %}{% if rv.saved %} <span class="pill" title="You set this target">Set</span>{% endif %}</td>
                 <td>{{ target_progress(rv) }}</td>

@@ -8,7 +8,7 @@
     {% set scope_views = {'all': 'All', 'property': 'Property Costs', 'business': 'Business Costs'} %}
     <div class="seg" style="margin-bottom:var(--s4)">
       {% for key, label in scope_views.items() %}
-        <a class="{{ 'on' if scope == key }}" href="{{ xurl(base_params, scope=key) }}">{{ label }}</a>
+        <a class="{{ 'on' if scope == key }}" href="{{ xurl(seg_base, scope=key) }}">{{ label }}</a>
       {% endfor %}
     </div>
   {% endif %}

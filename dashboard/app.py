@@ -241,8 +241,15 @@ def create_app():
         from services.context import link_params
         return url_for(endpoint, **link_params(keep_property, **values))
 
+    def wsurl(ctx, endpoint, property_id, **extra):
+        """A link into one property's workspace tab carrying the selected period and comparison explicitly."""
+        from flask import url_for
+        from services.context import workspace_params
+        return url_for(endpoint, property_id=property_id, **workspace_params(ctx), **extra)
+
     flask_app.jinja_env.globals["xurl"] = xurl
     flask_app.jinja_env.globals["cx"] = cx
+    flask_app.jinja_env.globals["wsurl"] = wsurl
 
     register_blueprints(flask_app)
     return flask_app

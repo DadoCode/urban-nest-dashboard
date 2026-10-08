@@ -19,6 +19,7 @@
     {% if compare == 'previous_period' and t.delta is defined %}{{ delta(t.delta, 'vs ' ~ compare_label, invert) }}
     {% elif compare == 'previous_year' and t.delta_ly is defined %}{{ delta(t.delta_ly, 'vs ' ~ compare_label, invert) }}{% endif %}
     {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
+    {% if t.note_html %}<div class="note">{{ t.note_html|safe }}</div>{% endif %}
     {% if sparkline_id %}<div class="tile-spark"><canvas id="{{ sparkline_id }}"></canvas></div>{% endif %}
     {% if href %}<span class="chev">›</span></a>{% else %}</div>{% endif %}
 {%- endmacro %}
@@ -81,3 +82,6 @@
   {%- set k = platform|channel_key -%}
   <span class="chan"><i class="chan-{{ k }}"></i>{{ CHANNELS[k] if k != 'other' or not platform else platform|replace('_', ' ')|title }}</span>
 {%- endmacro %}
+
+{# A figure that opens the evidence behind it. Quiet by design: same text, a dotted underline, and a clearer one on hover/focus. #}
+{% macro mlink(href, text, label) -%}<a class="mlink" href="{{ href }}" aria-label="{{ label }}">{{ text }}</a>{%- endmacro %}

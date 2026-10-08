@@ -730,3 +730,19 @@ a.sort:hover, a.sort.on { color: var(--ink); }
 .viewer-note { background: var(--neutral-dim); color: var(--ink-soft); font-size: var(--fs-small); padding: 8px var(--s4); border-radius: var(--radius-sm); margin-bottom: var(--s3); }
 body.viewer .add-btn, body.viewer [onclick*="add-apartment-dialog"] { display: none; }
 form.view-only { opacity: 0.6; }
+
+/* ---------- drilldown links: a number that opens the records behind it ---------- */
+a.mlink { color: inherit; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; text-decoration-thickness: 1px; padding: 2px 0; border-radius: 3px; }
+a.mlink:hover { color: var(--brand-ink); text-decoration-style: solid; text-decoration-color: var(--brand-ink); }
+a.mlink:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.cost-line { margin: calc(var(--s2) * -1) 0 var(--s4); font-size: var(--fs-small); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px var(--s3); align-items: baseline; }
+.cost-line a { color: var(--ink); text-decoration: none; padding: 4px 0; min-height: 24px; }
+.cost-line a strong { font-weight: 600; }
+.cost-line a:hover { color: var(--brand-ink); text-decoration: underline; }
+.cost-line a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+.pill.review-link { text-decoration: none; }
+.recs-total td { font-weight: 600; border-top: 1px solid var(--line-strong); }
+.hide-sm { }
+@media (max-width: 760px) { .hide-sm { display: none; } }
+.sum-line { display: flex; flex-wrap: wrap; gap: 4px var(--s4); font-size: var(--fs-small); color: var(--muted); margin: 0 0 var(--s4); }
+.sum-line strong { color: var(--ink); font-weight: 600; }

@@ -39,22 +39,31 @@
     </div>
   {% endcall %}
 
-  {% call section("By property", "Detail") %}
+  {% call section("By property", "Detail · " ~ current_month, "by-property") %}
     <div class="card flush">
       <table>
-        <thead><tr><th>Property</th><th class="num">Occupancy</th><th class="num">Days booked</th><th class="num">Change vs prior month</th></tr></thead>
+        <thead><tr><th>Property</th><th class="num">Occupancy</th><th class="num">Booked nights</th><th class="num">Available nights</th><th class="num hide-sm">Gross Booking Revenue</th><th class="num hide-sm">ADR</th><th class="num hide-sm">RevPAR</th><th class="num hide-sm">Change vs prior period</th></tr></thead>
         <tbody>
           {% for r in rows %}
             <tr>
-              <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+              <td><a href="{{ wsurl(ctx, 'properties.bookings', r.id) }}#booked-nights">{{ r.name }}</a></td>
               <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
               <td class="num">{{ '%.0f'|format(r.days_booked) }}</td>
-              <td class="num">{% if r.delta is not none %}{{ delta(r.delta, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td class="num">{{ '%.0f'|format(r.available) }}</td>
+              <td class="num hide-sm">{{ r.gross|money }}</td>
+              <td class="num hide-sm">{{ r.adr|money }}</td>
+              <td class="num hide-sm">{{ r.revpar|money }}</td>
+              <td class="num hide-sm">{% if r.delta is not none %}{{ delta(r.delta, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
             </tr>
           {% endfor %}
         </tbody>
+        <tfoot>
+          <tr class="recs-total"><td>Portfolio</td><td class="num">{{ '%.0f'|format(totals.occupancy * 100) }}%</td><td class="num">{{ '%.0f'|format(totals.days_booked) }}</td><td class="num">{{ '%.0f'|format(totals.available) }}</td>
+            <td class="num hide-sm">{{ totals.gross|money }}</td><td class="num hide-sm">{{ totals.adr|money }}</td><td class="num hide-sm">{{ totals.revpar|money }}</td><td class="hide-sm"></td></tr>
+        </tfoot>
       </table>
     </div>
+    <p class="note" style="margin-top:var(--s2)">Occupancy = booked nights ÷ available nights. ADR = Gross Booking Revenue ÷ booked nights. RevPAR = Gross Booking Revenue ÷ available nights. Click a property for the records behind its nights.</p>
   {% endcall %}
 
   <script>

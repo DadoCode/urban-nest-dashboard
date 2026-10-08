@@ -2,6 +2,7 @@ import datetime
 import json
 
 from flask import Blueprint, flash, make_response, redirect, render_template, request, url_for
+from markupsafe import Markup
 
 import db
 import services.extraction as extraction
@@ -11,7 +12,9 @@ import services.sources as src
 from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta, is_managed
 from services.completeness import completeness_for, health_for, not_active, seed_defaults
 from services.kpis import _has_activity as _kpi_has_activity
-from services.context import compare_bounds, link_params, range_params, request_context
+from services.context import compare_bounds, link_params, range_params, request_context, workspace_params
+import services.drilldown as drill
+from services.provenance import review_status
 import services.ingest as ingest
 from services.audit import record
 from services.vendors import get_or_create_vendor
@@ -50,6 +53,7 @@ def index():
     if sort_mg not in ("revenue", "occupancy", "name"):
         sort_mg = "revenue"
     rows = []
+    lo, hi = _period_ym(start, end)
     for p in flats:
         # adjusted_kpi_snapshot(): Revenue/Net profit are what this business
         # actually earns -- full figures for an owned flat, the fee share
@@ -63,6 +67,7 @@ def index():
             "occupancy": snap["occupancy"],
             "model": "Managed" if is_managed(p) else "Operated",
             "managed": is_managed(p), "fee": fee,
+            "review": (lambda r: r[1] if r and r[0] == "REVIEW" else None)(review_status(conn, p["id"], lo, hi)),
             # nothing is expected of it in this period (not started, ended, or inactive with no activity in the period): no performance to show
             "not_active": bool(not_active(conn, p["id"], start, end)) and not (not p["active"] and _kpi_has_activity(conn, p["id"], datetime.date.fromisoformat(start), datetime.date.fromisoformat(end))),
         })
@@ -75,11 +80,20 @@ def index():
     operated = _sorted([r for r in rows if not r["managed"]], sort_op)
     managed = _sorted([r for r in rows if r["managed"]], sort_mg)
 
+    # What the Overview tiles add up from: operated revenue + management fees = Urban Nest Revenue; operated profit + fees = Property
+    # Profit. Sums of the per-property KPI values shown below, only when the list is the whole portfolio (no search, no status filter).
+    summary = None
+    if status == "active" and not q and rows:
+        op_rows, mg_rows = [r for r in rows if not r["managed"]], [r for r in rows if r["managed"]]
+        summary = {"revenue": sum(r["revenue"] for r in rows), "profit": sum(r["profit"] for r in rows),
+                   "op_revenue": sum(r["revenue"] for r in op_rows), "op_profit": sum(r["profit"] for r in op_rows),
+                   "fees": sum(r["revenue"] for r in mg_rows)}
+
     return render_template(
         "properties.html", active="properties", all_properties=get_properties(conn), active_property=None,
         operated=operated, managed=managed, q=q, status=status, sort_op=sort_op, sort_mg=sort_mg,
         current_month=ctx["display"], total_count=active_count if status == "active" else len(rows), inactive_with_activity=inactive_with_activity,
-        context_bar=True, ctx=ctx, hide_property=True,
+        context_bar=True, ctx=ctx, hide_property=True, summary=summary,
     )
 
 
@@ -115,6 +129,16 @@ def _ws(conn, ctx, prop, tab, **extra):
 
 def cx_url(endpoint, **values):
     return url_for(endpoint, **link_params(**values))
+
+
+def ws_url(endpoint, ctx, property_id, anchor="", **extra):
+    """A link to one property's workspace tab with the selected period and comparison spelled out in the URL."""
+    return url_for(endpoint, property_id=property_id, **workspace_params(ctx, **extra)) + (f"#{anchor}" if anchor else "")
+
+
+def _period_ym(start, end):
+    last = datetime.date.fromisoformat(end) - datetime.timedelta(days=1)
+    return start[:7], last.strftime("%Y-%m")
 
 
 def health_title(ctx):
@@ -160,37 +184,62 @@ def _overview_tiles(conn, prop, ctx):
         cur_occ = kpis.occupancy(conn, property_id, start, end)
         prev_gross, prev_fee, prev_occ = (kpis.revenue(conn, property_id, *cmp_b), kpis.business_income(conn, property_id, *cmp_b),
                                            kpis.occupancy(conn, property_id, *cmp_b)) if cmp_b else (None, None, None)
+        rev_url = ws_url("properties.bookings", ctx, property_id, "revenue-records")
+        fee_url = ws_url("properties.bookings", ctx, property_id, "fees")
+        nights_url = ws_url("properties.bookings", ctx, property_id, "booked-nights")
+        lo, hi = _period_ym(start, end)
+        review = review_status(conn, property_id, lo, hi)
+        review_note = (Markup(f'<a class="pill warn review-link" href="/imports/{review[1]}#prop-{property_id}" title="The import that wrote this property\'s figures left it in REVIEW. Open the reason.">REVIEW ›</a>')
+                       if review and review[0] == "REVIEW" else None)
         primary = [
             {"key": "gross_booking_revenue", "label": f"Gross Booking Revenue — {period_label}", "value": f"£{cur_gross:,.0f}",
-             "delta": d(cur_gross, prev_gross, 100), "info": METRIC_INFO.get("gross_booking_revenue")},
+             "delta": d(cur_gross, prev_gross, 100), "info": METRIC_INFO.get("gross_booking_revenue"), "href": rev_url, "hint": "See the booking income rows behind this"},
             {"key": "fee", "label": "Management Fee Earned", "value": f"£{cur_fee:,.0f}",
-             "delta": d(cur_fee, prev_fee, 20), "info": METRIC_INFO.get("fee")},
-            {"key": "occupancy", "label": "Occupancy", "value": f"{cur_occ * 100:.0f}%", "delta": d(cur_occ, prev_occ, 0.05)},
+             "delta": d(cur_fee, prev_fee, 20), "info": METRIC_INFO.get("fee"), "href": fee_url, "hint": "See the fee record behind this", "note_html": review_note},
+            {"key": "occupancy", "label": "Occupancy", "value": f"{cur_occ * 100:.0f}%", "delta": d(cur_occ, prev_occ, 0.05),
+             "href": nights_url, "hint": "See the booked and available nights behind this"},
         ]
         has_data = bool(cur_gross or cur_occ or cur_fee)
         secondary = [
-            {"label": "ADR", "value": f"£{kpis.adr(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("adr")},
-            {"label": "RevPAR", "value": f"£{kpis.revpar(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("revpar")},
+            {"label": "ADR", "value": f"£{kpis.adr(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("adr"), "href": nights_url, "hint": "Booking revenue ÷ booked nights"},
+            {"label": "RevPAR", "value": f"£{kpis.revpar(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("revpar"), "href": nights_url, "hint": "Booking revenue ÷ available nights"},
         ] if has_data else []
     else:
         snap = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
         prev_snap = kpis.adjusted_kpi_snapshot(conn, property_id, *cmp_b) if cmp_b else None
         cur_costs = _costs(conn, start, end, property_id=property_id)
         prev_costs = _costs(conn, *cmp_b, property_id=property_id) if cmp_b else None
+        rev_url = ws_url("properties.bookings", ctx, property_id, "revenue-records")
+        nights_url = ws_url("properties.bookings", ctx, property_id, "booked-nights")
+        costs_url = ws_url("properties.expenses_tab", ctx, property_id)
+        lo, hi = _period_ym(start, end)
+        review = review_status(conn, property_id, lo, hi)
+        review_note = (Markup(f'<a class="pill warn review-link" href="/imports/{review[1]}#prop-{property_id}" title="The import that wrote this property\'s figures left it in REVIEW. Open the reason.">REVIEW ›</a>')
+                       if review and review[0] == "REVIEW" else None)
+        def money(v):
+            return ("−" if v < 0 else "") + f"£{abs(v):,.0f}"
+        # Property Profit = the Urban Nest Revenue above minus the property's own costs: the same two figures the KPI
+        # snapshot already holds, shown as the sum they are (each side opens its own records).
+        profit_note = Markup(f'<a class="mlink" href="{rev_url}" aria-label="Revenue records behind Urban Nest Revenue">Revenue {money(snap["revenue"])}</a> − '
+                             f'<a class="mlink" href="{costs_url}" aria-label="Expenses behind the property costs">Costs {money(snap["costs"])}</a> = {money(snap["net_profit"])}')
         primary = [
             {"key": "revenue", "label": f"Urban Nest Revenue — {period_label}", "value": f"£{snap['revenue']:,.0f}",
-             "delta": d(snap["revenue"], prev_snap["revenue"] if prev_snap else None, 100), "info": METRIC_INFO.get("revenue")},
+             "delta": d(snap["revenue"], prev_snap["revenue"] if prev_snap else None, 100), "info": METRIC_INFO.get("revenue"),
+             "href": rev_url, "hint": "See the income rows behind this", "note_html": review_note},
             {"key": "property_costs", "label": "Property Costs", "value": f"£{cur_costs:,.0f}",
-             "delta": d(cur_costs, prev_costs, 100), "info": METRIC_INFO.get("property_costs")},
+             "delta": d(cur_costs, prev_costs, 100), "info": METRIC_INFO.get("property_costs"),
+             "href": costs_url, "hint": "See this property's expenses for the period"},
             {"key": "net_profit", "label": "Property Profit", "value": f"£{snap['net_profit']:,.0f}",
-             "delta": d(snap["net_profit"], prev_snap["net_profit"] if prev_snap else None, 1000), "info": METRIC_INFO.get("net_profit")},
+             "delta": d(snap["net_profit"], prev_snap["net_profit"] if prev_snap else None, 1000), "info": METRIC_INFO.get("net_profit"),
+             "note_html": profit_note},
             {"key": "occupancy", "label": "Occupancy", "value": f"{snap['occupancy'] * 100:.0f}%",
-             "delta": d(snap["occupancy"], prev_snap["occupancy"] if prev_snap else None, 0.05)},
+             "delta": d(snap["occupancy"], prev_snap["occupancy"] if prev_snap else None, 0.05),
+             "href": nights_url, "hint": "See the booked and available nights behind this"},
         ]
         has_data = bool(snap["revenue"] or snap["occupancy"] or cur_costs)
         secondary = [
-            {"label": "ADR", "value": f"£{snap['adr']:,.0f}", "info": METRIC_INFO.get("adr")},
-            {"label": "RevPAR", "value": f"£{snap['revpar']:,.0f}", "info": METRIC_INFO.get("revpar")},
+            {"label": "ADR", "value": f"£{snap['adr']:,.0f}", "info": METRIC_INFO.get("adr"), "href": nights_url, "hint": "Booking revenue ÷ booked nights"},
+            {"label": "RevPAR", "value": f"£{snap['revpar']:,.0f}", "info": METRIC_INFO.get("revpar"), "href": nights_url, "hint": "Booking revenue ÷ available nights"},
         ] if has_data else []
     return (primary, secondary) if has_data else ([], [])
 
@@ -315,6 +364,8 @@ def bookings(property_id):
         b_sort=b_sort, b_dir=b_dir, sort_href=sort_href, filters=filters, platforms=platforms, sources=sources,
         has_future=bool(facts["future"]), has_cancelled=bool(facts["cancelled"]),
         ctx_params=link_params(), inactive_stored=inactive_stored,
+        records=drill.revenue_records(conn, prop, start, end), evidence=drill.nights_evidence(conn, prop, start, end), managed=is_managed(prop),
+        not_active_now=bool(not_active(conn, property_id, start, end)) and not _kpi_has_activity(conn, property_id, datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)),
         # Bookings is the reservation evidence layer -- what guests
         # actually booked and paid, so it's Gross Booking Revenue (the
         # true guest value) here, never the adjusted Urban Nest figure
@@ -377,10 +428,13 @@ def performance_tab(property_id):
 
     mtd = ctx["partial"] and ctx["choice"] == "this_month"
 
+    nights_url = ws_url("properties.bookings", ctx, property_id, "booked-nights")
+
     def t(label, key, fmt, base):
         cv = cur[key]
         return {"label": label, "value": fmt(cv), "info": METRIC_INFO.get(key),
-                "delta": None if mtd else (pct_delta(cv, prev[key], min_base=base) if prev else None)}
+                "delta": None if mtd else (pct_delta(cv, prev[key], min_base=base) if prev else None),
+                "href": nights_url, "hint": "See the booked nights and booking revenue behind this"}
     tiles = [
         t("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%", 0.05),
         t("ADR", "adr", lambda v: f"£{v:,.0f}", 20),

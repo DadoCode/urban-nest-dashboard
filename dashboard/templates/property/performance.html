@@ -3,7 +3,7 @@
 {% block tab_content %}
   {% if tiles %}
     <div class="tiles">
-      {% for t in tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
+      {% for t in tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=t.href, hint=t.hint) }}{% endfor %}
     </div>
   {% else %}
     <div class="card">{{ empty_state("No " ~ ctx.display ~ " booking data for " ~ prop.name, "Import the monthly workbook or choose a different period.", "Import workbook", url_for('imports.index')) }}</div>

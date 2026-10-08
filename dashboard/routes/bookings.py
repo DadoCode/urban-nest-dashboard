@@ -11,6 +11,7 @@ import services.kpis as kpis
 import services.sources as src
 from services.common import METRIC_INFO, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta
 from services.context import compare_bounds, range_params, request_context
+from services.provenance import workbook_source
 
 bp = Blueprint("bookings", __name__)
 
@@ -106,7 +107,7 @@ def booking_drawer(booking_id):
                              (b["document_id"], b["reservation_id"])).fetchone()
                 or conn.execute("SELECT * FROM document_items WHERE document_id=? AND check_in=? AND check_out=? LIMIT 1",
                                 (b["document_id"], b["check_in"], b["check_out"])).fetchone())
-    return render_template("partials/booking_drawer.html", b=b, prov=ingest.provenance(conn, b["document_id"], line))
+    return render_template("partials/booking_drawer.html", b=b, prov=ingest.provenance(conn, b["document_id"], line), wb=workbook_source(conn, b))
 
 
 @bp.route("/bookings/day/<day>")
@@ -221,6 +222,8 @@ def performance(property_id=None):
 
     series_by_property = {}
     rows = []
+    period_start, period_end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
+    pstart, pend = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
     for p in flats:
         own_months = set(kpis.months_with_data(conn, p["id"]))
         values = []
@@ -233,17 +236,24 @@ def performance(property_id=None):
             values.append(round(kpis.occupancy(conn, p["id"], s, e) * 100, 1))
         series_by_property[p["name"]] = values
 
-        cstart, cend = kpis.month_bounds(year, month)
-        pstart, pend = kpis.month_bounds(py, pm)
+        # The whole selected period (not just its last month), so the rows add up to the portfolio occupancy tile that links here.
+        cstart, cend = period_start, period_end
         cur_occ = kpis.occupancy(conn, p["id"], cstart, cend)
         prev_occ = kpis.occupancy(conn, p["id"], pstart, pend)
         rows.append({
             "id": p["id"], "name": p["name"], "occupancy": cur_occ,
             "days_booked": kpis.booked_nights(conn, p["id"], cstart, cend),
-            "delta": None if mtd else (pct_delta(cur_occ, prev_occ) if f"{py}-{pm:02d}" in own_months else None),
+            "available": kpis.available_nights(conn, p["id"], cstart, cend),
+            "gross": kpis.accommodation_revenue(conn, p["id"], cstart, cend),
+            "revpar": kpis.revpar(conn, p["id"], cstart, cend),
+            "delta": None if mtd else (pct_delta(cur_occ, prev_occ) if pstart[:7] in own_months else None),
             "adr": kpis.adr(conn, p["id"], cstart, cend),
         })
     rows.sort(key=lambda r: r["occupancy"], reverse=True)
+    # The portfolio line the Overview Occupancy / RevPAR tiles show, from the same KPI functions: the rows above add up to it.
+    totals = {"days_booked": kpis.booked_nights(conn, None, period_start, period_end), "available": kpis.available_nights(conn, None, period_start, period_end),
+              "occupancy": kpis.occupancy(conn, None, period_start, period_end), "gross": kpis.accommodation_revenue(conn, None, period_start, period_end),
+              "adr": kpis.adr(conn, None, period_start, period_end), "revpar": kpis.revpar(conn, None, period_start, period_end)}
 
     portfolio_months = set(kpis.months_with_data(conn, None))
     portfolio_series = []
@@ -261,7 +271,7 @@ def performance(property_id=None):
     return render_template(
         "bookings/performance.html", active="bookings", active_bookings_tab="performance",
         all_properties=get_properties(conn), active_property=None, context_bar=True, ctx=ctx, hide_property=True,
-        current_month=f"{MONTH_NAMES[month]} {year}", rows=rows,
+        current_month=ctx["display"], rows=rows, totals=totals,
         heatmap_months=[MONTH_ABBR[int(ym.split('-')[1])] + " " + ym.split('-')[0][2:] for ym in heatmap_months],
         heatmap_rows=heatmap_rows,
         months_json=json.dumps(months), portfolio_json=json.dumps(portfolio_series),

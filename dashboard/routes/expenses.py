@@ -8,8 +8,9 @@ import db
 import services.ingest as ingest
 import services.kpis as kpis
 from services.audit import record, record_edits
-from services.common import CATEGORIES, MONTH_NAMES, get_properties, get_property, pct_delta
+from services.common import CATEGORIES, MANAGED_SQL, MONTH_NAMES, get_properties, get_property, is_managed, pct_delta
 from services.context import compare_bounds, range_params, request_context
+from services.provenance import is_workbook_row, workbook_source
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("expenses", __name__)
@@ -24,6 +25,7 @@ bp = Blueprint("expenses", __name__)
 # signal -- no property_id IS NULL case exists to handle separately.
 # ----------------------------------------------------------------------
 SCOPES = ("all", "property", "business")
+MODELS = ("operated", "managed")        # narrows Property Costs to operated (rent-to-rent) or managed properties
 
 
 def _scope(args):
@@ -31,7 +33,12 @@ def _scope(args):
     return s if s in SCOPES else "all"
 
 
-def _costs(conn, start, end, scope="all", property_id=None, capex=None):
+def _model_sql(model):
+    """SQL fragment (on `properties p`) narrowing to operated or managed flats; '' when no model is chosen."""
+    return f"p.type='flat' AND {'NOT ' if model == 'operated' else ''}{MANAGED_SQL}" if model in MODELS else ""
+
+
+def _costs(conn, start, end, scope="all", property_id=None, capex=None, model=None):
     """Sum of real expense transactions for a scope, joined to
     properties.type so Property/Business is decided by cost-centre, not
     category. category='management_fee' is always excluded here: that
@@ -51,6 +58,8 @@ def _costs(conn, start, end, scope="all", property_id=None, capex=None):
         params.append(property_id)
     elif scope == "property":
         clauses.append("p.type='flat'")
+        if model in MODELS:
+            clauses.append(_model_sql(model))
     elif scope == "business":
         clauses.append("p.type='overhead'")
     if capex is not None:
@@ -62,7 +71,7 @@ def _costs(conn, start, end, scope="all", property_id=None, capex=None):
     return row[0]
 
 
-def _ledger_where(ctx, start, end, args):
+def _ledger_where(ctx, start, end, args, model=None):
     """WHERE fragments for the ledger: the shared context (period,
     property) plus the ledger's own narrowing filters. A chart click
     sets t_month, which replaces the period with that single month.
@@ -91,6 +100,8 @@ def _ledger_where(ctx, start, end, args):
     if not ctx["property_id"]:
         if scope == "property":
             clauses.append("p.type='flat'")
+            if model in MODELS:
+                clauses.append(_model_sql(model))
         elif scope == "business":
             clauses.append("p.type='overhead'")
     t_scope = args.get("t_scope") or ""
@@ -116,6 +127,18 @@ def _ledger_where(ctx, start, end, args):
     return clauses, params, month, scope, t_scope
 
 
+def _back(default_endpoint="expenses.index"):
+    """Where to land after an edit/delete: the page the drawer was opened on, with every filter it carried (period,
+    property, scope, category, vendor, search, sort...). Same-host referrers on this app's own pages only."""
+    from urllib.parse import urlparse
+    ref = request.referrer
+    if ref:
+        u = urlparse(ref)
+        if u.netloc in ("", request.host) and (u.path.startswith("/expenses") or u.path.startswith("/properties/")):
+            return redirect(u.path + (f"?{u.query}" if u.query else "") + (f"#{u.fragment}" if u.fragment else ""))
+    return redirect(url_for(default_endpoint))
+
+
 @bp.route("/expenses")
 def index():
     conn = db.get_conn()
@@ -133,6 +156,13 @@ def index():
     # so this page falls back to a single-scope view (same shape as
     # before Phase 3, just without a standalone Opex/Capex tile pair).
     scope = None if pid else _scope(request.args)
+    # model=operated|managed narrows Property Costs to one kind of property, so a figure like Overview's "Operated Property
+    # Costs" can be reproduced exactly. It is a narrowing of the property scope and is ignored for one property or Business Costs.
+    model = request.args.get("model") if request.args.get("model") in MODELS else None
+    if pid or request.args.get("scope") == "business":
+        model = None
+    elif model:
+        scope = "property"
 
     if pid:
         cur_total = _costs(conn, start, end, property_id=pid)
@@ -158,9 +188,11 @@ def index():
         property_total = _costs(conn, start, end, scope="property")
         business_total = _costs(conn, start, end, scope="business")
         total = property_total + business_total
-        opex = _costs(conn, start, end, scope=scope, capex=False)
-        capex = _costs(conn, start, end, scope=scope, capex=True)
+        opex = _costs(conn, start, end, scope=scope, capex=False, model=model)
+        capex = _costs(conn, start, end, scope=scope, capex=True, model=model)
         headline = {"all": total, "property": property_total, "business": business_total}[scope]
+        if model:
+            headline = _costs(conn, start, end, scope="property", model=model)
         nights = kpis.booked_nights(conn, None, start, end)
 
         def prev_of(fn):
@@ -173,17 +205,19 @@ def index():
             summary_tiles.append({"label": "Business Costs", "value": f"£{business_total:,.0f}",
                                    "delta": d(business_total, prev_of(lambda a, b: _costs(conn, a, b, scope="business")))})
         headline_label = {"all": "Total Recorded Costs", "property": "Property Costs", "business": "Business Costs"}[scope]
+        if model:
+            headline_label = f"{model.capitalize()} Property Costs"
         summary_tiles.append({
             "label": headline_label, "value": f"£{headline:,.0f}",
             "sub": f"Opex £{opex:,.0f} · Capex £{capex:,.0f}",
-            "delta": d(headline, prev_of(lambda a, b: _costs(conn, a, b, scope=scope))),
+            "delta": d(headline, prev_of(lambda a, b: _costs(conn, a, b, scope=scope, model=model))),
         })
         # Cost/booked night isn't a meaningful number for Business Costs
         # alone (company overhead has no "booked nights" of its own) --
         # left out of that view rather than forced in. See routes/
         # expenses.py's index() docstring / the Phase 3 report for the
         # reasoning; recorded here so it isn't silently redefined later.
-        if scope != "business":
+        if scope != "business" and not model:
             numerator = total if scope == "all" else property_total
             info = ("Total recorded costs (property + business) divided by booked nights in the selected period."
                     if scope == "all" else
@@ -212,25 +246,32 @@ def index():
         # single property view above keeps one plain Costs series:
         # splitting Property/Business for one already-single-scope
         # property would just relabel the same bar, not add information.
-        chart_series = {"Property Costs": [], "Business Costs": []}
-        for ym in months:
-            y, m = map(int, ym.split("-"))
-            s, e = kpis.month_bounds(y, m)
-            chart_series["Property Costs"].append(_costs(conn, s, e, scope="property"))
-            chart_series["Business Costs"].append(_costs(conn, s, e, scope="business"))
+        if model:
+            chart_series = {f"{model.capitalize()} Property Costs": []}
+            for ym in months:
+                y, m = map(int, ym.split("-"))
+                s, e = kpis.month_bounds(y, m)
+                chart_series[f"{model.capitalize()} Property Costs"].append(_costs(conn, s, e, scope="property", model=model))
+        else:
+            chart_series = {"Property Costs": [], "Business Costs": []}
+            for ym in months:
+                y, m = map(int, ym.split("-"))
+                s, e = kpis.month_bounds(y, m)
+                chart_series["Property Costs"].append(_costs(conn, s, e, scope="property"))
+                chart_series["Business Costs"].append(_costs(conn, s, e, scope="business"))
 
     # ---- Property Costs section: by-property table + category breakdown ----
     property_rows = []
     property_categories = []
     if not pid and scope in ("all", "property"):
-        for p in flats:
+        for p in [p for p in flats if not model or is_managed(p) == (model == "managed")]:
             opex = _costs(conn, start, end, property_id=p["id"], capex=False)
             capex_amt = _costs(conn, start, end, property_id=p["id"], capex=True)
             property_rows.append({"id": p["id"], "name": p["name"], "opex": opex, "capex": capex_amt, "total": opex + capex_amt})
         property_rows.sort(key=lambda r: r["total"], reverse=True)
         property_categories = conn.execute(
-            """SELECT t.category, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN properties p ON p.id=t.property_id
-               WHERE t.direction='expense' AND t.category != 'management_fee' AND p.type='flat' AND t.date>=? AND t.date<?
+            f"""SELECT t.category, SUM(t.amount) amt, COUNT(*) n FROM transactions t JOIN properties p ON p.id=t.property_id
+               WHERE t.direction='expense' AND t.category != 'management_fee' AND p.type='flat' {('AND ' + _model_sql(model)) if model else ''} AND t.date>=? AND t.date<?
                GROUP BY t.category ORDER BY amt DESC""",
             (start, end)).fetchall()
 
@@ -248,7 +289,7 @@ def index():
     if pid:
         vendor_scope_clause, vendor_scope_params = "AND t.property_id=?", [pid]
     elif scope == "property":
-        vendor_scope_clause = "AND p.type='flat'"
+        vendor_scope_clause = "AND p.type='flat'" + (f" AND {_model_sql(model)}" if model else "")
     elif scope == "business":
         vendor_scope_clause = "AND p.type='overhead'"
     # LEFT JOIN, not JOIN: a transaction can carry a raw vendor name
@@ -286,7 +327,7 @@ def index():
         (start, end, *vendor_scope_params)).fetchone()[0]
 
     # ---- ledger, on this page, driven by the shared context + its own filters ----
-    clauses, params, f_month, f_scope, f_t_scope = _ledger_where(ctx, start, end, request.args)
+    clauses, params, f_month, f_scope, f_t_scope = _ledger_where(ctx, start, end, request.args, model=model)
     where = " AND ".join(clauses)
     # Default: newest first. Date and Amount are the two sortable columns;
     # id is the stable tiebreaker so equal dates/amounts never shuffle.
@@ -305,11 +346,16 @@ def index():
     f["t_month"] = f_month
     chips = []
     base = range_params(ctx)
+    seg_base = dict(base)                                         # scope switch links never carry a model
+    if model:
+        base["model"] = model
     def chip(label, drop):
         keep = {k: v for k, v in f.items() if v and k != drop}
         if (t_sort, t_dir) != ("date", "desc"):
             keep.update(t_sort=t_sort, t_dir=t_dir)
         chips.append({"label": label, "href": url_for("expenses.index", **{**base, **({"scope": scope} if scope else {}), **keep}) + "#ledger"})
+    if model:
+        chips.append({"label": f"{model.capitalize()} properties only", "href": url_for("expenses.index", **{**range_params(ctx), "scope": "property", **{k: v for k, v in f.items() if v}}) + "#ledger"})
     if f_month:
         y, m = map(int, f_month.split("-")); chip(f"{MONTH_NAMES[m]} {y}", "t_month")
     if f["t_scope"]:
@@ -345,7 +391,7 @@ def index():
         summary_tiles=summary_tiles, property_rows=property_rows,
         property_categories=property_categories, business_categories=business_categories,
         vendor_rows=vendors, vendorless_total=vendorless_total, ledger=ledger, ledger_total=ledger_total,
-        f=f, chips=chips, t_sort=t_sort, t_dir=t_dir, sort_href=sort_href, sources=sources, ledger_base=urlencode({**base, **({"scope": scope} if scope else {})}), base_params=base,
+        f=f, chips=chips, t_sort=t_sort, t_dir=t_dir, sort_href=sort_href, sources=sources, ledger_base=urlencode({**base, **({"scope": scope} if scope else {})}), base_params=base, seg_base=seg_base,
         all_vendors=conn.execute("SELECT id, name FROM vendors ORDER BY name").fetchall(),
         categories=CATEGORIES,
         months_json=json.dumps(months), chart_series_json=json.dumps(chart_series),
@@ -374,7 +420,7 @@ def transaction_drawer(tx_id):
             or conn.execute("SELECT * FROM document_items WHERE document_id=? AND ABS(amount-?)<0.01 AND include=1 LIMIT 1", (doc["id"], tx["amount"])).fetchone()
     return render_template(
         "partials/transaction_drawer.html", tx=tx, history=history, doc=doc, line=line,
-        prov=ingest.provenance(conn, tx["document_id"], line),
+        prov=ingest.provenance(conn, tx["document_id"], line), wb=workbook_source(conn, tx), workbook_row=is_workbook_row(tx),
         flats=get_properties(conn, include_overhead=True), categories=CATEGORIES,
     )
 
@@ -387,12 +433,15 @@ def edit_transaction(tx_id):
         return "<div class='card'>Transaction not found.</div>", 404
     if tx["category"] == "reconciliation":
         flash("Historical adjustments can't be edited: they keep the historical totals matching the original Excel accounts.", "warning")
-        return redirect(url_for("expenses.index"))
+        return _back()
+    if is_workbook_row(tx):
+        flash("That row was written by a monthly workbook import, so it can't be edited one row at a time. Correct the workbook and re-import it, or undo the import.", "warning")
+        return _back()
 
     new_property_id = request.form.get("property_id", tx["property_id"])
     if not get_property(conn, new_property_id):
         flash("That property doesn't exist, so nothing was changed. Choose one from the list.", "error")
-        return redirect(url_for("expenses.index"))
+        return _back()
 
     vendor_name = request.form.get("vendor", "").strip()
     vendor_id = get_or_create_vendor(conn, vendor_name)
@@ -414,7 +463,7 @@ def edit_transaction(tx_id):
         )
         conn.commit()
         flash("✓ Transaction updated.", "success")
-    return redirect(url_for("expenses.index"))
+    return _back()
 
 
 @bp.route("/expenses/transactions/<int:tx_id>/delete", methods=["POST"])
@@ -422,13 +471,16 @@ def delete_transaction(tx_id):
     conn = db.get_conn()
     tx = conn.execute("SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone()
     if not tx:
-        return redirect(url_for("expenses.index"))
+        return _back()
     if tx["category"] == "reconciliation":
         flash("Historical adjustments can't be deleted: they keep the historical totals matching the original Excel accounts.", "warning")
-        return redirect(url_for("expenses.index"))
+        return _back()
+    if is_workbook_row(tx):
+        flash("That row was written by a monthly workbook import, so it can't be deleted one row at a time. Correct the workbook and re-import it, or undo the import.", "warning")
+        return _back()
     record(conn, "transaction", tx_id, "delete", old_value=f"{tx['vendor']} £{tx['amount']}")
     conn.execute("UPDATE document_items SET duplicate_of=NULL WHERE duplicate_of=?", (tx_id,))
     conn.execute("DELETE FROM transactions WHERE id=?", (tx_id,))
     conn.commit()
     flash("✓ Transaction deleted.", "success")
-    return redirect(url_for("expenses.index"))
+    return _back()

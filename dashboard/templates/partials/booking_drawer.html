@@ -1,4 +1,20 @@
 {% from "_components.html" import channel %}
+{% if b.reservation_id == 'monthly-aggregate' %}
+<div class="drawer-head">
+  <div>
+    <div class="drawer-amount">{{ b.nights }} booked nights</div>
+    <div class="note">Monthly total · {{ b.property_name }}</div>
+  </div>
+  <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
+</div>
+<p class="note" style="margin-top:14px">This is the month's booked-nights total as recorded, not an individual reservation. Revenue for the month is held as booking-income rows (see Revenue records).</p>
+<div class="drawer-section">
+  <div class="drawer-field"><span>Property</span><strong>{{ b.property_name }}</strong></div>
+  <div class="drawer-field"><span>Counted from</span><strong>{{ b.check_in }}</strong></div>
+  <div class="drawer-field"><span>to</span><strong>{{ b.check_out }}</strong></div>
+  {% include 'partials/provenance.html' %}
+</div>
+{% else %}
 <div class="drawer-head">
   <div>
     <div class="drawer-amount">{{ b.net_revenue|money2 }}</div>
@@ -23,6 +39,7 @@
 </div>
 
 <div class="drawer-section">
-  <div class="drawer-field"><span>Source</span><strong>{{ b.source|replace('_', ' ')|title }}</strong></div>
+  <div class="drawer-field"><span>Recorded by</span><strong>{{ b.source|replace('_', ' ')|title }}</strong></div>
   {% include 'partials/provenance.html' %}
 </div>
+{% endif %}

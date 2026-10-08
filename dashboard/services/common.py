@@ -47,6 +47,10 @@ def pct_delta(current, previous, min_base=0):
     return round((current - previous) / abs(previous) * 100, 1)
 
 
+# SQL form of is_managed() for queries that join `properties p`: the explicit flag OR a fee percentage.
+MANAGED_SQL = "(COALESCE(p.is_managed,0)=1 OR COALESCE(p.management_fee_pct,0)>0)"
+
+
 def is_managed(prop):
     """True for a property managed for an owner. Decided by the explicit flag OR a fee percentage, so a managed property
     whose percentage is not known yet (never invented) is still managed."""

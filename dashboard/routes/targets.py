@@ -43,7 +43,7 @@ def _num(raw):
 
 def _history(conn, property_id, cur):
     series = [r for r in kpis.monthly_series(conn, property_id) if r["ym"] <= cur and r["revenue"] > 0]
-    return {r["ym"]: {"revenue": round(r["revenue"], 2), "profit": round(r["net_profit"], 2),
+    return {r["ym"]: {"revenue": round(r["revenue"], 2), "profit": round(r["net_profit"], 2), "costs": round(r["costs"], 2),
                       "occupancy": round(r["occupancy"] * 100, 1)} for r in series}
 
 
@@ -150,7 +150,9 @@ def edit(property_id):
     avg_label = "Average of all recorded months" if basis == "all" else f"{basis}-month average"
     return render_template(
         "partials/target_drawer.html", p=view, month=month, month_label=_label(month), basis=basis,
-        avg_label=avg_label, history_json=json.dumps(view["hist"]),
+        avg_label=avg_label, history_json=json.dumps(view["hist"]), formula=view["hist"].get(month),
+        perf_url=url_for("properties.performance_tab", property_id=property_id, **{"from": f"{month}-01", "to": f"{month}-01", "compare": "previous_period"}),
+        managed=bool(p["management_fee_pct"] or p["is_managed"]),
         ly_label=f"{MONTH_NAMES[int(month[5:])]} {int(month[:4]) - 1}",
     )
 

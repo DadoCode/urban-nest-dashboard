@@ -3,11 +3,14 @@
 {% block tab_content %}
   {% if primary_tiles %}
     <div class="tiles">
-      {% for t in primary_tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '') }}{% endfor %}
+      {% for t in primary_tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=t.href, hint=t.hint) }}{% endfor %}
     </div>
     {% if secondary_tiles %}
       <div class="tiles tiles-secondary">
-        {% for t in secondary_tiles %}<div class="tile"><div class="label" {% if t.info %}title="{{ t.info }}"{% endif %}>{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endfor %}
+        {% for t in secondary_tiles %}
+          {% if t.href %}<a class="tile link" href="{{ t.href }}" title="{{ t.hint or t.info }}"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div><span class="chev">›</span></a>
+          {% else %}<div class="tile"><div class="label" {% if t.info %}title="{{ t.info }}"{% endif %}>{{ t.label }}</div><div class="value">{{ t.value }}</div></div>{% endif %}
+        {% endfor %}
       </div>
     {% endif %}
   {% else %}

@@ -1,11 +1,12 @@
 import json
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template, request, url_for
 
 import db
 import services.kpis as kpis
 from services.common import METRIC_INFO, get_properties, is_managed, pct_delta
-from services.context import request_context, range_params
+from routes.expenses import _costs
+from services.context import request_context, range_params, workspace_params
 
 bp = Blueprint("overview", __name__)
 
@@ -154,8 +155,32 @@ def index():
             values.append(round(kpis.occupancy(conn, p["id"], s, e) * 100, 1))
         occupancy_by_property[p["id"]] = {"name": p["name"], "values": values}
 
+    # Where each headline figure opens. Every destination shows a breakdown that adds up to the number clicked.
+    pid = ctx["property_id"]
+    if pid:
+        def ws(endpoint, anchor=""):
+            return url_for(endpoint, property_id=pid, **workspace_params(ctx)) + (f"#{anchor}" if anchor else "")
+        drill = {"revenue": ws("properties.bookings", "revenue-records"), "net_profit": ws("properties.detail"),
+                 "occupancy": ws("properties.bookings", "booked-nights"), "revpar": ws("properties.bookings", "booked-nights")}
+    else:
+        props_url = url_for("properties.index", **range_params(ctx))
+        drill = {"revenue": props_url, "net_profit": props_url,
+                 "occupancy": url_for("bookings.performance", **range_params(ctx)), "revpar": url_for("bookings.performance", **range_params(ctx))}
+    hints = {"revenue": "See which properties and records make up this revenue", "net_profit": "See profit and management fees by property",
+             "occupancy": "See booked and available nights by property", "revpar": "See booking revenue and available nights by property"}
+
+    # Property Costs / Business Costs: the same expense logic the Expenses page uses (routes/expenses._costs), nothing new.
+    if pid:
+        cost_line = {"property": {"value": _costs(conn, start, end, property_id=pid), "href": url_for("expenses.index", **range_params(ctx)), "title": "This property's recorded costs"}}
+    else:
+        op, mg = _costs(conn, start, end, scope="property", model="operated"), _costs(conn, start, end, scope="property", model="managed")
+        cost_line = {"property": {"value": _costs(conn, start, end, scope="property"), "href": url_for("expenses.index", **range_params(ctx, scope="property")),
+                                  "title": f"Operated £{op:,.0f} + managed £{mg:,.0f}"},
+                     "business": {"value": _costs(conn, start, end, scope="business"), "href": url_for("expenses.index", **range_params(ctx, scope="business")),
+                                  "title": "Company-level costs, not part of Property Profit"}}
+
     return render_template(
-        "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats),
+        "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats), drill=drill, hints=hints, cost_line=cost_line,
         active_property=ctx["property_id"], viewing=viewing,
         primary_tiles=primary_tiles, ctx=ctx,
         context_bar=True, rtr_rows=rtr_rows, managed_rows=managed_rows,
