@@ -61,8 +61,15 @@ def review_status(conn, property_id, start_ym, end_ym):
         if property_id in json.loads(b["properties"] or "[]"):
             seen[b["period"]] = b
     verdict = None
+    row = conn.execute("SELECT management_fee_pct FROM properties WHERE id=?", (property_id,)).fetchone()
+    pct = row["management_fee_pct"] if row else None
     for ym in sorted(seen):
         checks = json.loads(seen[ym]["reconciliation"] or "{}").get(property_id, [])
+        # The fee-rate check compares the fee actually recorded with the property's configured percentage, and the configuration can
+        # change after an import (a decision to follow the workbook's rate resolves it). Re-judge that one check against the
+        # CURRENT percentage with the importer's own tolerance (0.05 points); every other check stays exactly as stored.
+        checks = [dict(c, status=("PASS" if abs(c["workbook"] * 100 - pct) <= 0.05 else "REVIEW")) if (c["metric"] == "Management fee rate" and pct and c.get("workbook") is not None) else c
+                  for c in checks]
         flagged = [c for c in checks if c["status"] == "REVIEW" or (c["status"] == "NO CONTROL" and c["imported"] not in (0, 0.0, None))]
         if flagged:
             return "REVIEW", seen[ym]["id"]

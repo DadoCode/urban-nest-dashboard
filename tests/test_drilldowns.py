@@ -293,9 +293,20 @@ rows_n = [int(a) for a, _b in re.findall(r'<td class="num">(\d+)</td>\s*<td clas
 check("the property rows add up to the portfolio booked nights", sum(rows_n) == tot_nights, (rows_n, tot_nights))
 check("the property names open that property's booked-nights evidence with the period", re.search(r'href="/properties/op1/bookings\?[^"]*from=2026-09-01[^"]*#booked-nights"', bp) is not None)
 
+# ------------------------------------------------------------------ REVIEW is judged against the CURRENT configuration
+print("REVIEW follows the current fee configuration")
+from services.provenance import review_status  # noqa: E402
+check("fee-rate REVIEW stored at import is still REVIEW while the configured % disagrees (12% vs 10.0% recorded)", review_status(conn, "mg1", SEP, SEP) == ("REVIEW", 7))
+c.execute("UPDATE properties SET management_fee_pct=10.0 WHERE id='mg1'"); c.commit()
+check("…and resolves to PASS once the configuration follows the workbook's rate (no pill on the page any more)",
+      review_status(db.get_conn(), "mg1", SEP, SEP) == ("PASS", 7) and "REVIEW" not in client.get(f"/properties/mg1?{Q}").data.decode())
+c.execute("UPDATE properties SET management_fee_pct=12.0 WHERE id='mg1'"); c.commit()
+check("a property with no workbook import has no verdict at all", review_status(db.get_conn(), "mg2", SEP, SEP) is None)
+
 # ------------------------------------------------------------------ responsive hooks
 print("Responsive hooks")
 css = (Path(__file__).resolve().parent.parent / "dashboard" / "static" / "style.css").read_text()
+check("tab bars, import detail cards and legends scroll inside themselves on narrow screens instead of widening the page", ".tabs { overflow-x: auto;" in css and "details.card { overflow-x: auto; }" in css)
 check("secondary columns collapse below 760px and metric links keep a focus ring", ".hide-sm { display: none; }" in css and "a.mlink:focus-visible" in css and ".cost-line a:focus-visible" in css)
 
 print(f"\n{COUNT - len(FAILS)}/{COUNT} checks passed" + ("" if not FAILS else f"; FAILED: {FAILS}"))

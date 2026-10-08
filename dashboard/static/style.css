@@ -732,7 +732,7 @@ body.viewer .add-btn, body.viewer [onclick*="add-apartment-dialog"] { display: n
 form.view-only { opacity: 0.6; }
 
 /* ---------- drilldown links: a number that opens the records behind it ---------- */
-a.mlink { color: inherit; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; text-decoration-thickness: 1px; padding: 2px 0; border-radius: 3px; }
+a.mlink { color: inherit; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; text-decoration-thickness: 1px; display: inline-block; padding: 3px 0; min-height: 24px; box-sizing: border-box; border-radius: 3px; }
 a.mlink:hover { color: var(--brand-ink); text-decoration-style: solid; text-decoration-color: var(--brand-ink); }
 a.mlink:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .cost-line { margin: calc(var(--s2) * -1) 0 var(--s4); font-size: var(--fs-small); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px var(--s3); align-items: baseline; }
@@ -746,3 +746,12 @@ a.mlink:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 @media (max-width: 760px) { .hide-sm { display: none; } }
 .sum-line { display: flex; flex-wrap: wrap; gap: 4px var(--s4); font-size: var(--fs-small); color: var(--muted); margin: 0 0 var(--s4); }
 .sum-line strong { color: var(--ink); font-weight: 600; }
+
+/* ---------- narrow screens: keep scrolling inside the component, never the whole page ---------- */
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs .tab, .tabs .tabs-divider { flex: none; }
+details.card { overflow-x: auto; }
+.filter-bar select, .filter-bar input { max-width: 100%; min-width: 0; }
+.chan-legend { max-width: 100%; }
+.chan-legend .chan { max-width: 100%; white-space: normal; }

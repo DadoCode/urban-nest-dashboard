@@ -308,3 +308,20 @@ Three different things are kept apart:
 **Fee-label rule:** a row whose label is a management fee (including "Management Faris 15%", "FG Mngmt Fee (12%)", "Mngmnt Fee") on a property sheet is category `management_fee`; business-cost rows never become management fees. The row diff is category-aware: a row whose category changes shows as CHANGED, not UNCHANGED.
 
 **Calculated-blank formulas:** a formula cell whose cached result is an empty string is blank by design, not an "uncalculated" error.
+
+## 17. Drilldowns: how a number leads to its records
+
+Rule: the number you click equals the breakdown you land on. Nothing is recalculated for a drilldown; every page reuses the KPI functions.
+
+| Figure | Opens | Reconciles to |
+|---|---|---|
+| Overview Urban Nest Revenue / Property Profit | Properties (summary line: operated + management fees) | `adjusted_kpi_snapshot` for the portfolio |
+| Overview "Operated Property Costs" bar | Expenses `scope=property&model=operated` | operated-property costs, to the penny |
+| Overview Property Costs / Business Costs line | Expenses `scope=property` / `scope=business` | the Expenses headline totals |
+| Occupancy / RevPAR | Bookings → Performance (rows + Portfolio line), then the property's Booked nights | booked ÷ available nights |
+| A property's revenue, fee, occupancy | Bookings tab: Revenue records, Management fee, Booked nights | `accommodation_revenue`, `revenue`, `business_income`, `booked_nights` |
+| Targets row | the property's Performance for that month; the drawer shows gross revenue − costs = Operating Profit | `monthly_series` |
+
+Source: a row written by a monthly workbook import shows "Imported from <file> · Batch #N · <sheet!cell> · applied <time>" and links to `/imports/N#prop-<property>`, which opens that property's reconciliation block. Such rows are read-only one at a time (edit or delete is refused server-side); correct the workbook and re-import, or undo the import. Rows from the earlier Excel history say "Earlier Excel import": no batch or cell was recorded for them. A workbook month holds booked nights and income as totals (no individual reservations), and the pages say so.
+
+REVIEW pills come from the reconciliation stored on the import batch; the fee-rate check is re-judged against the property's current configured percentage.
