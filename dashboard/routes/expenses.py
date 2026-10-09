@@ -9,6 +9,7 @@ import services.ingest as ingest
 import services.kpis as kpis
 from services.audit import record, record_edits
 from services.common import CATEGORIES, MANAGED_SQL, MONTH_NAMES, get_properties, get_property, is_managed, pct_delta
+from services.completeness import period_has_data
 from services.context import compare_bounds, range_params, request_context
 from services.provenance import is_workbook_row, workbook_source
 from services.vendors import get_or_create_vendor
@@ -230,6 +231,11 @@ def index():
                            if cmp_bounds and kpis.booked_nights(conn, None, *cmp_bounds) else None, base=5),
             })
 
+    # NO DATA (nothing recorded for the period) is "—" with no comparison; a recorded zero stays a zero.
+    no_data = not period_has_data(conn, pid, start, end)
+    if no_data:
+        summary_tiles = [{**t, "value": "—", "sub": None, "delta": None} for t in summary_tiles]
+
     # Anchored + clipped to trailing 12 months, same rule as every other
     # trend chart in the app.
     anchor_ym = f"{ctx['end_year']}-{ctx['end_month']:02d}"
@@ -388,7 +394,7 @@ def index():
     return render_template(
         "expenses.html", active="expenses", all_properties=get_properties(conn), active_property=None,
         context_bar=True, ctx=ctx, viewing=viewing, scope=scope, flats=flats,
-        summary_tiles=summary_tiles, property_rows=property_rows,
+        summary_tiles=summary_tiles, no_data=no_data, property_rows=property_rows,
         property_categories=property_categories, business_categories=business_categories,
         vendor_rows=vendors, vendorless_total=vendorless_total, ledger=ledger, ledger_total=ledger_total,
         f=f, chips=chips, t_sort=t_sort, t_dir=t_dir, sort_href=sort_href, sources=sources, ledger_base=urlencode({**base, **({"scope": scope} if scope else {})}), base_params=base, seg_base=seg_base,

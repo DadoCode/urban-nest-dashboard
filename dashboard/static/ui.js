@@ -117,3 +117,49 @@
   const init = () => document.querySelectorAll('.tabs, .sidebar, .card.flush').forEach(cue);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
+
+/* ---------- info controls (the ⓘ next to a metric): hover, keyboard focus, click and tap all show the same short definition ---------- */
+(function () {
+  let pop = null, pinned = null;
+  const textOf = (el) => el.getAttribute('data-info') || el.getAttribute('aria-label') || el.getAttribute('title') || '';
+  const prep = (el) => {
+    if (el.hasAttribute('title')) { el.setAttribute('data-info', el.getAttribute('title')); el.removeAttribute('title'); }   // one tooltip, not the native one on top
+    if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
+    if (!el.hasAttribute('tabindex')) el.tabIndex = 0;
+    if (!el.hasAttribute('aria-expanded')) el.setAttribute('aria-expanded', 'false');
+  };
+  const hide = () => { if (pop) { pop.remove(); pop = null; } document.querySelectorAll('.info-dot[aria-expanded="true"]').forEach((d) => d.setAttribute('aria-expanded', 'false')); };
+  const show = (el) => {
+    hide();
+    prep(el);
+    pop = document.createElement('div');
+    pop.className = 'info-pop';
+    pop.setAttribute('role', 'tooltip');
+    pop.textContent = textOf(el);
+    document.body.appendChild(pop);
+    el.setAttribute('aria-expanded', 'true');
+    const r = el.getBoundingClientRect(), w = Math.min(280, window.innerWidth - 24);
+    pop.style.width = w + 'px';
+    pop.style.left = Math.max(12, Math.min(window.innerWidth - w - 12, r.left + r.width / 2 - w / 2)) + 'px';
+    const below = r.bottom + 8, h = pop.offsetHeight;
+    pop.style.top = (below + h > window.innerHeight - 8 && r.top - h - 8 > 8 ? r.top - h - 8 : below) + 'px';
+  };
+  const dot = (e) => e.target.closest && e.target.closest('.info-dot');
+  document.addEventListener('mouseover', (e) => { const d = dot(e); if (d && !pinned) show(d); });
+  document.addEventListener('mouseout', (e) => { if (dot(e) && !pinned) hide(); });
+  document.addEventListener('focusin', (e) => { const d = dot(e); if (d && !pinned) show(d); });
+  document.addEventListener('focusout', (e) => { if (dot(e) && !pinned) hide(); });
+  document.addEventListener('click', (e) => {
+    const d = dot(e);
+    if (d) {
+      e.preventDefault();                                   // an ⓘ inside a linked tile or header must not follow the link
+      if (pinned === d) { pinned = null; hide(); } else { pinned = d; show(d); }
+    } else if (pinned || pop) { pinned = null; hide(); }
+  });
+  document.addEventListener('keydown', (e) => {
+    const d = dot(e);
+    if (d && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); d.click(); }
+    if (e.key === 'Escape' && (pinned || pop)) { pinned = null; hide(); }
+  });
+  window.addEventListener('scroll', () => { if (pop && !pinned) hide(); }, { passive: true });
+})();

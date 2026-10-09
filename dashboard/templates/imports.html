@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_head, empty_state %}
-{% from "_import_macros.html" import status_pill %}
+{% from "_import_macros.html" import status_pill, status_legend %}
 {% block title %}Import monthly workbook — Urban Nest Estates{% endblock %}
 {% block content %}
   {{ page_head("Import monthly workbook", "Upload the monthly workbook prepared from your source documents. It is checked, you see exactly what would change for the month, and only then is it imported. Any import can be undone.") }}
-  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('documents.index') }}">&larr; Documents</a> · <a href="{{ url_for('reconcile.index') }}">Reconciliation</a></p>
+  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('documents.index') }}">&larr; Documents &amp; Monthly Import</a> · {% if recon_total %}<a href="{{ url_for('reconcile.index') }}">Excel vs booking statements</a>{% endif %}</p>
 
   <div class="card">
     {% if demo_mode %}
@@ -17,6 +17,9 @@
       <p class="note m-t3">One Excel workbook in the standard monthly layout. Only the sheets this importer knows are read; a sheet holding logins is excluded by name and never opened. The file itself is not kept — only the figures read from it, so a batch can be reviewed and undone.</p>
     {% endif %}
   </div>
+
+  <p class="note mt3">If a workbook-controlled figure is wrong, correct the workbook and re-import the month.</p>
+  {{ status_legend() }}
 
   <nav class="tabs mt5">
     <a href="?" class="tab {{ 'active' if not f_status }}">All</a>

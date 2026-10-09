@@ -118,7 +118,7 @@
 
   {% call section("Reservations", (total_rows ~ ' in this view') if total_rows else None) %}
     {% if inactive_stored %}
-      <div class="flash info mb3">{{ inactive_stored }} of these reservation{{ 's are' if inactive_stored != 1 else ' is' }} stored but <strong>not counted in the figures above</strong>: the Excel history is still in charge of {{ 'those months' if inactive_stored != 1 else 'that month' }}. <a href="{{ url_for('reconcile.index') }}">Compare and choose on the Reconciliation page</a>.</div>
+      <div class="flash info mb3">{{ inactive_stored }} of these reservation{{ 's are' if inactive_stored != 1 else ' is' }} stored but <strong>not counted in the figures above</strong>: the Excel history is still in charge of {{ 'those months' if inactive_stored != 1 else 'that month' }}. <a href="{{ url_for('reconcile.index') }}">Compare and choose on the Excel vs booking statements page</a>.</div>
     {% endif %}
     {# Filters only appear when there's something to choose between -- no
        empty dropdowns for a property with one channel and one source. #}

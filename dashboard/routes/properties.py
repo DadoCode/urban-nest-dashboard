@@ -1,7 +1,7 @@
 import datetime
 import json
 
-from flask import Blueprint, flash, make_response, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, make_response, redirect, render_template, request, url_for
 from markupsafe import Markup
 
 import db
@@ -9,12 +9,13 @@ import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
 import services.sources as src
-from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, fee_text, get_properties, get_property, pct_delta, is_managed
-from services.completeness import completeness_for, health_for, not_active, seed_defaults
+from services.common import METRIC_INFO, MONTH_NAMES, gbp0, pct0, adjusted_yoy_pairs, fee_text, get_properties, get_property, pct_delta, is_managed
+from services.completeness import completeness_for, has_real_data, health_for, not_active, seed_defaults
 from services.kpis import _has_activity as _kpi_has_activity
 from services.context import compare_bounds, link_params, range_params, request_context, workspace_params
 import services.drilldown as drill
 from services.provenance import review_status
+from services.controlled import workbook_batch_for
 import services.ingest as ingest
 from services.audit import record
 from services.vendors import get_or_create_vendor
@@ -66,7 +67,7 @@ def index():
             "revenue": snap["revenue"], "profit": snap["net_profit"],
             "occupancy": snap["occupancy"],
             "model": "Managed" if is_managed(p) else "Operated",
-            "managed": is_managed(p), "fee": fee,
+            "managed": is_managed(p), "fee": fee, "no_data": not has_real_data(conn, p["id"], start, end),
             "review": (lambda r: r[1] if r and r[0] == "REVIEW" else None)(review_status(conn, p["id"], lo, hi)),
             # nothing is expected of it in this period (not started, ended, or inactive with no activity in the period): no performance to show
             "not_active": bool(not_active(conn, p["id"], start, end)) and not (not p["active"] and _kpi_has_activity(conn, p["id"], datetime.date.fromisoformat(start), datetime.date.fromisoformat(end))),
@@ -199,17 +200,17 @@ def _overview_tiles(conn, prop, ctx):
         review_note = (Markup(f'<a class="pill warn review-link" href="/imports/{review[1]}#prop-{property_id}" title="The import that wrote this property\'s figures left it in REVIEW. Open the reason.">REVIEW ›</a>')
                        if review and review[0] == "REVIEW" else None)
         primary = [
-            {"key": "gross_booking_revenue", "label": "Gross Booking Revenue", "value": f"£{cur_gross:,.0f}",
+            {"key": "gross_booking_revenue", "label": "Gross Booking Revenue", "value": gbp0(cur_gross),
              "delta": d(cur_gross, prev_gross, 100), "info": METRIC_INFO.get("gross_booking_revenue"), "href": rev_url, "hint": "See the booking income rows behind this"},
-            {"key": "fee", "label": "Management Fee Earned", "value": f"£{cur_fee:,.0f}",
+            {"key": "fee", "label": "Management Fee Earned", "value": gbp0(cur_fee),
              "delta": d(cur_fee, prev_fee, 20), "info": METRIC_INFO.get("fee"), "href": fee_url, "hint": "See the fee record behind this", "note_html": review_note},
-            {"key": "occupancy", "label": "Occupancy", "value": f"{cur_occ * 100:.0f}%", "delta": d(cur_occ, prev_occ, 0.05),
+            {"key": "occupancy", "label": "Occupancy", "value": pct0(cur_occ), "delta": d(cur_occ, prev_occ, 0.05), "info": METRIC_INFO.get("occupancy"),
              "href": nights_url, "hint": "See the booked and available nights behind this"},
         ]
-        has_data = bool(cur_gross or cur_occ or cur_fee)
+        has_data = has_real_data(conn, property_id, start, end)      # coverage, not 'a figure happens to be non-zero'
         secondary = [
-            {"label": "ADR", "value": f"£{kpis.adr(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("adr"), "href": nights_url, "hint": "Booking revenue ÷ booked nights"},
-            {"label": "RevPAR", "value": f"£{kpis.revpar(conn, property_id, start, end):,.0f}", "info": METRIC_INFO.get("revpar"), "href": nights_url, "hint": "Booking revenue ÷ available nights"},
+            {"label": "ADR", "value": gbp0(kpis.adr(conn, property_id, start, end)), "info": METRIC_INFO.get("adr"), "href": nights_url, "hint": "Booking revenue ÷ booked nights"},
+            {"label": "RevPAR", "value": gbp0(kpis.revpar(conn, property_id, start, end)), "info": METRIC_INFO.get("revpar"), "href": nights_url, "hint": "Booking revenue ÷ available nights"},
         ] if has_data else []
     else:
         snap = kpis.adjusted_kpi_snapshot(conn, property_id, start, end)
@@ -224,29 +225,29 @@ def _overview_tiles(conn, prop, ctx):
         review_note = (Markup(f'<a class="pill warn review-link" href="/imports/{review[1]}#prop-{property_id}" title="The import that wrote this property\'s figures left it in REVIEW. Open the reason.">REVIEW ›</a>')
                        if review and review[0] == "REVIEW" else None)
         def money(v):
-            return ("−" if v < 0 else "") + f"£{abs(v):,.0f}"
+            return gbp0(v)
         # Property Profit = the Urban Nest Revenue above minus the property's own costs: the same two figures the KPI
         # snapshot already holds, shown as the sum they are (each side opens its own records).
         profit_note = Markup(f'<a class="mlink" href="{rev_url}" aria-label="Revenue records behind Urban Nest Revenue">Revenue {money(snap["revenue"])}</a> − '
                              f'<a class="mlink" href="{costs_url}" aria-label="Expenses behind the property costs">Costs {money(snap["costs"])}</a> = {money(snap["net_profit"])}')
         primary = [
-            {"key": "revenue", "label": "Urban Nest Revenue", "value": f"£{snap['revenue']:,.0f}",
+            {"key": "revenue", "label": "Urban Nest Revenue", "value": gbp0(snap['revenue']),
              "delta": d(snap["revenue"], prev_snap["revenue"] if prev_snap else None, 100), "info": METRIC_INFO.get("revenue"),
              "href": rev_url, "hint": "See the income rows behind this", "note_html": review_note},
-            {"key": "property_costs", "label": "Property Costs", "value": f"£{cur_costs:,.0f}",
+            {"key": "property_costs", "label": "Property Costs", "value": gbp0(cur_costs),
              "delta": d(cur_costs, prev_costs, 100), "info": METRIC_INFO.get("property_costs"),
              "href": costs_url, "hint": "See this property's expenses for the period"},
-            {"key": "net_profit", "label": "Property Profit", "value": f"£{snap['net_profit']:,.0f}",
+            {"key": "net_profit", "label": "Property Profit", "value": gbp0(snap['net_profit']),
              "delta": d(snap["net_profit"], prev_snap["net_profit"] if prev_snap else None, 1000), "info": METRIC_INFO.get("net_profit"),
              "note_html": profit_note},
-            {"key": "occupancy", "label": "Occupancy", "value": f"{snap['occupancy'] * 100:.0f}%",
+            {"key": "occupancy", "label": "Occupancy", "value": pct0(snap['occupancy']), "info": METRIC_INFO.get("occupancy"),
              "delta": d(snap["occupancy"], prev_snap["occupancy"] if prev_snap else None, 0.05),
              "href": nights_url, "hint": "See the booked and available nights behind this"},
         ]
-        has_data = bool(snap["revenue"] or snap["occupancy"] or cur_costs)
+        has_data = has_real_data(conn, property_id, start, end)      # coverage, not 'a figure happens to be non-zero'
         secondary = [
-            {"label": "ADR", "value": f"£{snap['adr']:,.0f}", "info": METRIC_INFO.get("adr"), "href": nights_url, "hint": "Booking revenue ÷ booked nights"},
-            {"label": "RevPAR", "value": f"£{snap['revpar']:,.0f}", "info": METRIC_INFO.get("revpar"), "href": nights_url, "hint": "Booking revenue ÷ available nights"},
+            {"label": "ADR", "value": gbp0(snap['adr']), "info": METRIC_INFO.get("adr"), "href": nights_url, "hint": "Booking revenue ÷ booked nights"},
+            {"label": "RevPAR", "value": gbp0(snap['revpar']), "info": METRIC_INFO.get("revpar"), "href": nights_url, "hint": "Booking revenue ÷ available nights"},
         ] if has_data else []
     return (primary, secondary) if has_data else ([], [])
 
@@ -282,7 +283,7 @@ def detail(property_id):
         prev_cost = kpis.costs(conn, property_id, *cmp_b) if cmp_b else None
         ly_cost = kpis.costs(conn, property_id, *kpis.range_bounds(*kpis.same_period_last_year(
             ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])))
-        primary_tiles = [{"label": "Total costs", "value": f"£{cur_cost:,.0f}",
+        primary_tiles = [{"label": "Total costs", "value": gbp0(cur_cost),
                   "delta": None if mtd else (pct_delta(cur_cost, prev_cost) if prev_cost is not None else None),
                   "delta_ly": None if mtd else pct_delta(cur_cost, ly_cost)}] if cur_cost or prev_cost or ly_cost else []
         secondary_tiles = []
@@ -294,9 +295,24 @@ def detail(property_id):
         primary_tiles, secondary_tiles = _overview_tiles(conn, prop, ctx)
         chart_kwargs = {}
 
+    # Managed property: say in one line whose money the booking revenue is. Current values only; the owner's share is not called profit.
+    owner_line = None
+    if not is_overhead and primary_tiles and is_managed(prop):
+        guests, fee = kpis.revenue(conn, property_id, start, end), kpis.business_income(conn, property_id, start, end)
+        owner_line = f"Guests paid £{guests:,.0f}. Urban Nest earned £{fee:,.0f} management fee; the remaining booking revenue belongs to the owner."
+    # Why there is nothing to show, in the words that fit: inactive, not started, or simply not imported yet.
+    empty_reason = None
+    if not primary_tiles:
+        if not prop["active"]:
+            empty_reason = ("inactive", f"{prop['name']} is no longer active and has nothing recorded in this period. Its history is kept.")
+        elif not_active(conn, property_id, start, end):
+            empty_reason = ("not_active", f"{prop['name']} had not joined the portfolio in this period, so nothing is expected.")
+        else:
+            empty_reason = ("no_data", "")
     resp = make_response(render_template(
         "property/overview.html", all_properties=get_properties(conn),
         **_ws(conn, ctx, prop, "overview", is_overhead=is_overhead, primary_tiles=primary_tiles, secondary_tiles=secondary_tiles),
+        owner_line=owner_line, empty_reason=empty_reason,
         **chart_kwargs,
     ))
     if not is_overhead:
@@ -443,10 +459,10 @@ def performance_tab(property_id):
                 "delta": None if mtd else (pct_delta(cv, prev[key], min_base=base) if prev else None),
                 "href": nights_url, "hint": "See the booked nights and booking revenue behind this"}
     tiles = [
-        t("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%", 0.05),
-        t("ADR", "adr", lambda v: f"£{v:,.0f}", 20),
+        t("Occupancy", "occupancy", lambda v: pct0(v), 0.05),
+        t("ADR", "adr", lambda v: gbp0(v), 20),
         t("Booked nights", "booked_nights", lambda v: f"{v:,.0f}", 2),
-        t("RevPAR", "revpar", lambda v: f"£{v:,.0f}", 20),
+        t("RevPAR", "revpar", lambda v: gbp0(v), 20),
     ] if (cur["booked_nights"] or cur["occupancy"]) else []
 
     # Same anchoring rule as every other trend chart here: this property's
@@ -589,19 +605,48 @@ def legacy_detail(property_id):
 
 @bp.route("/apartments", methods=["POST"])
 def add():
+    """Add a property. The business model is a required, explicit choice: a managed property created as 'operated' would count the owner's
+    guest revenue as Urban Nest Revenue, so nothing is assumed."""
     conn = db.get_conn()
-    name = (request.form.get("name") or "").strip()
-    address = (request.form.get("address") or "").strip() or name
+    f = request.form
+    name = (f.get("name") or "").strip()
+    address = (f.get("address") or "").strip() or name
+    model = (f.get("model") or "").strip()
+    status = (f.get("status") or "active").strip()
+    start_date = (f.get("start_date") or "").strip() or None
+    back = redirect(url_for("properties.index"))
     if not name:
-        flash("Enter a name for the new property so we can add it.", "error")
-        return redirect(url_for("overview.index"))
+        flash("Enter a name for the new property, then choose how it is run, so we can add it.", "error")
+        return back
+    if model not in ("operated", "managed"):
+        flash("Choose how this property is run: Operated (Urban Nest keeps the booking revenue and pays the property costs) or Managed "
+              "(Urban Nest earns a management fee). Nothing was added.", "error")
+        return back
+    fee = None
+    if model == "managed":
+        try:
+            fee = float((f.get("fee") or "").strip())
+        except ValueError:
+            fee = None
+        if fee is None or not (0 < fee <= 100):
+            flash("A managed property needs its management fee as a percentage between 0 and 100, for example 15. Nothing was added.", "error")
+            return back
+    if status not in ("active", "inactive"):
+        flash("Choose whether the property is Active or Inactive. Nothing was added.", "error")
+        return back
+    if start_date:
+        try:
+            datetime.date.fromisoformat(start_date)
+        except ValueError:
+            flash("Enter the start date as a date, or leave it empty if you don't know it yet. Nothing was added.", "error")
+            return back
     slug = db.unique_slug(conn, db.slugify(name))
-    conn.execute("INSERT INTO properties (id, code, name, address, type) VALUES (?,?,?,?,'flat')",
-                 (slug, slug.upper()[:10], name, address))
+    conn.execute("INSERT INTO properties (id, code, name, address, type, active, start_date, management_fee_pct, is_managed) VALUES (?,?,?,?,'flat',?,?,?,?)",
+                 (slug, slug.upper()[:10], name, address, 1 if status == "active" else 0, start_date, fee, 1 if model == "managed" else 0))
     seed_defaults(conn, slug)
     conn.commit()
-    flash(f"\u2713 Added {name}. Upload its first document or add an expense to start building its figures.", "success")
-    return redirect(url_for("properties.detail", property_id=slug))
+    flash(f"\u2713 Property added as {'Managed at ' + format(fee, 'g') + '%' if model == 'managed' else 'Operated'}. Import the monthly workbook when {name} has data.", "success")
+    return redirect(url_for("properties.settings_tab", property_id=slug))
 
 
 @bp.route("/properties/<property_id>/ownership", methods=["POST"])
@@ -730,6 +775,9 @@ def sync_calendar(property_id):
 def add_expense(property_id):
     conn = db.get_conn()
     today = datetime.date.today()
+    prop = get_property(conn, property_id)
+    if not prop:
+        abort(404)
     try:
         amount = abs(float(request.form["amount"]))
         year = int(request.form.get("year") or today.year)
@@ -740,13 +788,25 @@ def add_expense(property_id):
     category = request.form.get("category", "purchase")
     direction = "income" if category == "booking_income" else "expense"
     vendor_name = request.form.get("vendor", "")
+    description = request.form.get("description", "")
+    ym = f"{year}-{month:02d}"
+    # A month the monthly workbook controls is not edited casually: say what this does and ask first.
+    batch = workbook_batch_for(conn, property_id, ym)
+    if batch and request.form.get("confirm_manual") != "1":
+        return render_template("property/confirm_manual.html", **_ws(conn, request_context(conn, fixed_property=property_id), prop, "expenses", is_overhead=prop["type"] == "overhead"),
+                               batch=batch, ym=ym, month_label=f"{MONTH_NAMES[month]} {year}", form={"vendor": vendor_name, "description": description, "amount": f"{amount:g}",
+                               "category": category, "month": month, "year": year}, direction=direction)
     vendor_id = get_or_create_vendor(conn, vendor_name)
-    conn.execute(
+    cur = conn.execute(
         """INSERT INTO transactions (property_id, date, vendor, vendor_id, description, amount, direction, category, source)
            VALUES (?,?,?,?,?,?,?,?,'manual')""",
-        (property_id, f"{year}-{month:02d}-01", vendor_name, vendor_id,
-         request.form.get("description", ""), amount, direction, category),
+        (property_id, f"{ym}-01", vendor_name, vendor_id, description, amount, direction, category),
     )
+    if batch:
+        record(conn, "transaction", cur.lastrowid, "manual_adjustment", field="workbook_import", new_value=str(batch))
     conn.commit()
-    flash("\u2713 Expense added.", "success")
+    if batch:
+        flash(f"\u2713 Manual adjustment added to {MONTH_NAMES[month]} {year}, outside workbook import #{batch}. That import may now show REVIEW; correct the workbook and re-import the month to bring them back in line.", "warning")
+    else:
+        flash("\u2713 Expense added.", "success")
     return redirect(url_for("properties.expenses_tab", property_id=property_id))

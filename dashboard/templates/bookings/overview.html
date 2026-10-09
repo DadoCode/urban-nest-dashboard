@@ -11,7 +11,7 @@
         <span style="font-size:var(--fs-section); font-weight:600">{{ '%.0f'|format(upcoming.occupancy * 100) }}% booked</span>
         <span class="muted"> · {{ upcoming.revenue|money }} confirmed revenue · {{ upcoming.reservations }} reservation{{ 's' if upcoming.reservations != 1 }}</span>
       {% else %}
-        {{ empty_state("No bookings imported for the next 30 days", "Reservations come from booking statements. Upload an Airbnb or Booking.com statement to see what's coming up.", "Upload a statement", url_for('documents.index')) }}
+        {{ empty_state("No upcoming reservations recorded", "The monthly workbook holds monthly totals rather than individual reservations, so this fills only if reservation records were imported.") }}
       {% endif %}
     </div>
   {% endcall %}
@@ -28,7 +28,9 @@
           </tbody>
         </table>
       {% else %}
-        {{ empty_state("No bookings imported for " ~ current_month, "Change the period, or import booking data to see which channels bring in revenue.", "Import booking data", url_for('documents.index')) }}
+        {% if no_data %}{{ empty_state("No data imported for this period.", "Choose a different period, or import the monthly workbook.", "Import monthly workbook", url_for('imports.index')) }}
+        {% elif totals_only %}{{ empty_state("No individual reservations imported", "Monthly booking totals are available for this period, but no individual reservation records were imported.") }}
+        {% else %}{{ empty_state("No reservation records for " ~ current_month, "Channel mix needs individual reservation records. Choose a different period, or import the monthly workbook.", "Import monthly workbook", url_for('imports.index')) }}{% endif %}
       {% endif %}
     </div>
   {% endcall %}

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_head, empty_state %}
-{% block title %}Documents — Urban Nest Estates{% endblock %}
+{% block title %}Documents & Monthly Import — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Documents", "Each month, your source documents are turned into one standard workbook, which you import here. Source documents below stay available for reference and manual checks.") }}
-  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('reconcile.index') }}">Reconciliation{% if recon_needed %} ({{ recon_needed }} month{{ 's' if recon_needed != 1 }} need a decision){% endif %}</a> · <a href="{{ url_for('reconcile.figures') }}">Figure audit</a></p>
+  {{ page_head("Documents & Monthly Import", "Your monthly figures come from the monthly workbook, imported here. Documents below are supporting evidence.") }}
+  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('imports.index') }}">Imports</a>{% if recon_total %} · <a href="{{ url_for('reconcile.index') }}">Excel vs booking statements{% if recon_needed %} ({{ recon_needed }} month{{ 's' if recon_needed != 1 }} need a decision){% endif %}</a>{% endif %} · <a href="{{ url_for('reconcile.figures') }}">Figure audit</a></p>
 
   <div class="card" style="margin-bottom:var(--s5); border-color: var(--brand)">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:var(--s3); flex-wrap:wrap">
@@ -17,7 +17,7 @@
   </div>
 
   <h2 class="m0-b2">Source documents</h2>
-  <p class="note m0-b3">Statements and invoices, kept for reference. They no longer drive the monthly figures; the workbook does.</p>
+  <p class="note m0-b3">Statements and invoices are kept as supporting evidence. In a month the monthly workbook controls, they add no figures; the workbook does.</p>
   <span id="upload"></span>
   {% if prefill_property or prefill_type %}
     <div class="flash info mb3">
@@ -33,7 +33,7 @@
     {% endif %}
     <form id="upload-form" class="upload-form" style="display:block" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
       <div id="dropzone" class="dropzone">
-        <div class="dropzone-label">Drop statements, invoices or receipts here</div>
+        <div class="dropzone-label">Drop supporting documents here (statements, invoices or receipts)</div>
         <div class="note">PDF, JPG/PNG photo, Excel/CSV, Word or text · up to {{ max_upload_mb }} MB per upload — we read what we can, you check it, then confirm</div>
         <div class="mt3"><button type="button" class="secondary" id="choose-files">Choose files</button></div>
         <input id="file-input" type="file" name="document" multiple required style="display:none">
@@ -114,13 +114,13 @@
       </table>
     {% else %}
       {% if f_status == 'review' and not (f_q or f_property or f_type or f_period) %}
-        {{ empty_state("Nothing waiting for review", "Every uploaded document has been confirmed. Upload more when new statements or invoices arrive.") }}
+        {{ empty_state("Nothing waiting for review", "Every uploaded document has been reviewed. Documents are supporting evidence; the monthly workbook is what drives your figures.") }}
       {% elif f_status == 'failed' and not (f_q or f_property or f_type or f_period) %}
         {{ empty_state("No failed documents", "Anything we couldn't read would show up here so you can enter it by hand.") }}
       {% elif total %}
         {{ empty_state("No documents match", "Nothing fits these filters. Clear a filter or pick another status.") }}
       {% else %}
-        {{ empty_state("No documents yet", "Upload booking statements, invoices or bank statements to start building your records.") }}
+        {{ empty_state("No documents yet", "Documents (statements, invoices, bank statements) are supporting evidence only. To bring in a month's figures, import the monthly workbook.") }}
       {% endif %}
     {% endif %}
   </div>

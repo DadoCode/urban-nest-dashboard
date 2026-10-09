@@ -120,10 +120,18 @@
     </div>
   {% endif %}
 
+  {% if controlled and not confirmed %}
+    <div class="card mb3 confirm-card" role="alert">
+      <div style="font-weight:600">{{ controlled|length }} month{{ 's' if controlled|length != 1 }} here {{ 'is' if controlled|length == 1 else 'are' }} controlled by a monthly workbook import</div>
+      <p class="note" style="margin:2px 0 0">{% for h in controlled %}{{ h.property }}, {{ h.month }} (<a href="{{ url_for('imports.batch', batch_id=h.batch) }}">workbook import #{{ h.batch }}</a>){{ ', ' if not loop.last }}{% endfor %}.
+        A document is supporting evidence and cannot add financial rows to those months, so <strong>Confirm</strong> will add nothing and leave this review open. Use <strong>Keep as evidence only</strong>, or correct the workbook and re-import the month.</p>
+    </div>
+  {% endif %}
+
   {% if overlap and overlap.lines and not confirmed %}
     <div class="card mb3">
       <div style="font-weight:600">{{ overlap.lines }} reservation{{ 's' if overlap.lines != 1 }} fall in months your Excel history already covers</div>
-      <p class="note" style="margin:2px 0 0">Confirming <strong>stores</strong> these but does <strong>not</strong> change those months' dashboard figures: Excel stays in charge of a month until you compare the two and choose, on the <a href="{{ url_for('reconcile.index') }}">Reconciliation page</a>. Months with no Excel history use these reservations automatically.</p>
+      <p class="note" style="margin:2px 0 0">Confirming <strong>stores</strong> these but does <strong>not</strong> change those months' dashboard figures: Excel stays in charge of a month until you compare the two and choose, on the <a href="{{ url_for('reconcile.index') }}">Excel vs booking statements page</a>. Months with no Excel history use these reservations automatically.</p>
     </div>
   {% endif %}
 
@@ -262,6 +270,7 @@
             </div>
             <div class="rv-confirm">
               <div id="confirm-note" class="note"></div>
+              {% if controlled %}<button type="submit" name="evidence_only" value="1" class="secondary" formnovalidate>Keep as evidence only</button>{% endif %}
               <button type="submit" id="confirm-btn">Confirm</button>
             </div>
           </div>

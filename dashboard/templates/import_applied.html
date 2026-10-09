@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_head %}
-{% from "_import_macros.html" import val, change, diffv, status_pill, check_pill, checks_table, live_table %}
+{% from "_import_macros.html" import val, change, diffv, status_pill, check_pill, checks_table, live_table, status_legend %}
 {% block title %}Import #{{ batch.id }} — Urban Nest Estates{% endblock %}
 {# Which figures an imported area shows, in order. Primary rows are always visible; the rest appear under "All metrics" (or when they changed). #}
 {% set PRIMARY_OP = ['revenue', 'property_costs', 'profit'] %}
@@ -54,6 +54,7 @@
 
   <section class="section">
     <div class="section-head"><h2>Reconciliation at import time</h2><span class="note">The workbook's own totals against what was imported, exactly as evaluated when this import was applied. A separate "Current status" check below each area compares workbook, ledger and dashboard now.</span></div>
+    {{ status_legend() }}
     {% for pid, checks in recon.items() %}
       {% set v = vmap.get(pid) %}
       {% set cchecks = current.get(pid, checks) %}
@@ -87,8 +88,8 @@
   {% if undoable %}
     <section class="section undo-block">
       <form method="post" action="{{ url_for('imports.undo', batch_id=batch.id) }}" onsubmit="return confirm('Undo this import? The rows it added are removed and the rows it replaced are put back exactly as they were.')">
-        <button type="submit" class="secondary" {{ 'disabled' if demo_mode }}>Undo import</button>
-        <span class="note">Restores the dashboard to exactly how it was before this import. Refused if a later import or an edit to these rows would make that a guess.</span>
+        <button type="submit" class="secondary" {% if demo_mode %}disabled title="Disabled in the read-only demo."{% endif %}>Undo import</button>
+        {% if demo_mode %}<span class="note">Disabled in the read-only demo.</span>{% else %}<span class="note">Restores the dashboard to exactly how it was before this import. Refused if a later import or an edit to these rows would make that a guess.</span>{% endif %}
       </form>
     </section>
   {% endif %}

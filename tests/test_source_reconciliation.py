@@ -212,7 +212,7 @@ check("every explicit decision is in the audit log", db.get_conn().execute("SELE
 
 # ---------------------------------------------------------------- the pages
 page = client.get("/reconciliation").get_data(as_text=True)
-check("the reconciliation page lists the property-months and the hint", "Prop-A" in page and "Reconciliation" in page and "RECONCILIATION NEEDED" in page)
+check("the reconciliation page lists the property-months and the hint", "Prop-A" in page and "Excel vs booking statements" in page and "RECONCILIATION NEEDED" in page)
 month_page = client.get("/reconciliation/prop-a/2026-08").get_data(as_text=True)
 check("the month page shows Existing / Uploaded / Difference and the projected impact", all(t in month_page for t in ("Existing (Excel monthly aggregate)", "Uploaded so far", "Difference", "Current dashboard", "After the switch", "Use detailed bookings for Aug 2026")))
 audit_page = client.get("/audit/figures?from=2026-08&to=2026-10").get_data(as_text=True)

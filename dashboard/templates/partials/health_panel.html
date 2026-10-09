@@ -26,7 +26,7 @@
     {% else %}
       <span class="hk opt">None</span>
       <span class="health-name">Not imported yet <span class="note">the monthly workbook has not been imported for this period</span></span>
-      <a class="btn secondary" style="height:26px" href="{{ url_for('documents.index') }}">Import workbook</a>
+      <a class="btn secondary" style="height:26px" href="{{ url_for('imports.index') }}">Import workbook</a>
     {% endif %}
   </div>
   {% if health.rows %}

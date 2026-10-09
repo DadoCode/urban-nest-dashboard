@@ -14,6 +14,7 @@ import services.kpis as kpis
 from services.common import MONTH_NAMES
 import services.review as review_helpers
 from services.documents import find_duplicate, find_duplicate_reservation, save_upload
+from services.controlled import workbook_batch_for
 from services.vendors import get_or_create_vendor
 
 bp = Blueprint("documents", __name__)
@@ -144,7 +145,7 @@ def index():
         return url_for("documents.index", **{k: v for k, v in args.items() if v is not None})
 
     return render_template(
-        "documents.html", active="documents", all_properties=get_properties(conn), active_property=None, recon_needed=rc.needed_count(conn),
+        "documents.html", active="documents", all_properties=get_properties(conn), active_property=None, recon_needed=rc.needed_count(conn), recon_total=len(rc.candidates(conn)),
         last_import=_last_import(conn),
         docs=rows, counts=counts, total=total, doc_types=DOC_TYPE_LABELS, status_labels=ingest.STATUS_FILTER_LABELS,
         periods=periods, sort=sort, sort_href=sort_href, extraction_available=extraction_available(),
@@ -312,6 +313,7 @@ def review(doc_id):
 
     detection = ingest.detection_of(doc)
     names = {p["id"]: p["name"] for p in get_properties(conn)}
+    controlled = [] if (confirmed or res_mode) else _controlled_hits(conn, [(v["row"]["property_id"], v["row"]["date"]) for v in views if v["include"] and v["row"]["item_kind"] == "transaction"])
     # reservation lines whose listing matches none of your properties yet: one decision per listing, remembered for next time
     unmatched = []
     if res_mode and not confirmed:
@@ -331,7 +333,7 @@ def review(doc_id):
         active_property=doc["property_id"], prop=prop, doc=doc, items=views,
         flats=get_properties(conn, include_overhead=not res_mode), year=year, month=month, unmatched=unmatched,
         categories=CATEGORIES, is_pdf=is_pdf, is_image=is_image, res_mode=res_mode, confirmed=confirmed,
-        summary=summary, preview=preview, focus=focus, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
+        summary=summary, preview=preview, focus=focus, controlled=controlled, doc_type_label=DOC_TYPE_LABELS.get(doc["doc_type"], doc["doc_type"] or "Document"),
         period_label=_period_text(doc), status_label=ingest.status_display(doc["status"])[0],
         strip=_summary_strip(doc, prop, items, detection, names), warnings=detection.get("warnings", []),
         events=events, kpi_changes=kpi_changes, created=created, dup_doc=dup_doc, overlap=overlap,
@@ -410,6 +412,30 @@ def _log_confirmed(conn, doc_id, noun, added, excluded, corrected, before, after
                      {"added": added, "replaced": replaced, "noun": noun, "excluded": excluded, "corrected": corrected, "manual": manual, "kpi_changes": changes})
 
 
+def _controlled_hits(conn, rows):
+    """(property name, month label, workbook batch) for each property-month in `rows` [(property_id, 'YYYY-MM-DD')] that a monthly workbook import
+    controls. Confirming a document must not post financial rows into those months behind the workbook's back."""
+    names = {p["id"]: p["name"] for p in get_properties(conn)}
+    seen, hits = set(), []
+    for pid, date in rows:
+        if not pid or not date or len(date) < 7 or (pid, date[:7]) in seen:
+            continue
+        seen.add((pid, date[:7]))
+        batch = workbook_batch_for(conn, pid, date[:7])
+        if batch:
+            hits.append({"property": names.get(pid, pid), "ym": date[:7], "month": f"{MONTH_NAMES[int(date[5:7])]} {date[:4]}", "batch": batch})
+    return hits
+
+
+def _hold_for_workbook(conn, doc_id, hits):
+    """Refuse to post rows into workbook-controlled months. The document stays as evidence, to be kept as evidence only or corrected."""
+    conn.commit()
+    where = "; ".join(f"{h['property']}, {h['month']} (workbook import #{h['batch']})" for h in hits[:3]) + (f" and {len(hits) - 3} more" if len(hits) > 3 else "")
+    flash(f"Nothing was added. {where} {'is' if len(hits) == 1 else 'are'} controlled by the monthly workbook, and a document cannot change the ledger there. "
+          "Keep this document as evidence only, or correct the workbook and re-import the month. A deliberate one-off correction goes through the property's Expenses tab as a manual adjustment.", "warning")
+    return redirect(url_for("documents.review", doc_id=doc_id))
+
+
 def _finish(conn, doc_id, final_property_id, added, noun, excluded, corrected, replaced=0):
     conn.execute("UPDATE documents SET status='confirmed', reviewed=1, property_id=? WHERE id=?", (final_property_id, doc_id))
     conn.commit()
@@ -431,6 +457,14 @@ def confirm(doc_id):
     _refresh_duplicates(conn, doc_id)
     has_items = conn.execute("SELECT 1 FROM document_items WHERE document_id=? LIMIT 1", (doc_id,)).fetchone()
     included = set(request.form.getlist("include"))
+
+    if request.form.get("evidence_only") == "1":
+        n = conn.execute("UPDATE document_items SET include=0, reviewed=1 WHERE document_id=?", (doc_id,)).rowcount
+        _log_confirmed(conn, doc_id, "transaction", 0, n, 0, {}, {})
+        conn.execute("UPDATE documents SET status='confirmed', reviewed=1 WHERE id=?", (doc_id,))
+        conn.commit()
+        flash("\u2713 Kept as supporting evidence. Nothing was added to your figures.", "success")
+        return redirect(url_for("documents.review", doc_id=doc_id))
 
     first_kind = conn.execute("SELECT item_kind FROM document_items WHERE document_id=? LIMIT 1", (doc_id,)).fetchone()
     if (first_kind and first_kind["item_kind"] == "reservation") or (not has_items and doc["doc_type"] == "booking_statement"):
@@ -457,6 +491,9 @@ def confirm(doc_id):
     if left_out_excel:
         flash(f"{', '.join(left_out_excel)} {'is' if len(left_out_excel) == 1 else 'are'} already in your Excel history, which is kept untouched, so {'it was' if len(left_out_excel) == 1 else 'they were'} not added again. "
               "Tick \u201cAdd even if they look like duplicates\u201d to add anyway.", "info")
+    hits = _controlled_hits(conn, [(e[0], e[5]) for e in entries])
+    if hits:
+        return _hold_for_workbook(conn, doc_id, hits)
     touched = {(e[0], *ingest.month_key(e[5])) for e in entries}
     before = ingest.kpi_snapshot(conn, touched)
     final_property_id = doc["property_id"]
@@ -531,6 +568,9 @@ def _confirm_transactions(conn, doc, doc_id, included):
         flash(_problem_message(problems, "transaction"), "warning")
         return redirect(url_for("documents.review", doc_id=doc_id))
 
+    hits = _controlled_hits(conn, [(r[1], r[7]) for r in ready])
+    if hits:
+        return _hold_for_workbook(conn, doc_id, hits)
     final_property_id = doc["property_id"]
     touched = {(r[1], *ingest.month_key(r[7])) for r in ready}
     before = ingest.kpi_snapshot(conn, touched)
@@ -656,8 +696,11 @@ def _confirm_reservations(conn, doc, doc_id, has_items, included):
         y, m = map(int, ym.split("-"))
         after = kpis.revenue(conn, pid, *kpis.month_bounds(y, m))
         if abs(after - before) < 0.005:
-            flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: stored. Dashboard figures are unchanged (the Excel history is still in charge of this month). "
-                  f"Compare the two on the Reconciliation page.", "info")
+            if workbook_batch_for(conn, pid, ym):
+                flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: stored as supporting evidence. Dashboard figures are unchanged: the monthly workbook is in charge of this month.", "info")
+            else:
+                flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: stored. Dashboard figures are unchanged (the Excel history is still in charge of this month). "
+                      f"Compare the two on the Excel vs booking statements page.", "info")
         else:
             flash(f"{names.get(pid, pid)}, {MONTH_NAMES[m]} {y}: £{before:,.0f} → £{after:,.0f} (no Excel history for this month, so these reservations now feed the dashboard).", "info")
     return redirect(url_for("documents.review", doc_id=doc_id))

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_head, empty_state %}
 {% from "_recon_macros.html" import fmt, diff %}
-{% block title %}{{ prop.name }} · {{ month_label }} — Reconciliation{% endblock %}
+{% block title %}{{ prop.name }} · {{ month_label }} — Excel vs booking statements{% endblock %}
 {% block content %}
   <p class="note m0-b2"><a href="{{ url_for('reconcile.index') }}">&larr; All reconciliation</a></p>
   {{ page_head(prop.name ~ " — " ~ month_label, "Which booking data feeds the dashboard for this month?") }}

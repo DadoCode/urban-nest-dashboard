@@ -73,6 +73,17 @@ def has_real_data(conn, property_id, start, end):
     ).fetchone())
 
 
+def period_has_data(conn, property_id, start, end):
+    """Whether ANYTHING is recorded for [start, end): any transaction or booking for the property (or for any property when None).
+    This separates NO DATA (nothing imported or recorded, so a figure cannot be evaluated) from a REAL ZERO (rows exist and the measured
+    result is 0). It is about coverage, never about whether a KPI happens to equal zero."""
+    if property_id:
+        return has_real_data(conn, property_id, start, end)
+    return bool(conn.execute(
+        """SELECT 1 FROM transactions WHERE date>=? AND date<?
+           UNION SELECT 1 FROM bookings WHERE check_in<? AND check_out>? LIMIT 1""", (start, end, end, start)).fetchone())
+
+
 def completeness_for(conn, property_id, start, end):
     """{'required': [...], 'received': [...], 'missing': [...], 'pct': float}
     for the [start, end) period -- 'received' checks whether a document of

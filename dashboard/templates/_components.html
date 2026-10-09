@@ -4,7 +4,8 @@
 {% macro delta(d, label, invert=False) -%}
   {%- if d is not none -%}
     {%- set good = (d > 0) != invert -%}
-    <span class="delta {{ 'flat' if d == 0 else ('up' if good else 'down') }}"><span class="arrow">{{ '→' if d == 0 else ('↑' if d > 0 else '↓') }}</span>{{ '%.1f'|format(d|abs) }}% {{ label }}</span>
+    {%- set zero = d|abs < 0.05 -%}
+    <span class="delta {{ 'flat' if zero else ('up' if good else 'down') }}"><span class="arrow">{{ '→' if zero else ('↑' if d > 0 else '↓') }}</span>{{ '%.1f'|format(d|abs) }}% {{ label }}</span>
   {%- endif -%}
 {%- endmacro %}
 

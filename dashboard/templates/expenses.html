@@ -24,6 +24,8 @@
     {% endfor %}
   </div>
 
+  {% if no_data %}<p class="nodata-line">No data imported for this period. <a href="{{ url_for('imports.index') }}">Import monthly workbook ›</a></p>{% endif %}
+
   {% call section("Monthly costs", "Click a bar to see that month's transactions") %}
     <div class="card"><div class="chart-box" style="height:260px"><canvas id="costsChart"></canvas></div></div>
   {% endcall %}

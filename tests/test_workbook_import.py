@@ -442,6 +442,14 @@ check("K provenance line appears for the imported month and not for an untouched
       b"Updated from workbook" in client.get(f"/expenses?from={SEP}-01&to={SEP}-01").data and b"Updated from workbook" not in client.get("/expenses?from=2026-05-01&to=2026-05-01").data)
 done = client.get(loc).data.decode()
 check("K applied page shows before/after, reconciliation and workbook = ledger = dashboard", "Before and after" in done and "Workbook = ledger = dashboard" in done and "Undo import" in done)
+check("P8 the preview counts changes in words, not symbols", re.search(r"\d+ new · \d+ changed · \d+ removed · \d+ unchanged", page) is not None and not re.search(r"\+\d+ ~\d+ −\d+", page))
+check("P8 PASS / REVIEW / NO CONTROL are defined on the preview and the applied page",
+      all(t in page and t in done for t in ("Figures reconcile with the available control.", "Something does not reconcile or needs checking.",
+                                              "No comparison/control value was provided, so the check cannot be evaluated. This is not a failure.")))
+up2 = client.post("/imports/upload", data={"workbook": (io.BytesIO(ORIGINAL), "Biz_Accounts_Tracker_2026_Sept_v4.xlsx")}, content_type="multipart/form-data")
+page2 = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", client.get(up2.headers["Location"]).data.decode()))
+check("P8 re-previewing a month that is already imported says nothing would change, and when it was last imported",
+      "Already up to date — this import would make no changes." in page2 and "Last imported" in page2 and f"import #{bid_k}" in page2, page2[:200])
 snap_applied = snapshot(db.get_conn())
 client.post(loc + "/undo")
 check("K undo through the page restores the pre-import ledger", c8.execute("SELECT status FROM import_batches WHERE id=?", (bid_k,)).fetchone()[0] == "undone" and snapshot(db.get_conn()) == snap_k0)

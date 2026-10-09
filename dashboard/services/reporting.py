@@ -79,7 +79,8 @@ def _kpi_section(conn, property_id, start, end, pstart, pend, lystart, lyend, he
     if use_adjusted:
         note = ("Revenue and Net profit are what this business actually earns -- full figures for a flat you own, "
                 "only the management fee for one you run for an owner. ADR, RevPAR and Occupancy describe the "
-                "properties themselves and aren't affected. " + note)
+                "properties themselves and aren't affected. Costs are operated-property costs only; managed-property costs "
+                "and Business Costs are not included. " + note)
     return {"heading": heading, "columns": [_col("Metric"), _col("Value", "mixed"),
                                              _col("vs prior period", "delta"), _col("vs same period last year", "delta")],
             "rows": rows, "row_fmts": fmts, "note": note}
@@ -218,7 +219,8 @@ def build_annual_portfolio(conn, year):
                         ["Margin", total["margin"] * 100, last["margin"] * 100, None],
                         ["Occupancy", total["occupancy"] * 100, last["occupancy"] * 100, None]],
                "note": "Revenue, Costs and Net profit are what this business actually earns -- full figures for a flat "
-                       "you own, only the management fee for one you run for an owner."}
+                       "you own, only the management fee for one you run for an owner. Costs are operated-property costs only; "
+                       "managed-property costs and Business Costs are not included."}
     return {"title": "Annual portfolio report", "subtitle": f"{year} · all properties",
             "sections": [summary,
                          {"heading": "Month by month",

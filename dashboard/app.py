@@ -208,14 +208,16 @@ def create_app():
     def money(v, places=0):
         if v is None:
             return "—"
+        if round(v, places) == 0:
+            v = 0                                   # never "−£0" or "−£0.00"
         sign = "−" if v < 0 else ""
         return f"{sign}£{abs(v):,.{places}f}"
 
     def money_k(v):
         if v is None:
             return "—"
-        sign = "−" if v < 0 else ""
         a = abs(v)
+        sign = "−" if v < 0 and round(a) != 0 else ""
         return f"{sign}£{a / 1000:.1f}k" if a >= 1000 else f"{sign}£{a:.0f}"
 
     flask_app.jinja_env.filters["money"] = money

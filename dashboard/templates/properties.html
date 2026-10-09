@@ -63,7 +63,7 @@
               <tr>
                 <td class="c-name"><a href="{{ cx('properties.detail', property_id=r.id) }}" title="{{ r.name }}">{{ pname(r.name) }}</a></td>
                 <td class="c-model note">Operated</td>
-                {% if r.not_active %}<td class="num" colspan="3"><span class="zero" title="No performance to show: this property was not active in this period">—</span></td>
+                {% if r.not_active or r.no_data %}<td class="num" colspan="3"><span class="zero" title="{{ 'No performance to show: this property was not active in this period' if r.not_active else 'No data imported for this period' }}">—</span></td>
                 {% else %}
                 <td class="num">{{ review_pill(r) }}{% if r.revenue %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#revenue-records', r.revenue|money, 'Revenue records for ' ~ r.name) }}{% else %}{{ r.revenue|money }}{% endif %}</td>
                 <td class="num c-secondary">{% if r.revenue or r.profit %}{{ mlink(wsurl(ctx, 'properties.detail', r.id), r.profit|money, 'Property Profit breakdown for ' ~ r.name) }}{% else %}{{ r.profit|money }}{% endif %}</td>
@@ -99,7 +99,7 @@
               <tr>
                 <td class="c-name"><a href="{{ cx('properties.detail', property_id=r.id) }}" title="{{ r.name }}">{{ pname(r.name) }}</a></td>
                 <td class="c-model note" title="Urban Nest earns {{ ('%g%%'|format(r.fee) ~ ' of this') if r.fee else 'the recorded management fee on this' }} property's booking revenue">Managed · {{ ('%g'|format(r.fee) ~ '% fee') if r.fee else 'fee % not set' }}</td>
-                {% if r.not_active %}<td class="num" colspan="3"><span class="zero" title="No performance to show: this property was not active in this period">—</span></td>
+                {% if r.not_active or r.no_data %}<td class="num" colspan="3"><span class="zero" title="{{ 'No performance to show: this property was not active in this period' if r.not_active else 'No data imported for this period' }}">—</span></td>
                 {% else %}
                 <td class="num">{{ review_pill(r) }}{% if r.revenue %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#fees', r.revenue|money, 'Management fee record for ' ~ r.name) }}{% else %}{{ r.revenue|money }}{% endif %}</td>
                 <td class="c-gap" aria-hidden="true"></td>

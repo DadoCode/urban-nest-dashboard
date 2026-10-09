@@ -9,10 +9,10 @@ import db
 import services.ingest as ingest
 import services.kpis as kpis
 import services.sources as src
-from services.common import METRIC_INFO, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta, short_name
+from services.common import METRIC_INFO, gbp0, pct0, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta, short_name
 from services.context import compare_bounds, range_params, request_context
 from services.provenance import workbook_source
-from services.completeness import not_active
+from services.completeness import has_real_data, not_active, period_has_data
 
 bp = Blueprint("bookings", __name__)
 
@@ -55,11 +55,16 @@ def index():
     revenue, prev_rev = metric(kpis.accommodation_revenue)
     tiles = [
         {"label": "Reservations", "value": f"{reservations:,}", "delta": None if mtd else (pct_delta(reservations, prev_res, min_base=2) if prev else None)},
-        {"label": "Booked nights", "value": f"{nights:,}", "delta": None if mtd else (pct_delta(nights, prev_nights, min_base=5) if prev else None)},
-        {"label": "ADR", "value": f"£{kpis.adr(conn, pid, start, end):,.0f}", "info": METRIC_INFO["adr"], "delta": None},
+        {"label": "Booked nights", "value": f"{nights:,}", "info": METRIC_INFO["booked_nights"], "delta": None if mtd else (pct_delta(nights, prev_nights, min_base=5) if prev else None)},
+        {"label": "ADR", "value": gbp0(kpis.adr(conn, pid, start, end)), "info": METRIC_INFO["adr"], "delta": None},
         {"label": "Avg stay", "value": (f"{kpis.avg_stay(conn, pid, start, end):.1f} nights" if kpis.avg_stay(conn, pid, start, end) else "—"), "delta": None},
-        {"label": "Gross Booking Revenue", "value": f"£{revenue:,.0f}", "info": METRIC_INFO["gross_booking_revenue"], "delta": None if mtd else (pct_delta(revenue, prev_rev, min_base=100) if prev else None)},
+        {"label": "Gross Booking Revenue", "value": gbp0(revenue), "info": METRIC_INFO["gross_booking_revenue"], "delta": None if mtd else (pct_delta(revenue, prev_rev, min_base=100) if prev else None)},
     ]
+
+    # NO DATA (nothing recorded for the period) reads "—" with no comparison; a recorded zero stays a zero.
+    no_data = not period_has_data(conn, pid, start, end)
+    if no_data:
+        tiles = [{**t, "value": "—", "delta": None, "no_data": True} for t in tiles]
 
     today = datetime.date.today()
     window_end = today + datetime.timedelta(days=30)
@@ -88,7 +93,7 @@ def index():
         "bookings/overview.html", active="bookings", active_bookings_tab="overview",
         all_properties=all_props, active_property=None, context_bar=True, ctx=ctx, viewing=viewing,
         current_month=ctx["display"], compare_label=label, tiles=tiles, upcoming=upcoming, channel_rows=channel_rows,
-        has_calendar_data=_has_real_bookings(conn),
+        has_calendar_data=_has_real_bookings(conn), no_data=no_data, totals_only=bool(not no_data and (nights or revenue) and not channel_rows),
     )
 
 
@@ -240,8 +245,12 @@ def performance(property_id=None):
         # A property that is inactive, or had not started, and recorded nothing in this period has no occupancy to rank: showing it as 0%
         # would read as measured poor performance. It is listed as "—" (never plotted) with the reason; a property that genuinely had
         # activity in the period stays in, whatever its status today.
+        # An active property with nothing recorded at all for the period is likewise "—" ("No data imported"), not a measured 0%.
         if not_active(conn, p["id"], period_start, period_end) and not (not p["active"] and kpis._has_activity(conn, p["id"], datetime.date.fromisoformat(period_start), datetime.date.fromisoformat(period_end))):
             idle_rows.append({"id": p["id"], "name": p["name"], "why": "Inactive" if not p["active"] else "Not active in this period"})
+            continue
+        if not has_real_data(conn, p["id"], period_start, period_end):
+            idle_rows.append({"id": p["id"], "name": p["name"], "why": "No data imported"})
             continue
         # The whole selected period (not just its last month), so the rows add up to the portfolio occupancy tile that links here.
         cstart, cend = period_start, period_end

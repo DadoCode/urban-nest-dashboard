@@ -1,9 +1,25 @@
 {# Number and status formatting for the workbook import pages. Pence are shown: this is where figures are checked. #}
+{# Plain, fixed explanations of the REVIEW checks that carry no stored reason. Nothing here guesses at why a figure happened. #}
+{% set REVIEW_WHY = {'Management fee rate': 'The recorded fee rate differs from the configured rate.',
+                     'Income without booked nights': 'Revenue is recorded while booked nights are zero.',
+                     "Reversal of last month's costs": 'Negative value may represent a reversal or credit.'} %}
+{# What the three statuses mean, in one place, near every import and reconciliation view. #}
+{% macro status_legend() -%}
+  <details class="legend">
+    <summary>What PASS, REVIEW and NO CONTROL mean</summary>
+    <dl>
+      <dt><span class="rc rc-pass">PASS</span></dt><dd>Figures reconcile with the available control.</dd>
+      <dt><span class="rc rc-review">REVIEW</span></dt><dd>Something does not reconcile or needs checking.</dd>
+      <dt><span class="rc rc-nc">NO CONTROL</span></dt><dd>No comparison/control value was provided, so the check cannot be evaluated. This is not a failure.</dd>
+    </dl>
+    <p class="note">If a workbook-controlled figure is wrong, correct the workbook and re-import the month.</p>
+  </details>
+{%- endmacro %}
 {% macro val(v, kind) -%}
   {%- if v is none -%}—
-  {%- elif kind == 'money' -%}{{ '−' if v < 0 }}£{{ '{:,.2f}'.format(v|abs) }}
-  {%- elif kind == 'pct' -%}{{ '%g'|format((v * 100)|round(1)) }}%
-  {%- else -%}{{ '{:,.0f}'.format(v) }}{%- endif -%}
+  {%- elif kind == 'money' -%}{{ '−' if v|round(2) < 0 }}£{{ '{:,.2f}'.format(v|abs) }}
+  {%- elif kind == 'pct' -%}{{ '%g'|format((v * 100)|round(1) + 0) if ((v * 100)|round(1)) != 0 else '0' }}%
+  {%- else -%}{{ '{:,.0f}'.format(v|abs if v|round(0) == 0 else v) }}{%- endif -%}
 {%- endmacro %}
 {% macro change(a, b, kind) -%}
   {%- if a is none or b is none -%}
@@ -45,7 +61,7 @@
 {% macro checks_table(rows) -%}
   <table class="chk"><colgroup><col><col class="cn"><col class="cn"><col class="cn"><col class="cs"></colgroup><thead><tr><th>Check</th><th class="num">Workbook</th><th class="num">Imported</th><th class="num">Difference</th><th>Status</th></tr></thead><tbody>
     {% for c in rows %}{% set k = kind_of(c.metric) %}
-      <tr><td>{{ c.metric }}{% if c.metric == 'Management fee rate' %}<div class="note">Recorded rate vs the rate configured at import</div>{% endif %}{% if c.current %}<div class="cur-note"><span class="cur-label">Current configuration</span> {{ '%g'|format(c.current.configured) }}% · {% if c.current.matches %}<span class="cur-ok">✓ now matches the recorded rate</span>{% else %}still differs from the recorded rate{% endif %} <span class="note">· the result at import time is unchanged</span></div>{% endif %}{% if c.note %}<div class="note">{{ c.note }}</div>{% endif %}</td><td class="num">{{ val(c.workbook, k) }}</td><td class="num">{{ val(c.imported, k) }}</td><td class="num">{{ diffv(c.diff, k) }}</td><td>{{ check_pill(c.status) }}</td></tr>
+      <tr><td>{{ c.metric }}{% if c.metric == 'Management fee rate' %}<div class="note">Recorded rate vs the rate configured at import</div>{% endif %}{% if c.status == 'REVIEW' and c.metric in REVIEW_WHY %}<div class="note why">{{ REVIEW_WHY[c.metric] }}</div>{% endif %}{% if c.current %}<div class="cur-note"><span class="cur-label">Current configuration</span> {{ '%g'|format(c.current.configured) }}% · {% if c.current.matches %}<span class="cur-ok">✓ now matches the recorded rate</span>{% else %}still differs from the recorded rate{% endif %} <span class="note">· the result at import time is unchanged</span></div>{% endif %}{% if c.note %}<div class="note">{{ c.note }}</div>{% endif %}</td><td class="num">{{ val(c.workbook, k) }}</td><td class="num">{{ val(c.imported, k) }}</td><td class="num">{{ diffv(c.diff, k) }}</td><td>{{ check_pill(c.status) }}</td></tr>
     {% endfor %}
   </tbody></table>
 {%- endmacro %}

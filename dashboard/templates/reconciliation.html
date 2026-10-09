@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_head, empty_state %}
 {% from "_recon_macros.html" import fmt, diff %}
-{% block title %}Reconciliation — Urban Nest Estates{% endblock %}
+{% block title %}Excel vs booking statements — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head("Reconciliation", "Months where the Excel history and uploaded reservations both exist. The dashboard keeps using Excel until you choose otherwise.") }}
+  {{ page_head("Excel vs booking statements", "Older Excel history against uploaded booking statements. Months where the Excel history and uploaded reservations both exist. The dashboard keeps using Excel until you choose otherwise.") }}
   <p class="note m0-b3"><a href="{{ url_for('documents.index') }}">&larr; Documents</a> · <a href="{{ url_for('reconcile.figures') }}">Figure audit — where does each number come from?</a></p>
 
   <div class="card mb4">

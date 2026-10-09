@@ -4,8 +4,9 @@ from flask import Blueprint, render_template, request, url_for
 
 import db
 import services.kpis as kpis
-from services.common import METRIC_INFO, get_properties, is_managed, pct_delta
+from services.common import METRIC_INFO, gbp0, pct0, get_properties, is_managed, pct_delta
 from routes.expenses import _costs
+from services.completeness import has_real_data, period_has_data
 from services.context import request_context, range_params, workspace_params
 
 bp = Blueprint("overview", __name__)
@@ -56,7 +57,13 @@ def kpi_rows(conn, property_id, ctx):
     # that isn't actually fair.
     mtd = ctx["partial"] and ctx["choice"] == "this_month"
 
+    # NO DATA is decided by coverage (is anything recorded for this period?), never by a figure happening to equal zero: an unevaluable
+    # period reads "—" with no comparison, while a period with rows and a measured zero still reads 0.
+    has_data = period_has_data(conn, property_id, start, end)
+
     def tile(label, key, value_fmt, extra_note=None, cur_val=None, prev_val=None):
+        if not has_data:
+            return {"key": key, "label": label, "value": "—", "delta": None, "delta_ly": None, "note": None, "info": METRIC_INFO.get(key), "no_data": True}
         cv = cur_val if cur_val is not None else cur[key]
         pv = prev_val if prev_val is not None else prev[key]
         lv = (last_year[key] if key in last_year.keys() else None) if cur_val is None else None
@@ -72,15 +79,15 @@ def kpi_rows(conn, property_id, ctx):
         }
 
     primary = [
-        tile("Urban Nest Revenue", "revenue", lambda v: f"£{v:,.0f}"),
-        tile("Property Profit", "net_profit", lambda v: f"£{v:,.0f}"),
-        tile("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%"),
-        tile("RevPAR", "revpar", lambda v: f"£{v:,.0f}"),
+        tile("Urban Nest Revenue", "revenue", lambda v: gbp0(v)),
+        tile("Property Profit", "net_profit", lambda v: gbp0(v)),
+        tile("Occupancy", "occupancy", lambda v: pct0(v)),
+        tile("RevPAR", "revpar", lambda v: gbp0(v)),
     ]
     secondary = [
-        tile("ADR", "adr", lambda v: f"£{v:,.0f}"),
+        tile("ADR", "adr", lambda v: gbp0(v)),
         tile("Booked nights", "booked_nights", lambda v: f"{v:,.0f}"),
-        tile("Profit margin", "margin", lambda v: f"{v * 100:.0f}%"),
+        tile("Profit margin", "margin", lambda v: pct0(v)),
         tile("Avg stay", "avg_stay", lambda v: f"{v:.1f} nights" if v else "—", cur_val=avg_stay, prev_val=prev_avg_stay),
     ]
     return primary, secondary, cur
@@ -109,14 +116,14 @@ def index():
         if is_managed(p):
             snap = kpis.adjusted_kpi_snapshot(conn, p["id"], start, end)
             managed_rows.append({
-                "id": p["id"], "name": p["name"], "fee": snap["net_profit"],
+                "id": p["id"], "name": p["name"], "fee": snap["net_profit"], "no_data": not has_real_data(conn, p["id"], start, end),
                 "fee_pct": p["management_fee_pct"],
                 "occupancy": snap["occupancy"], "adr": snap["adr"],
             })
         else:
             snap = kpis.kpi_snapshot(conn, p["id"], start, end)
             rtr_rows.append({
-                "id": p["id"], "name": p["name"], "revenue": snap["revenue"], "costs": snap["costs"],
+                "id": p["id"], "name": p["name"], "no_data": not has_real_data(conn, p["id"], start, end), "revenue": snap["revenue"], "costs": snap["costs"],
                 "profit": snap["net_profit"], "occupancy": snap["occupancy"], "adr": snap["adr"],
             })
     rtr_rows.sort(key=lambda r: r["revenue"], reverse=True)
@@ -174,12 +181,12 @@ def index():
     else:
         op, mg = _costs(conn, start, end, scope="property", model="operated"), _costs(conn, start, end, scope="property", model="managed")
         cost_line = {"property": {"value": _costs(conn, start, end, scope="property"), "href": url_for("expenses.index", **range_params(ctx, scope="property")),
-                                  "title": f"Operated £{op:,.0f} + managed £{mg:,.0f}"},
+                                  "title": f"Operated £{op:,.0f} + managed £{mg:,.0f}", "operated": op, "managed": mg},
                      "business": {"value": _costs(conn, start, end, scope="business"), "href": url_for("expenses.index", **range_params(ctx, scope="business")),
                                   "title": "Company-level costs, not part of Property Profit"}}
 
     return render_template(
-        "index.html", active="overview", all_properties=nav_properties, flats_count=len(flats), drill=drill, hints=hints, cost_line=cost_line,
+        "index.html", active="overview", no_data=not period_has_data(conn, ctx["property_id"], start, end), all_properties=nav_properties, flats_count=len(flats), drill=drill, hints=hints, cost_line=cost_line,
         active_property=ctx["property_id"], viewing=viewing,
         primary_tiles=primary_tiles, ctx=ctx,
         context_bar=True, rtr_rows=rtr_rows, managed_rows=managed_rows,

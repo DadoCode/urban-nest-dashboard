@@ -1,0 +1,19 @@
+{% extends "property/_shell.html" %}
+{% from "_components.html" import section %}
+{% block tab_content %}
+  {% call section("This month is controlled by a workbook import") %}
+    <div class="card confirm-card">
+      <p class="mt0"><strong>{{ month_label }} for {{ prop.name|short }} is controlled by workbook import #{{ batch }}.</strong></p>
+      <p>Adding this {{ 'income' if direction == 'income' else 'expense' }} changes the ledger outside the workbook and may cause reconciliation REVIEW on that import.
+        The workbook is the primary source for the month: if a figure is wrong, correct the workbook and re-import the month instead.</p>
+      <p class="note">You are about to add: <strong>£{{ form.amount }}</strong>{% if form.vendor %} · {{ form.vendor }}{% endif %}{% if form.description %} · {{ form.description }}{% endif %} · {{ form.category|replace('_', ' ')|title }} · {{ month_label }}. It will be marked as a manual row.</p>
+      <form method="post" action="{{ url_for('properties.add_expense', property_id=prop.id) }}" class="confirm-actions">
+        <input type="hidden" name="confirm_manual" value="1">
+        {% for k, v in form.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        <a class="btn secondary" href="{{ url_for('properties.expenses_tab', property_id=prop.id) }}">Cancel</a>
+        <button type="submit">Add manual adjustment</button>
+      </form>
+      <p class="note mb0"><a href="{{ url_for('imports.batch', batch_id=batch) }}#prop-{{ prop.id }}">Open import #{{ batch }} and its reconciliation ›</a></p>
+    </div>
+  {% endcall %}
+{% endblock %}

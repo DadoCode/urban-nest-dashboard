@@ -14,14 +14,14 @@
   {% endcall %}
 
   {% if not is_overhead %}
-  {% call section("Name and address", "How this property is named everywhere, and matched on booking statements") %}
+  {% call section("Name and address", "How this property is named everywhere, and matched on the workbook and any supporting documents") %}
   <div class="card">
     <form method="post" action="{{ url_for('properties.save_details', property_id=prop.id) }}" class="goal-form">
       <label style="display:flex; flex-direction:column; gap:4px; flex:1 1 220px">Name <input name="name" value="{{ prop.name }}" required maxlength="120"></label>
       <label style="display:flex; flex-direction:column; gap:4px; flex:1 1 280px">Address <input name="address" value="{{ prop.address or '' }}" maxlength="200"></label>
       <button type="submit" class="secondary" style="align-self:flex-end">Save</button>
     </form>
-    <p class="note m-t2">Booking statements are matched on the name and address, so make them match what Airbnb and Booking.com show (for example the street name and house number).</p>
+    <p class="note m-t2">The monthly workbook matches this property by its sheet; supporting documents are matched on the name and address, so keep them close to what Airbnb and Booking.com show (for example the street name and house number).</p>
   </div>
   {% endcall %}
 
@@ -83,7 +83,7 @@
 
   {% call section("Booking calendar", "Optional") %}
   <div class="card">
-    <p class="note mt0">Paste this property's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>
+    <p class="note mt0">Paste this property's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this: monthly figures come from the monthly workbook. The calendar only adds individual reservations, and never overwrites one already on file.</p>
     <form class="goal-form" method="post" action="{{ url_for('properties.sync_calendar', property_id=prop.id) }}">
       <input type="url" name="ical_url" placeholder="https://www.airbnb.com/calendar/ical/....ics" value="{{ prop.ical_url or '' }}" style="flex: 1 1 320px">
       <button type="submit" class="secondary">Sync now</button>

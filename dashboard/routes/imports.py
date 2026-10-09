@@ -11,6 +11,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 import db
 from services import runtime
+import services.reconcile as rc
 from services.common import short_name, get_properties, is_managed
 from services.provenance import current_rate_context
 from services.workbook import apply as A
@@ -75,21 +76,21 @@ def index():
         r["kind_label"] = "Clean-up" if is_cleanup else "Workbook"
         r["file_label"] = (r["filename"].split(":", 1)[1].strip().capitalize() if is_cleanup else (stem if len(stem) <= 34 else "…" + stem[-33:]))
     return render_template("imports.html", active="documents", all_properties=get_properties(conn), active_property=None,
-                           batches=rows, f_status=status, sort=sort, direction=direction)
+                           batches=rows, f_status=status, sort=sort, direction=direction, recon_total=len(rc.candidates(conn)))
 
 
 @bp.route("/imports/upload", methods=["POST"])
 def upload():
     f = request.files.get("workbook")
     if not f or not f.filename:
-        flash("Choose the monthly workbook (.xlsx) to import.", "error")
+        flash("No file was chosen. Choose the monthly .xlsx workbook.", "error")
         return redirect(url_for("imports.index"))
     if not f.filename.lower().endswith((".xlsx", ".xlsm")):
-        flash("The monthly import takes an Excel workbook (.xlsx).", "error")
+        flash("That is not an Excel workbook. Choose the monthly .xlsx workbook.", "error")
         return redirect(url_for("imports.index"))
     data = f.read()
     if len(data) > runtime.max_upload_bytes():
-        flash("That file is larger than the upload limit.", "error")
+        flash("That file is larger than the upload limit. Choose the monthly .xlsx workbook, without extra attachments or images.", "error")
         return redirect(url_for("imports.index"))
     conn = db.get_conn()
     try:
@@ -128,8 +129,14 @@ def batch(batch_id):
     base = P.plan_month(conn, parsed, ym, with_after=False) if plan else None
     month_issues = [i for i in parsed["issues"] if i["level"] in ("error", "review") and i["month"] == ym]
     elsewhere = sum(1 for i in parsed["issues"] if i["level"] in ("error", "review") and i["month"] not in (None, ym))
+    # "Last imported": the newest applied workbook batch for that month that actually covered the property (undone batches do not count)
+    last_imported = {}
+    if ym:
+        for b in conn.execute("SELECT id, applied_at, properties FROM import_batches WHERE kind='workbook' AND status='applied' AND period=? ORDER BY applied_at DESC, id DESC", (ym,)):
+            for pid in json.loads(b["properties"] or "[]"):
+                last_imported.setdefault(pid, {"batch": b["id"], "date": (b["applied_at"] or "")[:10]})
     return render_template("import_batch.html", report=report, overview=overview, ym=ym, plan=plan, month_issues=month_issues,
-                           elsewhere=elsewhere, fingerprint=fingerprint(base) if base else "", **ctx)
+                           elsewhere=elsewhere, fingerprint=fingerprint(base) if base else "", last_imported=last_imported, **ctx)
 
 
 def _applied(conn, row, parsed, ctx):
@@ -168,7 +175,7 @@ def apply(batch_id):
         return redirect(url_for("imports.index"))
     base = P.plan_month(conn, parsed, ym, with_after=False)
     if request.form.get("fingerprint") != fingerprint(base):
-        flash("The dashboard changed since this preview was shown. Review the updated preview before applying.", "warning")
+        flash("The workbook or data changed after this preview. Create a new preview before applying.", "warning")
         return redirect(url_for("imports.batch", batch_id=batch_id, month=ym))
     confirm, excluded, distinct = _choices(request.form)
     plan = P.plan_month(conn, parsed, ym, with_after=False, excluded=excluded, confirm=confirm, distinct=distinct)

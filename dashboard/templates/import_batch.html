@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_head, empty_state %}
-{% from "_import_macros.html" import val, change, status_pill, row_pill, check_pill %}
+{% from "_import_macros.html" import val, change, status_pill, row_pill, check_pill, status_legend %}
 {% block title %}Import preview — Urban Nest Estates{% endblock %}
 {% set METRICS = [('revenue', 'Revenue (booking value)', 'money'), ('property_costs', 'Property costs', 'money'), ('management_fee', 'Management fee earned', 'money'),
                   ('days', 'Days booked', 'int'), ('occupancy', 'Occupancy', 'pct'), ('profit', 'Property profit (managed: fee earned)', 'money')] %}
@@ -51,6 +51,7 @@
       {% endfor %}
       {% if elsewhere %}<p class="note">{{ elsewhere }} problem(s) elsewhere in the workbook (other months) don't affect this import.</p>{% endif %}
 
+      {{ status_legend() }}
       <form method="post" action="{{ url_for('imports.apply', batch_id=batch.id) }}">
         <input type="hidden" name="month" value="{{ ym }}">
         <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
@@ -63,7 +64,9 @@
             <td style="width:28px"><input type="checkbox" name="include" value="{{ it.property_id }}" {{ 'checked' if it.status == 'ok' and it.change_count }} {{ 'disabled' if not selectable }}></td>
             <td style="min-width:17rem"><strong>{{ it.name }}</strong>{% if it.code and not business %} <span class="note">· {{ it.code }}</span>{% endif %}
               {% if it.new_property %}<div class="note">new · {{ it.new_property.model or 'model to choose' }}{% if it.new_property.model == 'managed' and it.new_property.pct %} {{ '%g'|format(it.new_property.pct) }}%{% endif %}</div>
-              {% elif cur.model in ('managed', 'operated') %}<div class="note">{{ cur.model }}</div>{% endif %}</td>
+              {% elif cur.model in ('managed', 'operated') %}<div class="note">{{ cur.model }}</div>{% endif %}
+              {% if it.counts and not it.change_count and it.status != 'error' %}<div class="note">Already up to date — this import would make no changes.</div>{% endif %}
+              {% if last_imported and last_imported.get(it.property_id) %}<div class="note">Last imported {{ last_imported[it.property_id].date }} · <a href="{{ url_for('imports.batch', batch_id=last_imported[it.property_id].batch) }}">import #{{ last_imported[it.property_id].batch }}</a></div>{% endif %}</td>
             <td>{{ status_pill(it.status) }}</td>
             {% if business %}
               <td class="num" colspan="3">{{ val(cur.business_costs, 'money') if it.current else '—' }} → {{ val(aft.business_costs, 'money') if it.after else '—' }} {% if it.current and it.after %}<div class="note">{{ change(cur.business_costs, aft.business_costs, 'money') }}</div>{% endif %}</td>
@@ -72,7 +75,7 @@
               <td class="num">{% if it.after %}{{ val(cur.property_costs, 'money') if it.current else 'new' }} → {{ val(aft.property_costs, 'money') }}{% if it.current %}<div class="note">{{ change(cur.property_costs, aft.property_costs, 'money') }}</div>{% endif %}{% endif %}</td>
               <td class="num">{% if it.after %}{{ val(cur.days, 'int') if it.current else 'new' }} → {{ val(aft.days, 'int') }} <span class="note">({{ val(aft.occupancy, 'pct') }})</span>{% endif %}</td>
             {% endif %}
-            <td class="num note">{% if it.counts %}+{{ it.counts.NEW }} ~{{ it.counts.CHANGED }} −{{ it.counts.REMOVED }} <span style="opacity:.7">={{ it.counts.UNCHANGED }}</span>{% endif %}</td>
+            <td class="num note">{% if it.counts %}{{ it.counts.NEW }} new · {{ it.counts.CHANGED }} changed · {{ it.counts.REMOVED }} removed · {{ it.counts.UNCHANGED }} unchanged{% endif %}</td>
           </tr>
           <tr><td></td><td colspan="6" style="padding-top:0">
             {% for r in it.reasons %}<div class="note" style="margin-bottom:4px">{{ r }}</div>{% endfor %}
@@ -159,7 +162,8 @@
             <label style="display:block;margin-bottom:var(--s2)"><input type="checkbox" name="ack" value="1"> I have reviewed the flagged items for the properties I ticked.</label>
             <div class="note" style="margin-bottom:var(--s2)">Anything flagged is not ticked by default. A flagged check means the workbook's own figures disagree with each other or with the dashboard's setup, or that a figure has no workbook control to confirm it.</div>
           {% endif %}
-          <button type="submit" {{ 'disabled' if demo_mode }}>Apply import for {{ month_label(ym) }}</button>
+          <button type="submit" {% if demo_mode %}disabled title="Disabled in the read-only demo."{% endif %}>Apply import for {{ month_label(ym) }}</button>
+          {% if demo_mode %}<span class="note">Disabled in the read-only demo.</span>{% endif %}
           <span class="note">Only the ticked rows change. Nothing outside {{ month_label(ym) }} is touched, and you can undo it afterwards.</span>
         </div>
       </form>

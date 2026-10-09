@@ -907,3 +907,24 @@ table.chk col.cn { width: 130px; } table.chk col.cs { width: 112px; }
 .cur-note { margin-top: 2px; font-size: var(--fs-small); color: var(--ink-soft); }
 .cur-label { text-transform: uppercase; letter-spacing: 0.05em; font-size: var(--fs-label); color: var(--muted); margin-right: 4px; }
 .cur-ok { color: var(--pos); font-weight: 500; }
+.confirm-card { max-width: 640px; border-left: 3px solid var(--warn); }
+.confirm-actions { display: flex; gap: var(--s2); margin: var(--s3) 0; }
+.mb0 { margin-bottom: 0; }
+
+/* Phase 8: quiet NO DATA state and the one-line cost note under the Overview tiles */
+.nodata-line { margin: var(--s3) 0 var(--s4); color: var(--muted); font-size: var(--fs-sm, 13px); }
+.cost-note { margin: calc(var(--s2) * -1) 0 var(--s4); }
+.owner-line { margin: var(--s2) 0 var(--s4); }
+
+/* Phase 8: the ⓘ definition popover (hover, focus, click and tap) and a touch-sized hit area */
+.info-pop { position: fixed; z-index: 120; padding: var(--s2) var(--s3); background: var(--ink); color: var(--surface); border-radius: var(--radius-sm, 6px); font-size: var(--fs-small); font-weight: 400; line-height: 1.4; letter-spacing: 0; text-transform: none; box-shadow: 0 8px 24px -8px rgba(0, 0, 0, .4); pointer-events: none; }
+.info-dot { cursor: pointer; }
+@media (pointer: coarse) { .info-dot { padding: 10px 8px; margin: -10px -4px -10px 0; } }
+
+/* Phase 8: the PASS / REVIEW / NO CONTROL legend */
+.legend { margin: var(--s2) 0 var(--s3); font-size: var(--fs-small); color: var(--muted); }
+.legend summary { cursor: pointer; }
+.legend dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px var(--s3); align-items: center; margin: var(--s2) 0; }
+.legend dt, .legend dd { margin: 0; }
+.legend .note { margin: 0; }
+.note.why { color: var(--muted); }

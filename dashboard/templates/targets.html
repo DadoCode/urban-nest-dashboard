@@ -21,6 +21,8 @@
 {% block content %}
   {{ page_head("Targets", "Where you are, where you're aiming, and how big the gap is. Targets start as the average of your own recorded months and only ever appear on this page.") }}
 
+  <p class="note">Target Operating Profit uses Gross Booking Revenue minus recorded costs. For managed properties this includes booking revenue that belongs to the owner. For Urban Nest's own figures, see <a href="{{ url_for('overview.index') }}">Overview</a>.</p>
+
   <form method="get" class="filter-bar">
     <label class="note">Average based on
       <select name="basis" onchange="this.form.submit()">

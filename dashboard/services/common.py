@@ -33,6 +33,8 @@ METRIC_INFO = {
     # Overview/Properties, so it gets its own distinct name ("Operating
     # Profit") rather than reusing that one.
     "operating_profit": "Gross Booking Revenue minus property-level operating costs. Company-level business expenses are not included.",
+    "occupancy": "Booked nights as a share of available nights in the period. Months imported from the workbook may carry a monthly total rather than individual reservations.",
+    "booked_nights": "Nights with a guest in the period. Months imported from the workbook may carry a monthly total rather than individual reservations.",
     "property_costs": "Genuine costs recorded against this property in the selected period. Management-fee transfers are excluded -- that's Urban Nest's own income, not a cost.",
 }
 
@@ -184,3 +186,15 @@ def channel_key(platform):
     if "vrbo" in p or "homeaway" in p:
         return "vrbo"
     return "other"
+
+
+def gbp0(v):
+    """Whole-pound money that never prints a negative zero: -0.3 reads £0, not £-0 or −£0."""
+    r = round(v)
+    return ("−" if r < 0 else "") + f"£{abs(r):,.0f}"
+
+
+def pct0(v):
+    """A 0-1 share as a whole percentage that never prints -0%."""
+    r = round(v * 100)
+    return ("−" if r < 0 else "") + f"{abs(r):.0f}%"

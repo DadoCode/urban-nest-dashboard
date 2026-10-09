@@ -58,7 +58,7 @@
           {% endfor %}
           {% for r in idle_rows %}
             <tr><td><a href="{{ wsurl(ctx, 'properties.bookings', r.id) }}#booked-nights" title="{{ r.name }}">{{ pname(r.name) }}</a> <span class="note">· {{ r.why }}</span></td>
-              <td class="num" colspan="3"><span class="zero" title="No occupancy to show: this property was not active in this period">—</span></td>
+              <td class="num" colspan="3"><span class="zero" title="{{ 'No occupancy to show: nothing is recorded for this property in this period' if r.why == 'No data imported' else 'No occupancy to show: this property was not active in this period' }}">—</span></td>
               <td class="num hide-sm" colspan="4"></td></tr>
           {% endfor %}
         </tbody>

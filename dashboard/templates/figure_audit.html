@@ -4,7 +4,7 @@
 {% block title %}Figure audit — Urban Nest Estates{% endblock %}
 {% block content %}
   {{ page_head("Figure audit", "Where did each number come from? One row per property and month: the active booking source, the figures, and how many source records sit behind them.") }}
-  <p class="note m0-b3"><a href="{{ url_for('reconcile.index') }}">&larr; Reconciliation</a> · <a href="{{ csv_url }}">Download CSV</a></p>
+  <p class="note m0-b3"><a href="{{ url_for('reconcile.index') }}">&larr; Excel vs booking statements</a> · <a href="{{ csv_url }}">Download CSV</a></p>
   <form method="get" class="filter-bar">
     <select name="property" onchange="this.form.submit()"><option value="">All properties</option>{% for p in all_properties if p.type != 'overhead' %}<option value="{{ p.id }}" {{ 'selected' if pid == p.id }}>{{ p.name }}</option>{% endfor %}</select>
     <input type="month" name="from" value="{{ first or '' }}"> <input type="month" name="to" value="{{ last or '' }}"><button type="submit" class="secondary">Show</button>

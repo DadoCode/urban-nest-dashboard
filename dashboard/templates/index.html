@@ -15,12 +15,17 @@
   <div class="tiles">
     {% for t in primary_tiles %}{% set href = drill.get(t.key) %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=href, hint=hints.get(t.key), sparkline_id='tile-spark-' ~ t.key) }}{% endfor %}
   </div>
+  {% if no_data %}
+    <p class="nodata-line">No data imported for this period. <a href="{{ url_for('imports.index') }}">Import monthly workbook ›</a></p>
+  {% else %}
   <div class="cost-line">
     {% for key, label in [('property', 'Property Costs'), ('business', 'Business Costs')] if cost_line.get(key) %}
       {% set c = cost_line[key] %}
-      <a href="{{ c.href }}" title="{{ c.title }}" aria-label="{{ label }} {{ '£{:,.0f}'.format(c.value) }}: open the expenses behind it">{{ label }} <strong>£{{ '{:,.0f}'.format(c.value) }}</strong> ›</a>
+      <a href="{{ c.href }}" title="{{ c.title }}" aria-label="{{ label }} {{ '£{:,.0f}'.format(c.value) }}: open the expenses behind it">{{ label }} <strong>£{{ '{:,.0f}'.format(c.value) }}</strong>{% if key == 'property' and c.operated is defined %} <span class="note">(operated £{{ '{:,.0f}'.format(c.operated) }} · managed £{{ '{:,.0f}'.format(c.managed) }})</span>{% endif %} ›</a>
     {% endfor %}
   </div>
+  {% if cost_line.property.operated is defined %}<p class="note cost-note">Property Profit uses operated-property costs only.</p>{% endif %}
+  {% endif %}
 
   {% call section("Portfolio performance", "Click a month to view it · click a costs bar for the operated-property costs behind it") %}
     <div class="card">
@@ -68,11 +73,13 @@
             {% for r in rtr_rows %}
               <tr>
                 <td><a href="{{ cx('properties.detail', property_id=r.id) }}" title="{{ r.name }}">{{ pname(r.name) }}</a></td>
+                {% if r.no_data %}<td class="num" colspan="5"><span class="zero" title="Nothing is recorded for this property in this period">— no data imported</span></td>{% else %}
                 <td class="num">{% if r.revenue %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#revenue-records', r.revenue|money, 'Revenue records for ' ~ r.name) }}{% else %}{{ r.revenue|money }}{% endif %}</td>
                 <td class="num">{% if r.costs %}{{ mlink(wsurl(ctx, 'properties.expenses_tab', r.id), r.costs|money, 'Expenses for ' ~ r.name) }}{% else %}{{ r.costs|money }}{% endif %}</td>
                 <td class="num">{{ r.profit|money }}</td>
                 <td class="num">{% if r.occupancy %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#booked-nights', '%.0f'|format(r.occupancy * 100) ~ '%', 'Booked nights for ' ~ r.name) }}{% else %}0%{% endif %}</td>
                 <td class="num">{{ r.adr|money }}</td>
+                {% endif %}
               </tr>
             {% endfor %}
           </tbody>
@@ -91,9 +98,11 @@
             {% for r in managed_rows %}
               <tr>
                 <td><a href="{{ cx('properties.detail', property_id=r.id) }}" title="{{ r.name }}">{{ pname(r.name) }}</a> <span class="note">· {{ ('%g'|format(r.fee_pct) ~ '% fee') if r.fee_pct else 'fee % not set' }}</span></td>
+                {% if r.no_data %}<td class="num" colspan="3"><span class="zero" title="Nothing is recorded for this property in this period">— no data imported</span></td>{% else %}
                 <td class="num">{% if r.fee %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#fees', r.fee|money, 'Management fee record for ' ~ r.name) }}{% else %}{{ r.fee|money }}{% endif %}</td>
                 <td class="num">{% if r.occupancy %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#booked-nights', '%.0f'|format(r.occupancy * 100) ~ '%', 'Booked nights for ' ~ r.name) }}{% else %}0%{% endif %}</td>
                 <td class="num">{{ r.adr|money }}</td>
+              {% endif %}
               </tr>
             {% endfor %}
           </tbody>
