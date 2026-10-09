@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, section, progress, empty_state %}
+{% from "_components.html" import pname, page_head, section, progress, empty_state %}
 {% block title %}Targets — Urban Nest Estates{% endblock %}
 
 {# actual/target% only means "progress toward target" when the target is
@@ -52,18 +52,18 @@
         </div>
       {% endfor %}
     </div>
-    <p class="note" style="margin-top:var(--s2)">Sum of the properties. Company-level business costs aren't included in Portfolio Operating Profit.</p>
+    <p class="note mt2">Sum of the properties. Company-level business costs aren't included in Portfolio Operating Profit.</p>
   {% endcall %}
 
   {% call section("By property", "Click a row to edit its targets") %}
     <div class="card flush">
       {% if rows %}
-        <table>
+        <table class="targets-table">
           <thead>
             <tr>
               <th>Property</th>
-              <th class="num" style="white-space:normal" title="{{ METRIC_INFO.gross_booking_revenue }}">Gross Booking Revenue</th><th class="num">Target</th><th>Progress</th>
-              <th class="num" style="white-space:normal" title="{{ METRIC_INFO.operating_profit }}">Operating Profit</th><th class="num">Target</th><th>Progress</th>
+              <th class="num wsn" title="{{ METRIC_INFO.gross_booking_revenue }}">Gross Booking Revenue</th><th class="num">Target</th><th>Progress</th>
+              <th class="num wsn" title="{{ METRIC_INFO.operating_profit }}">Operating Profit</th><th class="num">Target</th><th>Progress</th>
               <th class="num">Occupancy</th>
               <th></th>
             </tr>
@@ -72,7 +72,7 @@
             {% for r in rows %}
               {% set rv = r.metrics.revenue %}{% set pf = r.metrics.profit %}{% set oc = r.metrics.occupancy %}
               <tr id="target-row-{{ r.id }}" class="clickable {{ 'focus-row' if r.id == focus_property }}" hx-get="{{ url_for('targets.edit', property_id=r.id, basis=basis, month=month) }}" hx-target="#drawer" hx-swap="innerHTML">
-                <td>{{ r.name }} <a class="mlink note" href="{{ url_for('properties.performance_tab', property_id=r.id, **{'from': month ~ '-01', 'to': month ~ '-01', 'compare': 'previous_period'}) }}" onclick="event.stopPropagation()" aria-label="Open Performance for {{ r.name }}, {{ month_label }}">Performance ›</a></td>
+                <td class="t-name" title="{{ r.name }}">{{ pname(r.name, always=True) }}</td>
                 <td class="num">{{ rv.actual|money if rv.actual is not none else '—' }}</td>
                 <td class="num">{% if rv.target %}{{ rv.target|money }}{% else %}<span class="muted">—</span>{% endif %}{% if rv.saved %} <span class="pill" title="You set this target">Set</span>{% endif %}</td>
                 <td>{{ target_progress(rv) }}</td>
@@ -80,7 +80,7 @@
                 <td class="num">{% if pf.target %}{{ pf.target|money }}{% else %}<span class="muted">—</span>{% endif %}{% if pf.saved %} <span class="pill" title="You set this target">Set</span>{% endif %}</td>
                 <td>{{ target_progress(pf) }}</td>
                 <td class="num">{% if oc.actual is not none %}{{ '%.0f'|format(oc.actual) }}%{% if oc.target %} <span class="muted">/ {{ '%.0f'|format(oc.target) }}%</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
-                <td class="num"><span class="btn secondary" style="height:26px">Edit</span></td>
+                <td class="num t-act"><a class="t-perf" href="{{ url_for('properties.performance_tab', property_id=r.id, **{'from': month ~ '-01', 'to': month ~ '-01', 'compare': 'previous_period'}) }}" onclick="event.stopPropagation()" aria-label="Open Performance for {{ r.name }}, {{ month_label }}">Performance</a><span class="btn secondary" style="height:26px">Edit</span></td>
               </tr>
             {% endfor %}
           </tbody>
@@ -92,7 +92,7 @@
   {% endcall %}
 
   {% if any_saved %}
-    <form method="post" action="{{ url_for('targets.reset') }}" style="margin-top:var(--s4)" onsubmit="return confirm('Discard every target you set and go back to the data averages?')">
+    <form class="mt4" method="post" action="{{ url_for('targets.reset') }}" onsubmit="return confirm('Discard every target you set and go back to the data averages?')">
       <input type="hidden" name="basis" value="{{ basis }}"><input type="hidden" name="month" value="{{ month }}">
       <button type="submit" class="secondary">Reset all to data average</button>
     </form>

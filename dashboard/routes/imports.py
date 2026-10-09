@@ -11,7 +11,8 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 import db
 from services import runtime
-from services.common import get_properties
+from services.common import short_name, get_properties, is_managed
+from services.provenance import rejudge_rate
 from services.workbook import apply as A
 from services.workbook import batches as B
 from services.workbook import config as C
@@ -66,8 +67,13 @@ def index():
     names = {p["id"]: p["name"] for p in get_properties(conn)}
     for r in rows:
         ids = json.loads(r["properties"] or "[]")
-        r["property_names"] = [names.get(i, "Business costs" if i == P.BUSINESS_ID else i) for i in ids]
+        r["property_names"] = [short_name(names.get(i, "Business costs" if i == P.BUSINESS_ID else i)) for i in ids]
         r["period_label"] = month_label(r["period"]) if r["period"] else "—"
+        # what kind of batch it is, and a file label that keeps the part that tells imports apart (the tail), not the identical prefix
+        is_cleanup = (r["filename"] or "").startswith("cleanup:")
+        stem = (r["filename"] or "").rsplit(".", 1)[0].replace("_", " ")
+        r["kind_label"] = "Clean-up" if is_cleanup else "Workbook"
+        r["file_label"] = (r["filename"].split(":", 1)[1].strip().capitalize() if is_cleanup else (stem if len(stem) <= 34 else "…" + stem[-33:]))
     return render_template("imports.html", active="documents", all_properties=get_properties(conn), active_property=None,
                            batches=rows, f_status=status, sort=sort, direction=direction)
 
@@ -131,7 +137,7 @@ def _applied(conn, row, parsed, ctx):
     names[P.BUSINESS_ID] = "Business costs"
     before = json.loads(row["before_totals"] or "{}")
     after = json.loads(row["after_totals"] or "{}")
-    recon = json.loads(row["reconciliation"] or "{}")
+    recon = {pid: rejudge_rate(conn, pid, checks) for pid, checks in json.loads(row["reconciliation"] or "{}").items()}
     verification = []
     if row["status"] == "applied" and parsed:
         for code, info in P.identity_map(conn, parsed).items():
@@ -144,7 +150,7 @@ def _applied(conn, row, parsed, ctx):
                 v["reasons"] = [c["metric"] for c in flagged]
                 verification.append(v)
     created = json.loads(row["new_properties"] or "[]")
-    return render_template("import_applied.html", names=names, before=before, after=after, recon=recon, verification=verification,
+    return render_template("import_applied.html", names=names, before=before, after=after, recon=recon, verification=verification, managed_ids={p["id"] for p in get_properties(conn) if is_managed(p)},
                            created=created, undoable=(row["status"] == "applied"), **ctx)
 
 

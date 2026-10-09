@@ -31,7 +31,6 @@ def kpi_rows(conn, property_id, ctx):
     Shared with routes/properties.py so a property workspace's own
     Overview uses the exact same grouping as the portfolio one."""
     cur, prev, last_year = _range_snapshot(conn, property_id, ctx)
-    period_label = ("MTD, " if ctx["partial"] and ctx["choice"] == "this_month" else "") + ctx["display"]
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     avg_stay = kpis.avg_stay(conn, property_id, start, end)
     prev_start, prev_end = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
@@ -73,7 +72,7 @@ def kpi_rows(conn, property_id, ctx):
         }
 
     primary = [
-        tile(f"Urban Nest Revenue — {period_label}", "revenue", lambda v: f"£{v:,.0f}"),
+        tile("Urban Nest Revenue", "revenue", lambda v: f"£{v:,.0f}"),
         tile("Property Profit", "net_profit", lambda v: f"£{v:,.0f}"),
         tile("Occupancy", "occupancy", lambda v: f"{v * 100:.0f}%"),
         tile("RevPAR", "revpar", lambda v: f"£{v:,.0f}"),

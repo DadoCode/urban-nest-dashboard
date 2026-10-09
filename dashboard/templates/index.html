@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, section, kpi_tile, empty_state, mlink %}
+{% from "_components.html" import page_head, section, kpi_tile, empty_state, mlink, pname %}
 {% block title %}{{ ctx.display }} Overview — Urban Nest Estates{% endblock %}
 {% block content %}
-  {{ page_head(ctx.display ~ " Overview", flats_count ~ " properties" ~ (" · " ~ viewing.name if viewing else "")) }}
+  {{ page_head(ctx.display ~ " Overview", flats_count ~ " properties" ~ (" · " ~ viewing.name|short if viewing else "") ~ (" · month to date" if ctx.partial and ctx.choice == "this_month" else "")) }}
 
   {% set period_views = {'this_month': 'Month', 'ytd': 'YTD', 'accounting_period': 'Accounting Period'} %}
-  <div class="seg" style="margin-bottom:var(--s4)">
+  <div class="seg mb4">
     {% for s in ctx.shortcuts if s.key in period_views %}
       <a class="{{ 'on' if s.key == ctx.choice or (s.key == 'this_month' and ctx.period_is_latest) else '' }}"
          href="?{{ {'from': s.params['from'], 'to': s.params['to'], 'property': ctx.property_id or 'all', 'compare': ctx.compare}|urlencode }}">{{ period_views[s.key] }}</a>
@@ -50,7 +50,7 @@
     <div class="spark-grid">
       {% for pid, p in occ_props.items() %}
         <a class="spark-card" href="{{ cx('properties.performance_tab', property_id=pid) }}">
-          <div class="spark-name">{{ p.name }}</div>
+          <div class="spark-name"><span aria-hidden="true" title="{{ p.name }}">{{ p.name|short }}</span><span class="vh">{{ p.name }}</span></div>
           <div class="spark-value" id="spark-value-{{ pid }}">—</div>
           <div class="spark-canvas"><canvas id="spark-{{ pid }}"></canvas></div>
         </a>
@@ -59,7 +59,7 @@
   {% endcall %}
 
   {% call section("Property performance") %}
-    <h3 style="margin-top:0">Operated (rent-to-rent)</h3>
+    <h3 class="mt0">Operated (rent-to-rent)</h3>
     <div class="card flush">
       {% if rtr_rows %}
         <table>
@@ -67,7 +67,7 @@
           <tbody>
             {% for r in rtr_rows %}
               <tr>
-                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a></td>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}" title="{{ r.name }}">{{ pname(r.name) }}</a></td>
                 <td class="num">{% if r.revenue %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#revenue-records', r.revenue|money, 'Revenue records for ' ~ r.name) }}{% else %}{{ r.revenue|money }}{% endif %}</td>
                 <td class="num">{% if r.costs %}{{ mlink(wsurl(ctx, 'properties.expenses_tab', r.id), r.costs|money, 'Expenses for ' ~ r.name) }}{% else %}{{ r.costs|money }}{% endif %}</td>
                 <td class="num">{{ r.profit|money }}</td>
@@ -82,7 +82,7 @@
       {% endif %}
     </div>
 
-    <h3 style="margin-top:var(--s5)">Managed</h3>
+    <h3 class="mt5">Managed</h3>
     <div class="card flush">
       {% if managed_rows %}
         <table>
@@ -90,7 +90,7 @@
           <tbody>
             {% for r in managed_rows %}
               <tr>
-                <td><a href="{{ cx('properties.detail', property_id=r.id) }}">{{ r.name }}</a> <span class="note">· {{ ('%g'|format(r.fee_pct) ~ '% fee') if r.fee_pct else 'fee % not set' }}</span></td>
+                <td><a href="{{ cx('properties.detail', property_id=r.id) }}" title="{{ r.name }}">{{ pname(r.name) }}</a> <span class="note">· {{ ('%g'|format(r.fee_pct) ~ '% fee') if r.fee_pct else 'fee % not set' }}</span></td>
                 <td class="num">{% if r.fee %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#fees', r.fee|money, 'Management fee record for ' ~ r.name) }}{% else %}{{ r.fee|money }}{% endif %}</td>
                 <td class="num">{% if r.occupancy %}{{ mlink(wsurl(ctx, 'properties.bookings', r.id) ~ '#booked-nights', '%.0f'|format(r.occupancy * 100) ~ '%', 'Booked nights for ' ~ r.name) }}{% else %}0%{% endif %}</td>
                 <td class="num">{{ r.adr|money }}</td>

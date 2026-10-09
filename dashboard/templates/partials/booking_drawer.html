@@ -12,6 +12,8 @@
   <div class="drawer-field"><span>Property</span><strong>{{ b.property_name }}</strong></div>
   <div class="drawer-field"><span>Counted from</span><strong>{{ b.check_in }}</strong></div>
   <div class="drawer-field"><span>to</span><strong>{{ b.check_out }}</strong></div>
+</div>
+<div class="drawer-section src">
   {% include 'partials/provenance.html' %}
 </div>
 {% else %}
@@ -38,8 +40,7 @@
   {% if b.nights %}<div class="drawer-field"><span>Per night</span><strong>{{ (b.net_revenue / b.nights)|money2 }}</strong></div>{% endif %}
 </div>
 
-<div class="drawer-section">
-  <div class="drawer-field"><span>Recorded by</span><strong>{{ b.source|replace('_', ' ')|title }}</strong></div>
+<div class="drawer-section src">
   {% include 'partials/provenance.html' %}
 </div>
 {% endif %}

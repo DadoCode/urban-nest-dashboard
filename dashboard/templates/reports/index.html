@@ -22,7 +22,7 @@
         <input type="hidden" name="type" value="property_monthly">
         <select name="property" required>
           <option value="">Choose a property…</option>
-          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == default_property }}>{{ p.name }}</option>{% endfor %}
+          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == default_property }}>{{ p.name|short }}</option>{% endfor %}
         </select>
         <input type="month" name="month" value="{{ default_month }}">
         <button type="submit">Preview</button>
@@ -48,7 +48,7 @@
         <input type="month" name="to" value="{{ default_to }}">
         <select name="property">
           <option value="">All properties</option>
-          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == default_property }}>{{ p.name }}</option>{% endfor %}
+          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if p.id == default_property }}>{{ p.name|short }}</option>{% endfor %}
         </select>
         <button type="submit">Preview</button>
       </form>

@@ -20,6 +20,8 @@
   --muted: #646e69;
   --line: rgba(20, 32, 28, 0.09);
   --line-strong: rgba(20, 32, 28, 0.16);
+  /* small glyphs that are controls or hints (info dot, chevrons): ~3.9:1 on white, so they are findable without being loud */
+  --icon: #7c8681;
 
   /* colour carries meaning: brand = selection / primary action / main series */
   --brand: #0e9f6e;
@@ -31,6 +33,7 @@
   --pos: #177c4e;
   --pos-dim: rgba(26, 138, 87, 0.10);
   --warn: #b7791f;
+  --warn-ink: #85560f;
   --warn-dim: rgba(183, 121, 31, 0.12);
   --neg: #c2413a;
   --neg-dim: rgba(194, 65, 58, 0.10);
@@ -234,17 +237,29 @@ main { max-width: 1160px; margin: 0 auto; padding: var(--s6) var(--s6) 64px; }
 
 .tiles {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius);
   overflow: hidden;
 }
-.tile { padding: var(--s3) var(--s4) 14px; border-left: 1px solid var(--line); min-width: 0; }
-.tile:first-child { border-left: none; }
-.tile .label { font-size: var(--fs-label); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+.tile { padding: var(--s3) var(--s4) 14px; background: var(--surface); min-width: 0; }
+@media (max-width: 1380px) { .tiles:has(> .tile:nth-child(5):last-child) .label { min-height: 32px; } }
+/* five tiles: one row when there is room, otherwise the last one spans so no tile is left alone on a row */
+.tiles:has(> .tile:nth-child(5):last-child) { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1100px) {
+  .tiles:has(> .tile:nth-child(5):last-child) { grid-template-columns: repeat(3, 1fr); }
+  .tiles:has(> .tile:nth-child(5):last-child) > .tile:nth-child(5) { grid-column: span 2; }
+  .tile .label { min-height: 32px; }                         /* labels that wrap must not push values out of line with their neighbours */
+}
+@media (max-width: 560px) {
+  .tiles:has(> .tile:nth-child(5):last-child) { grid-template-columns: repeat(2, 1fr); }
+  .tiles:has(> .tile:nth-child(5):last-child) > .tile:nth-child(5) { grid-column: span 2; }
+}
+.tile .label { font-size: var(--fs-label); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; line-height: 16px; }
 /* Precision on top of an already-clear label, not a replacement for
    one -- see services/common.py's METRIC_INFO. Native title tooltip:
    no new JS, works on hover and (via tabindex) keyboard focus. */
-.info-dot { display: inline-block; margin-left: 4px; font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--line-strong); cursor: help; vertical-align: 1px; }
-.info-dot:hover, .info-dot:focus-visible { color: var(--muted); outline: none; }
+.info-dot { display: inline-block; margin-left: 4px; line-height: 1; font-size: var(--fs-small); letter-spacing: 0; text-transform: none; color: var(--icon); cursor: help; vertical-align: 1px; }
+.info-dot:hover { color: var(--muted); }
+.info-dot:focus-visible { color: var(--ink); outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
 .tile .value { font-size: var(--fs-kpi); font-weight: 600; margin-top: 2px; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .tile .delta, .delta { display: block; margin-top: 2px; font-size: var(--fs-small); font-weight: 400; color: var(--muted); padding: 0; background: none; border-radius: 0; }
 .delta .arrow { font-weight: 600; margin-right: 2px; }
@@ -269,7 +284,15 @@ th, td { text-align: left; padding: 8px var(--s3); border-bottom: 1px solid var(
 th { color: var(--muted); font-weight: 500; font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.05em; background: var(--surface-2); white-space: nowrap; position: sticky; top: 0; z-index: 2; }
 tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--surface-2); }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nw { white-space: nowrap; }
+/* a difference of nothing recedes; a real one reads */
+.zero { color: var(--muted); font-weight: 400; }
+.nz { color: var(--ink); font-weight: 600; }
+tfoot td { background: var(--surface-2); border-top: 1px solid var(--line); }
+tfoot tr:first-child td { border-top-color: var(--line-strong); }
+tfoot tr:last-child td { border-bottom: none; }
+tfoot .recs-total td { font-weight: 600; }
 td:first-child, th:first-child { padding-left: var(--s4); }
 td:last-child, th:last-child { padding-right: var(--s4); }
 table a { color: var(--ink); font-weight: 500; text-decoration: none; }
@@ -281,27 +304,23 @@ tr.focus-row td { background: var(--brand-dim); box-shadow: inset 3px 0 0 var(--
 tr.focus-row:hover td { background: var(--brand-dim); }
 td.truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Properties index: the stacked Operated and Managed tables share
-   Model / Occupancy / Status column positions so the page scans as one grid. */
+/* Properties index: the Operated and Managed tables share one column grid (name, model, figure, [profit], occupancy, status), so
+   Model / Occupancy / Status line up from one table to the next. Managed has no profit column; its empty gap column only holds the space. */
+.prop-table td.c-name a { font-weight: 500; }
+.prop-table td.c-status .pill { white-space: normal; text-align: left; line-height: 1.25; }
+.prop-table .c-gap { padding: 0; }
 @media (min-width: 1181px) {
   .prop-table { table-layout: fixed; }
-  .prop-table th.c-metric { width: 205px; }
-  .prop-table th.c-occ { width: 110px; }
-  .prop-table th.c-model { width: 150px; }
-  .prop-table th.c-status { width: 170px; }
+  col.c-model { width: 150px; } col.c-metric { width: 150px; } col.c-occ { width: 100px; } col.c-status { width: 150px; }
+  .prop-table th { white-space: normal; }
 }
-
-/* Properties index below 1180px: let headers and the Status pill wrap
-   so the Property name keeps its room instead of the table scrolling. */
-.prop-table td:first-child .note { white-space: nowrap; }
 @media (max-width: 1180px) {
   .prop-table th { white-space: normal; letter-spacing: 0.02em; }
-  .prop-table td:first-child, .prop-table th:first-child { min-width: 170px; }
-  .prop-table td.c-status .pill { white-space: normal; text-align: left; line-height: 1.25; }
+  .prop-table .c-gap, col.c-gap { display: none; }
+  .prop-table td.c-name, .prop-table th:first-child { min-width: 170px; }
 }
 @media (max-width: 560px) {
-  .prop-table .c-secondary, .prop-table .c-model { display: none; }
-  .prop-table td:first-child { max-width: none; }
+  .prop-table .c-secondary, .prop-table .c-model, col.c-secondary, col.c-model { display: none; }
 }
 @media (max-width: 760px) {
   .prop-table th, .prop-table td { padding-left: var(--s2); padding-right: var(--s2); }
@@ -370,12 +389,12 @@ button.danger:hover { background: var(--neg-dim); border-color: var(--neg-dim); 
   background: var(--neutral-dim); color: var(--ink-soft); text-transform: none; letter-spacing: 0; white-space: nowrap;
 }
 .pill.pos, .status-pill.confirmed { background: var(--pos-dim); color: var(--pos); }
-.pill.warn { background: var(--warn-dim); color: var(--warn); }
+.pill.warn { background: var(--warn-dim); color: var(--warn-ink); }
 .pill.neg { background: var(--neg-dim); color: var(--neg); }
 .pill.brand { background: var(--brand-dim); color: var(--brand-ink); }
 button.pill { height: auto; border: none; }
 button.pill:hover { filter: brightness(0.95); }
-button.pill.warn { background: var(--warn-dim); color: var(--warn); }
+button.pill.warn { background: var(--warn-dim); color: var(--warn-ink); }
 button.pill.pos { background: var(--pos-dim); color: var(--pos); }
 button.pill.neutral { background: var(--neutral-dim); color: var(--ink-soft); }
 
@@ -688,7 +707,6 @@ button.chan-toggle.off i { background: var(--muted) !important; }
 
 @media (max-width: 860px) { .sidebar .jump-btn { display: none; } }
 
-.context-fixed { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: var(--radius-sm); background: var(--neutral-dim); color: var(--ink); font-size: var(--fs-context); font-weight: 600; cursor: default; }
 .ctx-reset { font-size: var(--fs-small); color: var(--muted); text-decoration: none; margin-left: var(--s1); }
 .ctx-reset:hover { color: var(--brand-ink); text-decoration: underline; }
 
@@ -711,7 +729,8 @@ a.sort:hover, a.sort.on { color: var(--ink); }
 
 .tile.link { position: relative; cursor: pointer; transition: background 0.12s ease; }
 .tile.link:hover { background: var(--surface-2); }
-.tile.link .chev { position: absolute; top: 10px; right: 12px; color: var(--line-strong); font-size: 18px; line-height: 1; transition: color 0.12s ease, transform 0.12s ease; }
+.tile.link .chev { position: absolute; top: 10px; right: 12px; color: var(--icon); font-size: 18px; line-height: 1; transition: color 0.12s ease, transform 0.12s ease; }
+.tile.link:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .tile.link:hover .chev { color: var(--brand-ink); transform: translateX(2px); }
 .tiles-secondary .tile.link { padding: 2px 22px 2px 0; border-radius: 4px; }
 .tiles-secondary .tile.link .chev { top: 0; right: 4px; font-size: 15px; }
@@ -731,27 +750,156 @@ a.sort:hover, a.sort.on { color: var(--ink); }
 body.viewer .add-btn, body.viewer [onclick*="add-apartment-dialog"] { display: none; }
 form.view-only { opacity: 0.6; }
 
-/* ---------- drilldown links: a number that opens the records behind it ---------- */
-a.mlink { color: inherit; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; text-decoration-thickness: 1px; display: inline-block; padding: 3px 0; min-height: 24px; box-sizing: border-box; border-radius: 3px; }
-a.mlink:hover { color: var(--brand-ink); text-decoration-style: solid; text-decoration-color: var(--brand-ink); }
-a.mlink:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
-.cost-line { margin: calc(var(--s2) * -1) 0 var(--s4); font-size: var(--fs-small); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px var(--s3); align-items: baseline; }
-.cost-line a { color: var(--ink); text-decoration: none; padding: 4px 0; min-height: 24px; }
-.cost-line a strong { font-weight: 600; }
-.cost-line a:hover { color: var(--brand-ink); text-decoration: underline; }
-.cost-line a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
-.pill.review-link { text-decoration: none; }
-.recs-total td { font-weight: 600; border-top: 1px solid var(--line-strong); }
-.hide-sm { }
-@media (max-width: 760px) { .hide-sm { display: none; } }
-.sum-line { display: flex; flex-wrap: wrap; gap: 4px var(--s4); font-size: var(--fs-small); color: var(--muted); margin: 0 0 var(--s4); }
-.sum-line strong { color: var(--ink); font-weight: 600; }
+/* =====================================================================
+   Drilldowns, status, workspace identity, import comparison.
+   Shared vocabulary: .mlink (a figure that opens its records), .st / .pill (operational status),
+   .rc (reconciliation status), .cmp / .chk (comparison + check tables), .nm (full / compact property name).
+   ===================================================================== */
 
-/* ---------- narrow screens: keep scrolling inside the component, never the whole page ---------- */
-.tabs { overflow-x: auto; scrollbar-width: none; }
+/* a figure that opens the records behind it: plain text, a hanging chevron (so numbers stay aligned), underline on hover */
+a.mlink { position: relative; color: inherit; text-decoration: none; display: inline-block; padding: 3px 0; min-height: 24px; box-sizing: border-box; border-radius: 3px; }
+a.mlink::after { content: '›'; position: absolute; left: 100%; margin-left: 4px; color: var(--icon); opacity: 0.8; transition: transform 0.12s ease, color 0.12s ease; }
+a.mlink:hover { color: var(--brand-ink); text-decoration: underline; text-underline-offset: 3px; }
+a.mlink:hover::after { color: var(--brand-ink); transform: translateX(2px); }
+a.mlink:focus-visible, .cost-line a:focus-visible, .grp-status:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.cost-line { margin: var(--s3) 0 var(--s5); font-size: var(--fs-small); color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px var(--s4); align-items: baseline; }
+.cost-line a { color: var(--ink); text-decoration: none; padding: 4px 0; min-height: 24px; border-radius: 3px; }
+.cost-line a strong { font-weight: 600; }
+.cost-line a:hover { color: var(--brand-ink); text-decoration: underline; text-underline-offset: 3px; }
+.pill.review-link { text-decoration: none; }
+.recs-total td { font-weight: 600; }
+.sum-line { display: flex; flex-wrap: wrap; gap: 4px var(--s5); font-size: var(--fs-small); color: var(--muted); margin: 0 0 var(--s4); }
+.sum-line strong { color: var(--ink); font-weight: 600; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--fs-small); }
+.meta-line { margin: 0 0 var(--s2); font-size: var(--fs-small); color: var(--muted); }
+.meta-line a { font-weight: 500; }
+
+/* operational status is quiet when normal: "Active" is plain text; only exceptions are pills */
+.st { font-size: var(--fs-table); color: var(--ink-soft); white-space: nowrap; }
+.pill.quiet { background: none; color: var(--muted); padding-left: 0; padding-right: 0; }
+
+/* reconciliation status: three meanings, three looks. PASS is a quiet tick, REVIEW is the only amber pill,
+   NO CONTROL is plain grey text (no comparison available, not a failure) */
+.rc { display: inline-flex; align-items: center; font-size: var(--fs-small); font-weight: 500; line-height: 1.5; white-space: nowrap; text-decoration: none; }
+.rc-pass { color: var(--pos); }
+.rc-pass::before { content: '✓\00a0'; }
+.rc-review { background: var(--warn-dim); color: var(--warn-ink); padding: 2px 9px; border-radius: 999px; }
+.rc-nc { color: var(--muted); font-weight: 400; cursor: help; text-decoration: underline dotted var(--icon); text-underline-offset: 3px; }
+.rc-pass-text { color: var(--pos); font-weight: 500; }
+
+/* import: Before / After / Change, grouped by area */
+table.cmp { table-layout: auto; }
+table.cmp th:not(:first-child), table.cmp td.num { width: 150px; }
+table.cmp td.metric { padding-left: var(--s6); color: var(--ink-soft); }
+table.cmp td.muted { color: var(--muted); }
+table.cmp tr.grp td { background: var(--surface-2); padding-top: 6px; padding-bottom: 6px; height: auto; border-top: 1px solid var(--line-strong); }
+table.cmp tbody:first-of-type tr.grp td { border-top: none; }
+.grp-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.grp-status { text-decoration: none; border-radius: 3px; }
+table.cmp tr.more { display: none; }
+table.cmp.show-all tr.more { display: table-row; }
+button.quiet[data-toggle-rows] { height: 26px; font-size: var(--fs-small); }
+
+/* import: one reconciliation block per area */
+.recon { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: var(--s3); overflow-x: auto; }
+.recon:target { border-color: var(--line-strong); box-shadow: 0 0 0 3px var(--brand-dim); }
+.recon.is-review { border-left: 3px solid var(--warn); }
+.recon-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s3); flex-wrap: wrap; padding: var(--s3) var(--s4); }
+.recon-head-r { display: inline-flex; align-items: center; gap: var(--s4); font-size: var(--fs-small); }
+.recon-head-r a:not(.rc) { font-weight: 500; text-decoration: none; }
+.recon-head-r a:not(.rc):hover { text-decoration: underline; }
+.recon-note { padding: 0 var(--s4) var(--s3); margin: 0; }
+table.chk td, table.chk th { height: 32px; }
+table.chk th { background: none; position: static; }
+table.chk td:first-child, table.chk th:first-child { padding-left: var(--s4); }
+details.sub { border-top: 1px solid var(--line); }
+details.sub > summary { cursor: pointer; padding: 9px var(--s4); font-size: var(--fs-small); color: var(--ink-soft); list-style: none; }
+details.sub > summary::-webkit-details-marker { display: none; }
+details.sub > summary::before { content: '›'; display: inline-block; width: 14px; color: var(--icon); transition: transform 0.12s ease; }
+details.sub[open] > summary::before { transform: rotate(90deg); }
+details.sub > summary:hover { background: var(--surface-2); }
+details.sub > summary:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+details.sub.nc > summary { color: var(--muted); }
+.undo-block { margin-top: var(--s7); padding-top: var(--s4); border-top: 1px solid var(--line); }
+
+/* property workspace identity: the name once, then model · fee · status */
+.ws-head { margin: 0 0 var(--s4); }
+.ws-title { font-size: clamp(21px, 2.1vw, var(--fs-title)); margin: 0; text-wrap: balance; }
+.ws-meta { margin: 2px 0 0; font-size: var(--fs-context); color: var(--muted); display: flex; flex-wrap: wrap; gap: 0 var(--s2); align-items: center; }
+.ws-meta .sep { color: var(--icon); }
+.ws-meta .ws-flag { color: var(--ink-soft); background: var(--neutral-dim); border-radius: 999px; padding: 0 9px; font-size: var(--fs-small); font-weight: 500; }
+.ws-addr { display: none; margin: 2px 0 0; font-size: var(--fs-small); color: var(--muted); }
+
+/* a property name has two forms: the full canonical name, and a compact one for cramped spots (display only) */
+.nm, .ws-title { position: relative; }          /* the visually-hidden full name must sit inside its own cell, or it widens the page */
+.nm .nm-short, .ws-title .nm-short { display: none; }
+.nm-always .nm-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.nm-always .nm-short { display: inline; }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 560px) {
+  .nm-compact .nm-full, .ws-title .nm-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }   /* still read by screen readers */
+  .nm-compact .nm-short, .ws-title .nm-short { display: inline; }
+  .ws-addr { display: block; }
+}
+
+/* narrow screens: scroll inside a component, never the page, and show that more is there */
+.tabs, .sidebar { overflow-x: auto; scrollbar-width: none; }
 .tabs::-webkit-scrollbar { display: none; }
 .tabs .tab, .tabs .tabs-divider { flex: none; }
+.tabs.has-more, .sidebar.has-more { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent); }
+.card.flush.has-more { box-shadow: inset -14px 0 10px -12px rgba(20, 32, 28, 0.22); }
 details.card { overflow-x: auto; }
-.filter-bar select, .filter-bar input { max-width: 100%; min-width: 0; }
-.chan-legend { max-width: 100%; }
-.chan-legend .chan { max-width: 100%; white-space: normal; }
+.filter-bar select, .filter-bar input, .mini-form select, .mini-form input { max-width: 100%; min-width: 0; }
+.mini-form select { max-width: 260px; text-overflow: ellipsis; }
+.filter-bar select { text-overflow: ellipsis; }
+/* the ledger filter bar: search takes the slack, selects stay compact and share a row where they can */
+.ledger-filters input[type=text] { flex: 1 1 180px; }
+.ledger-filters select { flex: 0 1 auto; max-width: 150px; }
+.ledger-filters select[name=t_scope] { max-width: 180px; }
+@media (max-width: 560px) { .ledger-filters input[type=text] { flex-basis: 100%; } .ledger-filters select { flex: 1 1 45%; max-width: none; } }
+td.scope { max-width: 200px; }
+.chan-legend, .chan-legend .chan { max-width: 100%; }
+.chan-legend .chan { white-space: normal; }
+@media (max-width: 760px) { .hide-sm { display: none; } }
+@media (max-width: 560px) { .section-head { flex-direction: column; align-items: flex-start; gap: 2px; } .section-head .note { text-align: left; } }
+/* targets: figures never split; the Performance link sits with Edit instead of crowding the name */
+.targets-table td.t-name { min-width: 190px; }
+.targets-table .t-act { white-space: nowrap; }
+.targets-table a.t-perf { font-size: var(--fs-small); font-weight: 500; color: var(--ink-soft); text-decoration: none; margin-right: var(--s3); padding: 6px 0; }
+.targets-table a.t-perf::after { content: ' ›'; color: var(--icon); }
+.targets-table a.t-perf:hover { color: var(--brand-ink); text-decoration: underline; text-underline-offset: 3px; }
+.targets-table a.t-perf:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+.pbar { width: 64px; }
+.file-label { font-size: var(--fs-small); color: var(--ink-soft); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* drawer hierarchy: the record first; where it came from is quieter, grouped, and says plainly what controls it */
+.drawer-field strong { font-weight: 500; text-align: right; }
+.drawer-head + .drawer-section, .drawer-head + p + .drawer-section { border-top: none; margin-top: var(--s3); }
+.drawer-section.src { border-top: 1px dashed var(--line-strong); }
+.drawer-section.src .drawer-field { font-size: var(--fs-small); padding: 2px 0; }
+.drawer-section.src .drawer-field strong { font-weight: 400; color: var(--ink-soft); }
+.src-state { font-size: var(--fs-label); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; color: var(--ink-soft); margin: 0 0 var(--s2); }
+.ro-note { margin: var(--s3) 0 0; font-size: var(--fs-small); color: var(--muted); }
+.drawer { overscroll-behavior: contain; }
+@media (max-width: 560px) { .drawer { width: 100vw; max-width: 100vw; } }
+table.chk { table-layout: fixed; min-width: 560px; }
+table.chk col.cn { width: 130px; } table.chk col.cs { width: 112px; }
+@media (max-width: 560px) {
+  table.cmp th:not(:first-child), table.cmp td.num { width: auto; }
+  table.cmp td.metric { padding-left: var(--s4); }
+  table.cmp th, table.cmp td { padding-left: var(--s2); padding-right: var(--s2); font-size: var(--fs-small); }
+  table.cmp td:first-child, table.cmp th:first-child { padding-left: var(--s3); }
+  table.cmp td:last-child, table.cmp th:last-child { padding-right: var(--s3); }
+  table.chk { min-width: 520px; }
+}
+
+/* spacing helpers (replace repeated inline margins) */
+.mt0 { margin-top: 0; } .mt2 { margin-top: var(--s2); } .mt3 { margin-top: var(--s3); } .mt4 { margin-top: var(--s4); } .mt5 { margin-top: var(--s5); }
+.m0 { margin: 0; } .mb3 { margin-bottom: var(--s3); } .mb4 { margin-bottom: var(--s4); }
+.m0-b3 { margin: 0 0 var(--s3); } .m0-b2 { margin: 0 0 var(--s2); } .m-t2 { margin: var(--s2) 0 0; } .m-t3 { margin: var(--s3) 0 0; }
+.wsn { white-space: normal; } .wa { width: auto; }
+.section .card.mb3 { margin-bottom: var(--s3); } .section .card.mb4 { margin-bottom: var(--s4); }
+/* a clickable tile that also carries its own link (REVIEW): the main link and the flag sit side by side, never nested */
+.tile.link.split { padding: 0; display: flex; flex-direction: column; }
+.tile.link.split .tile-main { display: block; flex: 1; color: inherit; text-decoration: none; padding: var(--s3) var(--s4) 4px; }
+.tile.link.split .tile-main:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.tile-flag { padding: 0 var(--s4) 12px; }

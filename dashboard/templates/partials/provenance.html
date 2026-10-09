@@ -3,11 +3,13 @@
            {"kind": "legacy"} for the older Excel history, which has no batch or cell to point at.
    `prov` = services.ingest.provenance(): the uploaded document a record came from; falsy for anything else. #}
 {% if wb and wb.kind == 'workbook' %}
+  <div class="src-state">Controlled by workbook import</div>
   <div class="drawer-field"><span>Imported from</span><strong style="text-align:right">{{ wb.label }}{% if wb.period_label %} · {{ wb.period_label }}{% endif %}</strong></div>
-  <div class="drawer-field"><span>Batch</span><a href="{{ url_for('imports.batch', batch_id=wb.batch_id) }}#{{ wb.anchor }}">#{{ wb.batch_id }} · open the import and its reconciliation</a></div>
+  <div class="drawer-field"><span>Batch</span><a href="{{ url_for('imports.batch', batch_id=wb.batch_id) }}#{{ wb.anchor }}">#{{ wb.batch_id }} · open reconciliation</a></div>
   {% if wb.ref %}<div class="drawer-field"><span>Source</span><strong>{{ wb.ref }}</strong></div>{% endif %}
   {% if wb.applied_at %}<div class="drawer-field"><span>Applied</span><strong>{{ wb.applied_at }}</strong></div>{% endif %}
 {% elif prov %}
+  <div class="src-state">From an uploaded document</div>
   <div class="drawer-field"><span>Source document</span><span style="text-align:right"><a href="{{ url_for('documents.review', doc_id=prov.id, item=prov.line_id) }}">{{ prov.filename }}</a></span></div>
   <div class="drawer-field"><span>Document type</span><strong>{{ prov.type }}</strong></div>
   <div class="drawer-field"><span>Uploaded</span><strong>{{ prov.uploaded }}</strong></div>
@@ -20,7 +22,7 @@
   <div class="drawer-field"><span>Import ref</span><span class="note">{{ prov.ref }}</span></div>
   <a class="btn secondary" style="margin-top:var(--s2); width:100%" href="{{ url_for('documents.review', doc_id=prov.id, item=prov.line_id) }}">View source document</a>
 {% elif wb and wb.kind == 'legacy' %}
-  <p class="note" style="margin:var(--s2) 0 0">Earlier Excel import. It predates the monthly workbook flow, so no batch or source cell was recorded for this row.</p>
+  <div class="src-state">Earlier Excel import</div><p class="note m0">It predates the monthly workbook flow, so no batch or source cell was recorded for this row.</p>
 {% else %}
-  <p class="note" style="margin:var(--s2) 0 0">No source document is attached to this record (it was entered by hand).</p>
+  <div class="src-state">Entered by hand</div><p class="note m0">No source document is attached to this record.</p>
 {% endif %}

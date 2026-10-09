@@ -16,11 +16,11 @@
     </div>
   </div>
 
-  <h2 style="margin:0 0 var(--s2)">Source documents</h2>
-  <p class="note" style="margin:0 0 var(--s3)">Statements and invoices, kept for reference. They no longer drive the monthly figures; the workbook does.</p>
+  <h2 class="m0-b2">Source documents</h2>
+  <p class="note m0-b3">Statements and invoices, kept for reference. They no longer drive the monthly figures; the workbook does.</p>
   <span id="upload"></span>
   {% if prefill_property or prefill_type %}
-    <div class="flash info" style="margin-bottom:var(--s3)">
+    <div class="flash info mb3">
       Uploading{% if prefill_type %} a <strong>{{ doc_types[prefill_type]|lower }}</strong>{% else %} a document{% endif %}{% if prefill_property_name %} for <strong>{{ prefill_property_name }}</strong>{% endif %} — choose the file below; the property and type are already set.
     </div>
   {% endif %}
@@ -29,17 +29,17 @@
       <div class="empty" style="padding:var(--s4)"><div class="empty-title">Uploads are off in this demo</div><div class="empty-body" style="margin-bottom:0">{{ demo_message }}</div></div>
     {% else %}
     {% if not extraction_available %}
-      <div class="flash info" id="ai-note" hidden style="margin-bottom:var(--s3)">Automatic extraction isn't configured, so PDFs, photos and Word files can't be read automatically. You can enter the extracted rows manually. (Spreadsheets and CSV files don't need it.)</div>
+      <div class="flash info mb3" id="ai-note" hidden>Automatic extraction isn't configured, so PDFs, photos and Word files can't be read automatically. You can enter the extracted rows manually. (Spreadsheets and CSV files don't need it.)</div>
     {% endif %}
     <form id="upload-form" class="upload-form" style="display:block" method="post" action="{{ url_for('documents.upload') }}" enctype="multipart/form-data">
       <div id="dropzone" class="dropzone">
         <div class="dropzone-label">Drop statements, invoices or receipts here</div>
         <div class="note">PDF, JPG/PNG photo, Excel/CSV, Word or text · up to {{ max_upload_mb }} MB per upload — we read what we can, you check it, then confirm</div>
-        <div style="margin-top:var(--s3)"><button type="button" class="secondary" id="choose-files">Choose files</button></div>
+        <div class="mt3"><button type="button" class="secondary" id="choose-files">Choose files</button></div>
         <input id="file-input" type="file" name="document" multiple required style="display:none">
-        <div id="file-list" class="note" style="margin-top:var(--s2)"></div>
+        <div id="file-list" class="note mt2"></div>
       </div>
-      <div class="filter-bar" style="margin:var(--s3) 0 0">
+      <div class="filter-bar m-t3">
         <select name="property_id">
           <option value="">Detect property automatically</option>
           {% for p in all_properties %}<option value="{{ p.id }}" {{ 'selected' if p.id == prefill_property }}>{{ p.name }}</option>{% endfor %}
@@ -58,7 +58,7 @@
       <a href="?d_status={{ key }}" class="tab {{ 'active' if f_status == key }}">{{ label }}<span class="count">{{ counts[key] }}</span></a>
     {% endif %}
   {% endmacro %}
-  <nav class="tabs" style="margin-top:var(--s5)">
+  <nav class="tabs mt5">
     {{ status_tab('review', 'Needs review') }}
     {{ status_tab('uploaded', 'Uploaded') }}
     {{ status_tab('processing', 'Processing') }}

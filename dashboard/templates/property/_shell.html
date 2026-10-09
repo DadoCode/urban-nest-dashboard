@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, tabs %}
+{% from "_components.html" import tabs %}
 {% block title %}{{ prop.name }} — Urban Nest Estates{% endblock %}
 {% block content %}
-  {# Suppress the subtitle when the address field is empty or just
-     repeats the property name verbatim -- otherwise every page shows
-     "602 Lascar Wharf / 602 Lascar Wharf". A real address still shows
-     normally. #}
-  {{ page_head(prop.name, prop.address if prop.address and prop.address != prop.name else None) }}
+  {# The property is named once, here: canonical name, then model · fee · status. A compact name stands in on phones; the full one stays for screen readers and underneath. #}
+  <header class="ws-head">
+    <h1 class="ws-title"><span class="nm-full">{{ prop.name }}</span><span class="nm-short" aria-hidden="true">{{ prop.name|short }}</span></h1>
+    <p class="ws-meta">{{ ws_meta.model }}{% if ws_meta.fee %}<span class="sep">·</span>{{ ws_meta.fee }}{% endif %}<span class="sep">·</span>{% if ws_meta.status == 'Active' %}<span>Active</span>{% else %}<span class="ws-flag">{{ ws_meta.status }}</span>{% endif %}{% if ws_meta.mtd %}<span class="sep">·</span><span>Month to date</span>{% endif %}</p>
+    {% if prop.name != prop.name|short %}<p class="ws-addr">{{ prop.name }}</p>{% endif %}
+  </header>
   {% set items = [('overview', 'Overview', cx('properties.detail', property_id=prop.id))] %}
   {% if not is_overhead %}
     {% set items = items + [('performance', 'Performance', cx('properties.performance_tab', property_id=prop.id))] %}

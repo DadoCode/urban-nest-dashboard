@@ -9,23 +9,23 @@
   <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('imports.index') }}">&larr; All imports</a> · uploaded {{ batch.uploaded_at[:16] }} · fingerprint {{ batch.file_hash[:10] }}</p>
 
   {# ---------------------------------------------------------------- what was read #}
-  <div class="card" style="margin-bottom:var(--s4)">
+  <div class="card mb4">
     {% if report.global_errors %}
       <div class="flash error">{{ report.global_errors|join(' ') }}</div>
     {% endif %}
     <strong>Workbook year {{ report.year or '?' }}.</strong>
     <span class="note">{{ report.used|length }} sheets read · {{ report.ignored|length }} ignored · {{ report.blocked|length }} excluded by name.</span>
     {% for r in report.required if not r.ok %}
-      <div class="note" style="margin-top:var(--s2)"><span class="pill warn">Missing</span> {{ r.name }}{% if r.note %} — {{ r.note }}{% endif %}</div>
+      <div class="note mt2"><span class="pill warn">Missing</span> {{ r.name }}{% if r.note %} — {{ r.note }}{% endif %}</div>
     {% endfor %}
     {% for u in report.unmapped %}
-      <div style="margin-top:var(--s2)"><span class="pill brand">New property detected</span> <strong>{{ u.sheet }}</strong> — {{ u.message }}</div>
+      <div class="mt2"><span class="pill brand">New property detected</span> <strong>{{ u.sheet }}</strong> — {{ u.message }}</div>
     {% endfor %}
     {% if report.missing_properties %}
-      <div class="note" style="margin-top:var(--s2)">No sheet in this workbook for: {% for m in report.missing_properties %}{{ m.property }} ({{ m.sheet }}){{ ', ' if not loop.last }}{% endfor %}. Those properties are left exactly as they are.</div>
+      <div class="note mt2">No sheet in this workbook for: {% for m in report.missing_properties %}{{ m.property }} ({{ m.sheet }}){{ ', ' if not loop.last }}{% endfor %}. Those properties are left exactly as they are.</div>
     {% endif %}
-    <details style="margin-top:var(--s2)"><summary class="note" style="cursor:pointer">Sheets read and ignored</summary>
-      <div class="note" style="margin-top:var(--s2)"><strong>Read:</strong> {{ report.used|join(', ') }}</div>
+    <details class="mt2"><summary class="note" style="cursor:pointer">Sheets read and ignored</summary>
+      <div class="note mt2"><strong>Read:</strong> {{ report.used|join(', ') }}</div>
       <div class="note"><strong>Ignored:</strong> {% for i in report.ignored %}{{ i.sheet }} <span style="opacity:.7">({{ i.reason }})</span>{{ '; ' if not loop.last }}{% endfor %}</div>
       {% if report.blocked %}<div class="note"><strong>Excluded by name, never opened:</strong> {{ report.blocked|join(', ') }}</div>{% endif %}
     </details>
@@ -83,7 +83,7 @@
                 <div class="note" style="margin-top:4px">Workbook sheet <strong>{{ np.sheet }}</strong> · id <strong>{{ np.property_id }}</strong> · aliases {{ np.aliases|join(', ') }} · name from {{ np.name_source }}</div>
                 <div class="note">Evidence for the model: {{ np.evidence|join('; ') }}.</div>
                 {% if np.pct_unknown_ok %}<div class="note"><strong>Fee % is not in the workbook, so none is invented.</strong> Leave it blank to create the property as managed with no percentage (only recorded fees count; nothing is estimated). It is flagged as configuration still needed.</div>{% endif %}
-                <div class="filter-bar" style="margin:var(--s2) 0 0">
+                <div class="filter-bar m-t2">
                   <label class="note">Name <input type="text" name="new_name:{{ it.property_id }}" value="{{ np.name }}" style="min-width:16rem"></label>
                   <label class="note">Model
                     <select name="new_model:{{ it.property_id }}">
@@ -154,7 +154,7 @@
         </div>
 
         {% set flagged = (plan.properties + [plan.business])|selectattr('flagged')|list %}
-        <div class="card" style="margin-top:var(--s3)">
+        <div class="card mt3">
           {% if flagged %}
             <label style="display:block;margin-bottom:var(--s2)"><input type="checkbox" name="ack" value="1"> I have reviewed the flagged items for the properties I ticked.</label>
             <div class="note" style="margin-bottom:var(--s2)">Anything flagged is not ticked by default. A flagged check means the workbook's own figures disagree with each other or with the dashboard's setup, or that a figure has no workbook control to confirm it.</div>
@@ -163,7 +163,7 @@
           <span class="note">Only the ticked rows change. Nothing outside {{ month_label(ym) }} is touched, and you can undo it afterwards.</span>
         </div>
       </form>
-      <form method="post" action="{{ url_for('imports.cancel', batch_id=batch.id) }}" style="margin-top:var(--s2)"><button type="submit" class="secondary">Cancel</button></form>
+      <form class="mt2" method="post" action="{{ url_for('imports.cancel', batch_id=batch.id) }}"><button type="submit" class="secondary">Cancel</button></form>
     {% endif %}
   {% endif %}
 {% endblock %}

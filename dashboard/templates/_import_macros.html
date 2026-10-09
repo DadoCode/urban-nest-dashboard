@@ -2,7 +2,7 @@
 {% macro val(v, kind) -%}
   {%- if v is none -%}—
   {%- elif kind == 'money' -%}{{ '−' if v < 0 }}£{{ '{:,.2f}'.format(v|abs) }}
-  {%- elif kind == 'pct' -%}{{ '{:.1f}'.format(v * 100) }}%
+  {%- elif kind == 'pct' -%}{{ '%g'|format((v * 100)|round(1)) }}%
   {%- else -%}{{ '{:,.0f}'.format(v) }}{%- endif -%}
 {%- endmacro %}
 {% macro change(a, b, kind) -%}
@@ -17,10 +17,44 @@
 {% macro status_pill(status) -%}
   {%- set m = {'ok': ('pos', 'Ready'), 'review': ('warn', 'Needs review'), 'error': ('neg', 'Blocked'), 'unchanged': ('', 'Already up to date'),
                'no_activity': ('', 'No activity'), 'missing_sheet': ('warn', 'Sheet missing'), 'not_in_dashboard': ('neg', 'Not in dashboard'),
-               'applied': ('pos', 'Applied'), 'undone': ('', 'Undone'), 'staged': ('warn', 'Not imported yet'), 'new_property': ('brand', 'New property'), 'not_active': ('', 'Not active yet')} -%}
+               'applied': ('quiet', '✓ Applied'), 'undone': ('', 'Undone'), 'staged': ('warn', 'Not imported yet'), 'new_property': ('brand', 'New property'), 'not_active': ('', 'Not active yet')} -%}
   <span class="pill {{ m[status][0] if status in m else '' }}">{{ m[status][1] if status in m else status }}</span>
 {%- endmacro %}
 {% macro row_pill(s) -%}
   <span class="pill {{ {'NEW': 'pos', 'CHANGED': 'warn', 'REMOVED': 'neg', 'UNCHANGED': ''}[s] }}">{{ s }}</span>
 {%- endmacro %}
-{% macro check_pill(s) -%}<span class="pill {{ 'pos' if s == 'PASS' else 'warn' }}" {% if s == 'NO CONTROL' %}title="The workbook's own total for this figure is blank, so there is nothing to compare against"{% endif %}>{{ s }}</span>{%- endmacro %}
+{% macro check_pill(s) -%}
+  {%- if s == 'PASS' -%}<span class="rc rc-pass">PASS</span>
+  {%- elif s == 'NO CONTROL' -%}<span class="rc rc-nc" title="The workbook's own total for this figure is blank, so there is nothing to compare against">NO CONTROL</span>
+  {%- else -%}<span class="rc rc-review">{{ s }}</span>{%- endif -%}
+{%- endmacro %}
+
+{# What kind of number a named check is, so a rate is never printed as money. #}
+{% macro kind_of(metric) -%}{{ 'pct' if metric in ('Occupancy', 'Management fee rate') else ('int' if metric in ('Days booked',) else 'money') }}{%- endmacro %}
+
+{# A difference: nothing recedes, something reads. Percentages are in percentage points. #}
+{% macro diffv(d, kind) -%}
+  {%- if d is none -%}<span class="zero">—</span>
+  {%- elif kind == 'pct' -%}{%- if d|abs < 0.0005 -%}<span class="zero">0 pp</span>{%- else -%}<span class="nz">{{ '+' if d > 0 else '−' }}{{ '%g'|format((d|abs * 100)|round(2)) }} pp</span>{%- endif -%}
+  {%- elif kind == 'int' -%}{%- if d|abs < 0.5 -%}<span class="zero">0</span>{%- else -%}<span class="nz">{{ '+' if d > 0 else '−' }}{{ '{:,.0f}'.format(d|abs) }}</span>{%- endif -%}
+  {%- else -%}{%- if d|abs < 0.005 -%}<span class="zero">£0.00</span>{%- else -%}<span class="nz">{{ '+' if d > 0 else '−' }}£{{ '{:,.2f}'.format(d|abs) }}</span>{%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+{# Import-time checks: Check | Workbook | Imported | Difference | Status #}
+{% macro checks_table(rows) -%}
+  <table class="chk"><colgroup><col><col class="cn"><col class="cn"><col class="cn"><col class="cs"></colgroup><thead><tr><th>Check</th><th class="num">Workbook</th><th class="num">Imported</th><th class="num">Difference</th><th>Status</th></tr></thead><tbody>
+    {% for c in rows %}{% set k = kind_of(c.metric) %}
+      <tr><td>{{ c.metric }}{% if c.note %}<div class="note">{{ c.note }}</div>{% endif %}</td><td class="num">{{ val(c.workbook, k) }}</td><td class="num">{{ val(c.imported, k) }}</td><td class="num">{{ diffv(c.diff, k) }}</td><td>{{ check_pill(c.status) }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+{%- endmacro %}
+
+{# Live check: Figure | Workbook | Imported ledger | Dashboard | Status #}
+{% macro live_table(rows) -%}
+  <table class="chk"><colgroup><col><col class="cn"><col class="cn"><col class="cn"><col class="cs"></colgroup><thead><tr><th>Figure</th><th class="num">Workbook</th><th class="num">Imported ledger</th><th class="num">Dashboard</th><th>Status</th></tr></thead><tbody>
+    {% for r in rows %}{% set k = kind_of(r.metric) %}
+      <tr><td>{{ r.metric }}{% if r.note %}<div class="note">{{ r.note }}</div>{% endif %}</td><td class="num">{{ val(r.workbook, k) }}</td><td class="num">{{ val(r.ledger, k) }}</td><td class="num">{{ val(r.dashboard, k) }}</td><td>{{ check_pill(r.status) }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+{%- endmacro %}

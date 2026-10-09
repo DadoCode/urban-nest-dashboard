@@ -76,8 +76,8 @@
   {% endif %}
 {% endmacro %}
 
-  <p class="note" style="margin:0 0 var(--s2)"><a href="{{ url_for('documents.index') }}">&larr; All documents</a></p>
-  <div class="page-head" style="margin-bottom:var(--s4)">
+  <p class="note m0-b2"><a href="{{ url_for('documents.index') }}">&larr; All documents</a></p>
+  <div class="page-head mb4">
     <div>
       <h1 style="font-size:22px">{{ doc.filename }}</h1>
       <p class="subtitle">{{ doc_type_label }} · {{ strip.property or 'Property not detected' }}{% if period_label %} · {{ period_label }}{% endif %} · uploaded {{ doc.uploaded_at[:10] }}</p>
@@ -93,7 +93,7 @@
   </div>
 
   {% if doc.status == 'failed' %}
-    <div class="flash warning" style="margin-bottom:var(--s3)"><strong>Couldn't read this automatically.</strong> {{ doc.failure_reason or 'Nothing could be read from this file.' }}{% if needs_ai and not extraction_available %} (Automatic extraction isn't configured, and this type of file needs it.){% endif %}</div>
+    <div class="flash warning mb3"><strong>Couldn't read this automatically.</strong> {{ doc.failure_reason or 'Nothing could be read from this file.' }}{% if needs_ai and not extraction_available %} (Automatic extraction isn't configured, and this type of file needs it.){% endif %}</div>
   {% endif %}
   {% for w in warnings %}
     <div class="flash {{ 'warning' if w.level == 'warn' else 'info' }}" style="margin-bottom:var(--s2)">
@@ -102,11 +102,11 @@
   {% endfor %}
 
   {% if unmatched and not confirmed %}
-    <div class="card" style="margin-bottom:var(--s3)">
+    <div class="card mb3">
       <div style="font-weight:600">Match listings to your properties</div>
       <p class="note" style="margin:2px 0 var(--s3)">These reservations use listing names that don't match a property yet. Choose once per listing; it's remembered for future statements. Pick "Not one of mine" to leave a listing out.</p>
       {% for u in unmatched %}
-        <form method="post" action="{{ url_for('documents.map_listing', doc_id=doc.id) }}" class="filter-bar" style="margin:0 0 var(--s2)">
+        <form method="post" action="{{ url_for('documents.map_listing', doc_id=doc.id) }}" class="filter-bar m0-b2">
           <input type="hidden" name="listing" value="{{ u.listing }}">
           <span style="flex:1 1 280px; min-width:0" class="truncate" title="{{ u.listing }}">{{ u.listing }} <span class="note">· {{ u.n }} reservation{{ 's' if u.n != 1 }}</span></span>
           <select name="property_id" required>
@@ -121,13 +121,13 @@
   {% endif %}
 
   {% if overlap and overlap.lines and not confirmed %}
-    <div class="card" style="margin-bottom:var(--s3)">
+    <div class="card mb3">
       <div style="font-weight:600">{{ overlap.lines }} reservation{{ 's' if overlap.lines != 1 }} fall in months your Excel history already covers</div>
       <p class="note" style="margin:2px 0 0">Confirming <strong>stores</strong> these but does <strong>not</strong> change those months' dashboard figures: Excel stays in charge of a month until you compare the two and choose, on the <a href="{{ url_for('reconcile.index') }}">Reconciliation page</a>. Months with no Excel history use these reservations automatically.</p>
     </div>
   {% endif %}
 
-  <div class="card rv-summary" style="margin-bottom:var(--s4)">
+  <div class="card rv-summary mb4">
     <div class="rv-sum-item"><span class="label">Source file</span><strong class="truncate" title="{{ strip.filename }}">{{ strip.filename }}</strong><span class="note">{{ strip.size or '' }}{% if strip.size %} · {% endif %}uploaded {{ strip.uploaded[:16] }}</span></div>
     <div class="rv-sum-item"><span class="label">Document type</span><strong>{{ strip.doc_type }}</strong><span class="note">{% if strip.method %}read by {{ strip.method }}{% else %}as chosen at upload{% endif %}</span></div>
     <div class="rv-sum-item"><span class="label">Detected property</span><strong>{{ strip.property or 'Not detected' }}</strong><span class="note">{{ strip.property_how }}</span></div>
@@ -269,7 +269,7 @@
 
       {% elif res_mode %}
         <div class="card">
-          <p class="note" style="margin:0 0 var(--s3)">{% if needs_ai and not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: type the reservations from the statement below; blank rows are ignored. Each is checked against what's already on file.</p>
+          <p class="note m0-b3">{% if needs_ai and not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: type the reservations from the statement below; blank rows are ignored. Each is checked against what's already on file.</p>
           <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
             {% for i in range(6) %}
               <div class="rv-row" data-row>
@@ -288,14 +288,14 @@
                 </div>
               </div>
             {% endfor %}
-            <label class="note" style="display:block; margin-bottom:var(--s2)"><input type="checkbox" name="allow_dups" value="1" style="width:auto"> Add even if they look like duplicates</label>
+            <label class="note" style="display:block; margin-bottom:var(--s2)"><input class="wa" type="checkbox" name="allow_dups" value="1"> Add even if they look like duplicates</label>
             <button type="submit">Add reservations</button>
           </form>
         </div>
 
       {% else %}
         <div class="card">
-          <p class="note" style="margin:0 0 var(--s3)">{% if needs_ai and not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: add the lines from the source below; rows without an amount are ignored. Each is checked against what's already on file.</p>
+          <p class="note m0-b3">{% if needs_ai and not extraction_available %}Automatic extraction isn't configured. {% endif %}You can enter the extracted rows manually: add the lines from the source below; rows without an amount are ignored. Each is checked against what's already on file.</p>
           <form method="post" action="{{ url_for('documents.confirm', doc_id=doc.id) }}">
             {% for i in range(5) %}
               <div class="rv-row" data-row>
@@ -314,7 +314,7 @@
                 </div>
               </div>
             {% endfor %}
-            <label class="note" style="display:block; margin-bottom:var(--s2)"><input type="checkbox" name="allow_dups" value="1" style="width:auto"> Add even if they look like duplicates</label>
+            <label class="note" style="display:block; margin-bottom:var(--s2)"><input class="wa" type="checkbox" name="allow_dups" value="1"> Add even if they look like duplicates</label>
             <button type="submit">Add to ledger</button>
           </form>
         </div>
@@ -322,11 +322,11 @@
     </div>
   </div>
 
-  <section class="section" style="margin-top:var(--s5)">
+  <section class="section mt5">
     <div class="section-head"><h2>What happened to this file</h2><span class="note">Uploaded → extracted → edited → confirmed</span></div>
 
     {% if confirmed and (created.transactions or created.bookings) %}
-      <div class="card flush" style="margin-bottom:var(--s3)">
+      <div class="card flush mb3">
         <table>
           <thead><tr><th colspan="5">Records created from this document</th></tr>
             <tr><th>Property</th><th>Date</th><th>Detail</th><th class="num">Amount</th><th>Source line</th></tr></thead>
@@ -347,7 +347,7 @@
     {% endif %}
 
     {% if kpi_changes %}
-      <div class="card flush" style="margin-bottom:var(--s3)">
+      <div class="card flush mb3">
         <table>
           <thead><tr><th colspan="4">Figures that moved when this was confirmed (property-month totals)</th></tr>
             <tr><th>Property · period</th><th class="num">Revenue</th><th class="num">Costs</th><th class="num">Booked nights</th></tr></thead>
@@ -386,7 +386,7 @@
           {% endfor %}
         </ol>
       {% else %}
-        <p class="note" style="margin:0">No trail was recorded for this file (it was uploaded before ingestion tracking was added).</p>
+        <p class="note m0">No trail was recorded for this file (it was uploaded before ingestion tracking was added).</p>
       {% endif %}
     </div>
   </section>

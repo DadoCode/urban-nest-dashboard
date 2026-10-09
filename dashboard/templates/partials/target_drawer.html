@@ -12,7 +12,7 @@
   <div class="drawer-field"><span>Gross revenue</span><strong>{{ formula.revenue|money2 }}</strong></div>
   <div class="drawer-field"><span>− Property costs</span><strong>{{ formula.costs|money2 }}</strong></div>
   <div class="drawer-field"><span>= Operating Profit</span><strong>{{ formula.profit|money2 }}</strong></div>
-  <p class="note" style="margin:var(--s2) 0 0">Targets use this property's own gross figures{% if managed %}, so its costs include the management fee recorded against it{% endif %}. That is not the same as Property Profit or Management Fee Earned on the Properties page.</p>
+  <p class="note m-t2">Targets use this property's own gross figures{% if managed %}, so its costs include the management fee recorded against it{% endif %}. That is not the same as Property Profit or Management Fee Earned on the Properties page.</p>
   <a class="btn secondary" style="margin-top:var(--s2); width:100%" href="{{ perf_url }}">Open Performance for {{ month_label }} ›</a>
 </div>
 {% endif %}
@@ -47,7 +47,7 @@
     <button type="submit">Save targets</button>
     <button type="submit" class="secondary" formaction="{{ url_for('targets.reset_one', property_id=p.id) }}" formnovalidate>Use data average</button>
   </div>
-  <p class="note" style="margin:0">Changing a number only tests it here. Nothing changes until you save.</p>
+  <p class="note m0">Changing a number only tests it here. Nothing changes until you save.</p>
 </form>
 
 <script>

@@ -5,11 +5,11 @@
   </div>
   <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
 </div>
-<div style="margin-top:var(--s3)">
+<div class="mt3">
   <span class="pill {{ status_kind }}">{{ status_label }}</span>
   {% if doc.duplicate_of_document %}<span class="pill warn">Possible duplicate</span>{% endif %}
 </div>
-{% if doc.status == 'failed' and doc.failure_reason %}<p class="note" style="margin:var(--s2) 0 0">{{ doc.failure_reason }}</p>{% endif %}
+{% if doc.status == 'failed' and doc.failure_reason %}<p class="note m-t2">{{ doc.failure_reason }}</p>{% endif %}
 <div class="drawer-section">
   <div class="drawer-field"><span>Property</span><strong>{{ prop.name if prop else 'Not assigned' }}</strong></div>
   <div class="drawer-field"><span>Period</span><strong>{{ period or '—' }}</strong></div>
@@ -17,8 +17,8 @@
   <div class="drawer-field"><span>Lines read</span><strong>{{ stats.n }}</strong></div>
   {% if stats.n %}<div class="drawer-field"><span>Included</span><strong>{{ stats.inc or 0 }} of {{ stats.n }}</strong></div>{% endif %}
 </div>
-{% for w in warnings if w.level == 'warn' %}<p class="note" style="margin:var(--s2) 0 0">⚠ {{ w.message }}</p>{% endfor %}
-<div class="drawer-actions" style="margin-top:var(--s4)">
+{% for w in warnings if w.level == 'warn' %}<p class="note m-t2">⚠ {{ w.message }}</p>{% endfor %}
+<div class="drawer-actions mt4">
   <a class="btn" href="{{ url_for('documents.review', doc_id=doc.id) }}">{{ 'View' if doc.status == 'confirmed' else 'Review' }}</a>
   <a class="btn secondary" href="{{ url_for('documents.file', doc_id=doc.id) }}" target="_blank">Open original</a>
 </div>

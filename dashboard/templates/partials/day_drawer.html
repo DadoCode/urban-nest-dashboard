@@ -6,7 +6,7 @@
   </div>
   <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
 </div>
-<div class="drawer-section" style="margin-top:var(--s3)">
+<div class="drawer-section mt3">
   {% if rows %}
     {% for b in rows %}
       <div class="list-row" style="cursor:pointer" hx-get="{{ url_for('bookings.booking_drawer', booking_id=b.id) }}" hx-target="#drawer" hx-swap="innerHTML">

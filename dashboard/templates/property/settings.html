@@ -21,7 +21,7 @@
       <label style="display:flex; flex-direction:column; gap:4px; flex:1 1 280px">Address <input name="address" value="{{ prop.address or '' }}" maxlength="200"></label>
       <button type="submit" class="secondary" style="align-self:flex-end">Save</button>
     </form>
-    <p class="note" style="margin:var(--s2) 0 0">Booking statements are matched on the name and address, so make them match what Airbnb and Booking.com show (for example the street name and house number).</p>
+    <p class="note m-t2">Booking statements are matched on the name and address, so make them match what Airbnb and Booking.com show (for example the street name and house number).</p>
   </div>
   {% endcall %}
 
@@ -41,12 +41,12 @@
         {% for a in aliases %}
           <li style="display:flex; align-items:center; justify-content:space-between; gap:var(--s3)">
             <span class="truncate" style="min-width:0" title="{{ a.label }}">{{ a.label }}</span>
-            <form method="post" action="{{ url_for('properties.remove_alias', property_id=prop.id) }}" style="margin:0"><input type="hidden" name="alias" value="{{ a.alias }}"><button type="submit" class="quiet">Remove</button></form>
+            <form class="m0" method="post" action="{{ url_for('properties.remove_alias', property_id=prop.id) }}"><input type="hidden" name="alias" value="{{ a.alias }}"><button type="submit" class="quiet">Remove</button></form>
           </li>
         {% endfor %}
       </ul>
     {% else %}
-      <p class="note" style="margin:0 0 var(--s3)">None saved yet. They're added automatically whenever you match a listing on a statement you confirm, or you can add one now.</p>
+      <p class="note m0-b3">None saved yet. They're added automatically whenever you match a listing on a statement you confirm, or you can add one now.</p>
     {% endif %}
     <form method="post" action="{{ url_for('properties.add_alias', property_id=prop.id) }}" class="goal-form">
       <input name="label" placeholder="Listing name exactly as shown on Airbnb / Booking.com" required style="flex:1 1 320px">
@@ -58,15 +58,15 @@
   {% call section("Model", "What this business actually earns from " ~ prop.name) %}
   <div class="card">
     {% if managed %}
-      <p class="note" style="margin-top:0">This property is managed for an owner. Urban Nest earns the agreed management fee -- {% if fee_pct %}currently <strong>{{ '%g'|format(fee_pct) }}%</strong> of {{ prop.name }}'s revenue{% else %}<strong>the fee percentage is not set yet</strong>, so only recorded fees count and nothing is estimated{% endif %} -- while the remaining booking revenue belongs to the owner.</p>
+      <p class="note mt0">This property is managed for an owner. Urban Nest earns the agreed management fee -- {% if fee_pct %}currently <strong>{{ '%g'|format(fee_pct) }}%</strong> of {{ prop.name }}'s revenue{% else %}<strong>the fee percentage is not set yet</strong>, so only recorded fees count and nothing is estimated{% endif %} -- while the remaining booking revenue belongs to the owner.</p>
     {% else %}
-      <p class="note" style="margin-top:0">This property is operated directly by Urban Nest. Urban Nest records the full property revenue and the property's direct operating costs.</p>
+      <p class="note mt0">This property is operated directly by Urban Nest. Urban Nest records the full property revenue and the property's direct operating costs.</p>
     {% endif %}
     <form method="post" action="{{ url_for('properties.save_ownership', property_id=prop.id) }}" x-data="{ kind: '{{ 'managed' if managed else 'owned' }}' }">
       <p class="note" style="margin:0 0 6px">To change this property's model:</p>
       <div style="display:flex; gap:var(--s5); margin-bottom:var(--s3)">
-        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="owned" x-model="kind" style="width:auto"> Operated by Urban Nest</label>
-        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input type="radio" name="kind" value="managed" x-model="kind" style="width:auto"> Managed for an owner</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input class="wa" type="radio" name="kind" value="owned" x-model="kind"> Operated by Urban Nest</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:500"><input class="wa" type="radio" name="kind" value="managed" x-model="kind"> Managed for an owner</label>
       </div>
       <div x-show="kind === 'managed'" x-cloak style="display:flex; align-items:center; gap:var(--s2); margin-bottom:var(--s3)">
         <span class="note">This business earns</span>
@@ -76,14 +76,14 @@
       <button type="submit" class="secondary">Save</button>
     </form>
     {% if your_income is not none %}
-      <p class="note" style="margin-top:var(--s3)">{{ ctx.display }}: this business earned {{ your_income|money }} from {{ prop.name }}{% if fee_pct %} ({{ '%g'|format(fee_pct) }}% of its revenue){% endif %}.</p>
+      <p class="note mt3">{{ ctx.display }}: this business earned {{ your_income|money }} from {{ prop.name }}{% if fee_pct %} ({{ '%g'|format(fee_pct) }}% of its revenue){% endif %}.</p>
     {% endif %}
   </div>
   {% endcall %}
 
   {% call section("Booking calendar", "Optional") %}
   <div class="card">
-    <p class="note" style="margin-top:0">Paste this property's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>
+    <p class="note mt0">Paste this property's calendar export/sync URL (Airbnb: listing &rarr; Availability &rarr; Export calendar; Booking.com/Vrbo: the sync-calendars link) to fill in bookings automatically. Most people won't need this -- uploading booking statements on the Documents page is the main way reservations get in. Never overwrites a reservation already on file.</p>
     <form class="goal-form" method="post" action="{{ url_for('properties.sync_calendar', property_id=prop.id) }}">
       <input type="url" name="ical_url" placeholder="https://www.airbnb.com/calendar/ical/....ics" value="{{ prop.ical_url or '' }}" style="flex: 1 1 320px">
       <button type="submit" class="secondary">Sync now</button>

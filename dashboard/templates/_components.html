@@ -13,15 +13,20 @@
    it out renders exactly as before, so every existing page that doesn't
    pass it is unaffected. #}
 {% macro kpi_tile(t, compare='previous_period', compare_label='prior period', invert=False, href=None, hint=None, sparkline_id=None) -%}
-  {% if href %}<a href="{{ href }}" title="{{ hint or 'See the detail behind this' }}" class="tile link">{% else %}<div class="tile">{% endif %}
+  {# A tile that opens its records is one link. If it also carries a link of its own (a REVIEW flag), the two sit side by side, never nested. #}
+  {% set split = href and t.note_html %}
+  {% if split %}<div class="tile link split"><a href="{{ href }}" title="{{ hint or 'See the detail behind this' }}" class="tile-main">
+  {% elif href %}<a href="{{ href }}" title="{{ hint or 'See the detail behind this' }}" class="tile link">
+  {% else %}<div class="tile">{% endif %}
     <div class="label">{{ t.label }}{% if t.info %}<span class="info-dot" title="{{ t.info }}" tabindex="0" aria-label="{{ t.info }}">ⓘ</span>{% endif %}</div>
     <div class="value">{{ t.value }}</div>
     {% if compare == 'previous_period' and t.delta is defined %}{{ delta(t.delta, 'vs ' ~ compare_label, invert) }}
     {% elif compare == 'previous_year' and t.delta_ly is defined %}{{ delta(t.delta_ly, 'vs ' ~ compare_label, invert) }}{% endif %}
     {% if t.note %}<div class="note">{{ t.note }}</div>{% endif %}
-    {% if t.note_html %}<div class="note">{{ t.note_html|safe }}</div>{% endif %}
+    {% if t.note_html and not split %}<div class="note">{{ t.note_html|safe }}</div>{% endif %}
     {% if sparkline_id %}<div class="tile-spark"><canvas id="{{ sparkline_id }}"></canvas></div>{% endif %}
-    {% if href %}<span class="chev">›</span></a>{% else %}</div>{% endif %}
+  {% if split %}<span class="chev">›</span></a><div class="note tile-flag">{{ t.note_html|safe }}</div></div>
+  {% elif href %}<span class="chev">›</span></a>{% else %}</div>{% endif %}
 {%- endmacro %}
 
 {% macro page_head(title, subtitle=None) -%}
@@ -85,3 +90,6 @@
 
 {# A figure that opens the evidence behind it. Quiet by design: same text, a dotted underline, and a clearer one on hover/focus. #}
 {% macro mlink(href, text, label) -%}<a class="mlink" href="{{ href }}" aria-label="{{ label }}">{{ text }}</a>{%- endmacro %}
+
+{# A property name: the full canonical name, plus a compact display form that cramped layouts switch to (CSS only). #}
+{% macro pname(name, always=False) -%}<span class="nm {{ 'nm-always' if always else 'nm-compact' }}"><span class="nm-full">{{ name }}</span><span class="nm-short" aria-hidden="true">{{ name|short }}</span></span>{%- endmacro %}

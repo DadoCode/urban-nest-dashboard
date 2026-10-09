@@ -9,7 +9,7 @@ import services.extraction as extraction
 import services.ical_sync as ical_sync
 import services.kpis as kpis
 import services.sources as src
-from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, get_properties, get_property, pct_delta, is_managed
+from services.common import METRIC_INFO, MONTH_NAMES, adjusted_yoy_pairs, fee_text, get_properties, get_property, pct_delta, is_managed
 from services.completeness import completeness_for, health_for, not_active, seed_defaults
 from services.kpis import _has_activity as _kpi_has_activity
 from services.context import compare_bounds, link_params, range_params, request_context, workspace_params
@@ -121,7 +121,15 @@ def _ws(conn, ctx, prop, tab, **extra):
     has_calendar_data = bool(conn.execute(
         "SELECT 1 FROM bookings WHERE property_id=? AND status='confirmed' AND reservation_id != 'monthly-aggregate' LIMIT 1",
         (prop["id"],)).fetchone())
-    return {"active": "properties", "active_property": prop["id"], "active_tab": tab, "prop": prop,
+    start, end = _range(ctx)
+    if prop["type"] == "overhead":
+        ws_meta = {"model": "Business costs", "fee": None, "status": "Active"}
+    else:
+        idle = bool(not_active(conn, prop["id"], start, end)) and not (not prop["active"] and _kpi_has_activity(conn, prop["id"], datetime.date.fromisoformat(start), datetime.date.fromisoformat(end)))
+        ws_meta = {"model": "Managed" if is_managed(prop) else "Operated", "fee": fee_text(prop) if is_managed(prop) else None,
+                   "status": "Inactive" if not prop["active"] else ("Not active in this period" if idle else "Active")}
+    ws_meta["mtd"] = bool(ctx["partial"] and ctx["choice"] == "this_month")
+    return {"active": "properties", "active_property": prop["id"], "active_tab": tab, "prop": prop, "ws_meta": ws_meta,
             "context_bar": True, "ctx": ctx, "fixed_property": prop, "hide_property": True,
             "has_calendar_data": has_calendar_data,
             "year": ctx["end_year"], "month": ctx["end_month"], "month_name": MONTH_NAMES[ctx["end_month"]], **extra}
@@ -173,7 +181,6 @@ def _overview_tiles(conn, prop, ctx):
     start, end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     cmp_b = compare_bounds(ctx)
     mtd = ctx["partial"] and ctx["choice"] == "this_month"
-    period_label = ("MTD, " if mtd else "") + ctx["display"]
 
     def d(cur_v, prev_v, base=0):
         return None if mtd else (pct_delta(cur_v, prev_v, min_base=base) if prev_v is not None else None)
@@ -192,7 +199,7 @@ def _overview_tiles(conn, prop, ctx):
         review_note = (Markup(f'<a class="pill warn review-link" href="/imports/{review[1]}#prop-{property_id}" title="The import that wrote this property\'s figures left it in REVIEW. Open the reason.">REVIEW ›</a>')
                        if review and review[0] == "REVIEW" else None)
         primary = [
-            {"key": "gross_booking_revenue", "label": f"Gross Booking Revenue — {period_label}", "value": f"£{cur_gross:,.0f}",
+            {"key": "gross_booking_revenue", "label": "Gross Booking Revenue", "value": f"£{cur_gross:,.0f}",
              "delta": d(cur_gross, prev_gross, 100), "info": METRIC_INFO.get("gross_booking_revenue"), "href": rev_url, "hint": "See the booking income rows behind this"},
             {"key": "fee", "label": "Management Fee Earned", "value": f"£{cur_fee:,.0f}",
              "delta": d(cur_fee, prev_fee, 20), "info": METRIC_INFO.get("fee"), "href": fee_url, "hint": "See the fee record behind this", "note_html": review_note},
@@ -223,7 +230,7 @@ def _overview_tiles(conn, prop, ctx):
         profit_note = Markup(f'<a class="mlink" href="{rev_url}" aria-label="Revenue records behind Urban Nest Revenue">Revenue {money(snap["revenue"])}</a> − '
                              f'<a class="mlink" href="{costs_url}" aria-label="Expenses behind the property costs">Costs {money(snap["costs"])}</a> = {money(snap["net_profit"])}')
         primary = [
-            {"key": "revenue", "label": f"Urban Nest Revenue — {period_label}", "value": f"£{snap['revenue']:,.0f}",
+            {"key": "revenue", "label": "Urban Nest Revenue", "value": f"£{snap['revenue']:,.0f}",
              "delta": d(snap["revenue"], prev_snap["revenue"] if prev_snap else None, 100), "info": METRIC_INFO.get("revenue"),
              "href": rev_url, "hint": "See the income rows behind this", "note_html": review_note},
             {"key": "property_costs", "label": "Property Costs", "value": f"£{cur_costs:,.0f}",

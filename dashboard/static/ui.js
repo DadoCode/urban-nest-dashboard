@@ -96,3 +96,24 @@
   const trigger = document.getElementById('palette-open');
   if (trigger) trigger.addEventListener('click', open);
 })();
+
+/* ---------- small shared behaviours ---------- */
+(function () {
+  // "All metrics": reveals the secondary rows of a comparison table
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-toggle-rows]');
+    if (!b) return;
+    const t = document.getElementById(b.dataset.toggleRows);
+    if (!t) return;
+    const on = t.classList.toggle('show-all');
+    b.setAttribute('aria-expanded', on ? 'true' : 'false');
+    b.textContent = on ? 'Fewer metrics' : 'All metrics';
+  });
+  // a horizontal scroller that has more to show gets a fade at its edge (nav strip, tab bar, wide tables)
+  const cue = (el) => {
+    const f = () => el.classList.toggle('has-more', el.scrollWidth - el.clientWidth - el.scrollLeft > 6);
+    f(); el.addEventListener('scroll', f, { passive: true }); window.addEventListener('resize', f);
+  };
+  const init = () => document.querySelectorAll('.tabs, .sidebar, .card.flush').forEach(cue);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();

@@ -3,7 +3,7 @@
 {% block tab_content %}
   {% call section("Add an expense") %}
   <div class="card">
-    <form class="mini-form" style="margin-top:0" method="post" action="{{ url_for('properties.add_expense', property_id=prop.id) }}">
+    <form class="mini-form mt0" method="post" action="{{ url_for('properties.add_expense', property_id=prop.id) }}">
       <input name="vendor" placeholder="Vendor">
       <input name="description" placeholder="Description">
       <input name="amount" type="number" step="0.01" placeholder="Amount £" required>

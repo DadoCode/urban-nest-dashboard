@@ -247,6 +247,8 @@ def create_app():
         from services.context import workspace_params
         return url_for(endpoint, property_id=property_id, **workspace_params(ctx), **extra)
 
+    from services.common import short_name
+    flask_app.jinja_env.filters["short"] = short_name
     flask_app.jinja_env.globals["xurl"] = xurl
     flask_app.jinja_env.globals["cx"] = cx
     flask_app.jinja_env.globals["wsurl"] = wsurl

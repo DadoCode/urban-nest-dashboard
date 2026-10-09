@@ -9,9 +9,10 @@ import db
 import services.ingest as ingest
 import services.kpis as kpis
 import services.sources as src
-from services.common import METRIC_INFO, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta
+from services.common import METRIC_INFO, MONTH_ABBR, MONTH_NAMES, channel_key, get_properties, pct_delta, short_name
 from services.context import compare_bounds, range_params, request_context
 from services.provenance import workbook_source
+from services.completeness import not_active
 
 bp = Blueprint("bookings", __name__)
 
@@ -221,7 +222,7 @@ def performance(property_id=None):
     months = [m for m in kpis.months_with_data(conn, None) if m <= anchor_ym][-12:]
 
     series_by_property = {}
-    rows = []
+    rows, idle_rows = [], []
     period_start, period_end = kpis.range_bounds(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"])
     pstart, pend = kpis.range_bounds(*kpis.prior_period(ctx["start_year"], ctx["start_month"], ctx["end_year"], ctx["end_month"]))
     for p in flats:
@@ -236,6 +237,12 @@ def performance(property_id=None):
             values.append(round(kpis.occupancy(conn, p["id"], s, e) * 100, 1))
         series_by_property[p["name"]] = values
 
+        # A property that is inactive, or had not started, and recorded nothing in this period has no occupancy to rank: showing it as 0%
+        # would read as measured poor performance. It is listed as "—" (never plotted) with the reason; a property that genuinely had
+        # activity in the period stays in, whatever its status today.
+        if not_active(conn, p["id"], period_start, period_end) and not (not p["active"] and kpis._has_activity(conn, p["id"], datetime.date.fromisoformat(period_start), datetime.date.fromisoformat(period_end))):
+            idle_rows.append({"id": p["id"], "name": p["name"], "why": "Inactive" if not p["active"] else "Not active in this period"})
+            continue
         # The whole selected period (not just its last month), so the rows add up to the portfolio occupancy tile that links here.
         cstart, cend = period_start, period_end
         cur_occ = kpis.occupancy(conn, p["id"], cstart, cend)
@@ -266,12 +273,16 @@ def performance(property_id=None):
         portfolio_series.append(round(kpis.occupancy(conn, None, s, e) * 100, 1))
 
     heatmap_months = months[-12:]
-    heatmap_rows = [{"id": r["id"], "name": r["name"], "cells": series_by_property[r["name"]][-12:]} for r in rows]
+    # history stays: any property with a recorded month in the window keeps its row (blank where it recorded nothing)
+    heatmap_rows = [{"id": p["id"], "name": p["name"], "cells": series_by_property[p["name"]][-12:]} for p in flats
+                    if any(v is not None for v in series_by_property[p["name"]][-12:])]
+    heatmap_rows.sort(key=lambda h: next((r["occupancy"] for r in rows if r["id"] == h["id"]), -1), reverse=True)
 
     return render_template(
         "bookings/performance.html", active="bookings", active_bookings_tab="performance",
         all_properties=get_properties(conn), active_property=None, context_bar=True, ctx=ctx, hide_property=True,
-        current_month=ctx["display"], rows=rows, totals=totals,
+        current_month=ctx["display"], rows=rows, idle_rows=idle_rows, totals=totals,
+        rows_json=json.dumps([{**r, "short": short_name(r["name"])} for r in rows]),
         heatmap_months=[MONTH_ABBR[int(ym.split('-')[1])] + " " + ym.split('-')[0][2:] for ym in heatmap_months],
         heatmap_rows=heatmap_rows,
         months_json=json.dumps(months), portfolio_json=json.dumps(portfolio_series),

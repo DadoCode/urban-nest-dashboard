@@ -130,11 +130,11 @@ check("with one property selected the revenue tile opens that property's Revenue
 snap = kpis.adjusted_kpi_snapshot(conn, None, S0, E0)
 page = text(client.get(rev_href))
 m = re.search(r"Urban Nest Revenue £([\d,\.]+) = operated £([\d,\.]+) \+ management fees £([\d,\.]+)", page)
-check("Properties summary: Urban Nest Revenue equals the Overview tile (to the penny) and equals operated + management fees",
-      bool(m) and abs(float(m.group(1).replace(",", "")) - snap["revenue"]) < 0.01
-      and abs(float(m.group(2).replace(",", "")) + float(m.group(3).replace(",", "")) - snap["revenue"]) < 0.015, (m.groups() if m else page[:300], snap["revenue"]))
+check("Properties summary (whole pounds): Urban Nest Revenue equals the Overview tile and equals operated + management fees to within rounding",
+      bool(m) and abs(float(m.group(1).replace(",", "")) - snap["revenue"]) < 0.51
+      and abs(float(m.group(2).replace(",", "")) + float(m.group(3).replace(",", "")) - snap["revenue"]) < 1.01, (m.groups() if m else page[:300], snap["revenue"]))
 m = re.search(r"Property Profit (−?)£([\d,\.]+) = operated (−?)£([\d,\.]+) \+ management fees £([\d,\.]+)", page)
-check("Properties summary: Property Profit equals the Overview tile", bool(m) and abs((-1 if m.group(1) else 1) * float(m.group(2).replace(",", "")) - snap["net_profit"]) < 0.01, (m.groups() if m else None, snap["net_profit"]))
+check("Properties summary: Property Profit equals the Overview tile", bool(m) and abs((-1 if m.group(1) else 1) * float(m.group(2).replace(",", "")) - snap["net_profit"]) < 0.51, (m.groups() if m else None, snap["net_profit"]))
 
 # ------------------------------------------------------------------ B / C / E. Operated Property Costs, Property Costs, Business Costs
 print("B/C. Costs drilldowns reconcile")
@@ -147,7 +147,7 @@ op_text = text(op_exp)
 check("Expenses ?scope=property&model=operated: headline equals the Overview bar exactly",
       f"Operated Property Costs £{bar:,.0f}" in op_text and abs(_costs(conn, S0, E0, scope="property", model="operated") - bar) < 0.005, op_text[op_text.find("Operated Property Costs"):][:80])
 rows_html = op_exp.data.decode()
-ledger_amounts = [float(a.replace(",", "")) for a in re.findall(r'<td class="num">£([\d,]+\.\d{2})</td>\s*<td class="note">', rows_html)]
+ledger_amounts = [float(a.replace(",", "")) for a in re.findall(r'<td class="num">£([\d,]+\.\d{2})</td>\s*<td class="note[^"]*">', rows_html)]
 check("…and the ledger rows listed there add up to the same number", abs(sum(ledger_amounts) - bar) < 0.005, ledger_amounts)
 check("…and it lists no managed-property or business row", "mg1 cleaning" not in rows_html and "tools" not in rows_html)
 line = client.get(f"/?{Q}").data.decode()
@@ -191,7 +191,7 @@ check("Urban Nest Revenue records (incl. other income) add up to kpis.revenue", 
 check("Management Fee Earned records add up to kpis.business_income (recorded row, not a percentage guess)", r_mg["fee"]["rows"] and abs(r_mg["fee"]["recorded"] - r_mg["fee"]["value"]) < 0.005 and r_mg["fee"]["value"] == 200.0 and not r_mg["fee"]["estimated"])
 mt = text(client.get(f"/properties/mg1/bookings?{Q}"))
 check("managed page: booking income and the management fee are separate sections; Gross Booking Revenue is never shown as the fee",
-      "Gross Booking Revenue £2,000.00" in mt and "Management Fee Earned £200.00" in mt and "Management fee September 2026" in mt and "Most of it belongs to the property's owner" in mt)
+      "Gross Booking Revenue £2,000.00" in mt and "Management Fee Earned £200.00" in mt and "The record behind Management Fee Earned" in mt and "Most of it belongs to the property's owner" in mt)
 check("managed page: configured % and the recorded rate are both shown (12% configured, 10.0% recorded)", "Configured fee: 12%" in mt and "Recorded fee ÷ Gross Booking Revenue = 10.0%" in mt)
 check("managed page: the fee row's workbook source and batch are shown", "Batch #7" in mt and "MG126!AC19" in mt)
 m2 = text(client.get(f"/properties/mg2/bookings?{Q}"))
@@ -202,7 +202,7 @@ check("revenue carried on a month's total row is shown as a monthly total (not a
       abs(agr["monthly_total"] - 700) < 0.005 and agr["reservations"] == 0 and abs(agr["gross"] - agr["kpi_gross"]) < 0.005 and "Monthly booking total" in ag and "Gross Booking Revenue £700.00" in ag and "listed under Reservations below" not in ag, ag[ag.find("Revenue records"):][:300])
 ot = text(client.get(f"/properties/op1/bookings?{Q}"))
 check("operated page: booking income, other income and Urban Nest Revenue are distinguished", "Booking income" in ot and "Other income" in ot and "Urban Nest Revenue £1,540.00" in ot and "Gross Booking Revenue £1,500.00" in ot)
-check("operated page has no management-fee section", "Management fee September 2026" not in ot)
+check("operated page has no management-fee section", "The record behind Management Fee Earned" not in ot)
 
 # ------------------------------------------------------------------ F. Property Profit breakdown uses the KPI snapshot
 print("F. Property Profit breakdown")
@@ -234,11 +234,12 @@ check("target drawer links to Performance for that month", "Open Performance for
 # ------------------------------------------------------------------ H. Inactive / not-started properties
 print("H. Inactive and not-started")
 pj = client.get("/properties?from=2026-06-01&to=2026-06-01&compare=none").data.decode()
-gone_row = re.search(r"<tr>\s*<td><a href=\"[^\"]*\">Gone Flat</a></td>.*?</tr>", pj, re.S).group(0)
+_rows = lambda h: re.findall(r"<tr>\s*<td class=\"c-name\">.*?</tr>", h, re.S)
+gone_row = next(r for r in _rows(pj) if "Gone Flat" in r)
 check("an inactive property's historical month with activity keeps its drilldowns and says Inactive", "Inactive" in gone_row and "#revenue-records" in gone_row)
 po = client.get(f"/properties?from=2026-10-01&to=2026-10-01&compare=none&status=all").data.decode()
-gone_oct = re.search(r"<tr>\s*<td><a href=\"[^\"]*\">Gone Flat</a></td>.*?</tr>", po, re.S).group(0)
-later_oct = re.search(r"<tr>\s*<td><a href=\"[^\"]*\">Later Flat</a></td>.*?</tr>", po, re.S).group(0)
+gone_oct = next(r for r in _rows(po) if "Gone Flat" in r)
+later_oct = next(r for r in _rows(po) if "Later Flat" in r)
 check("an inactive property with no activity in the period shows '—' and no metric links", "—" in gone_oct and "mlink" not in gone_oct and "Inactive" in gone_oct)
 check("a property that has not started shows 'Not active in this period' and no metric links", "Not active in this period" in later_oct and "mlink" not in later_oct)
 gb = text(client.get(f"/properties/later/bookings?{Q}"))
@@ -250,10 +251,10 @@ wd = client.get(f"/expenses/transactions/{cost_wb}")
 wt = wd.data.decode()
 check("workbook row drawer: Imported from, Batch, Source cell and Applied are shown", "Biz Accounts Tracker 2026 Sept v4" in wt and "September 2026" in wt and "#7" in wt and "OP126!AC20" in wt and "2026-10-06 10:05" in wt)
 check("workbook row drawer links to the batch AND that property's anchored block", 'href="/imports/7#prop-op1"' in wt)
-check("workbook row drawer has no Save/Edit or Delete", "Save changes" not in wt and "Delete transaction" not in wt and "can't be edited or deleted one row at a time" in wt)
-check("management-fee row is labelled as Urban Nest income, not Opex", "Management fee (Urban Nest income)" in client.get(f"/expenses/transactions/{fee_wb}").data.decode())
+check("workbook row drawer has no Save/Edit or Delete", "Save changes" not in wt and "Delete transaction" not in wt and "can't be edited or deleted" in wt and "Controlled by workbook import" in wt)
+check("management-fee row is labelled as Urban Nest income, not Opex", "Management fee · Urban Nest income" in client.get(f"/expenses/transactions/{fee_wb}").data.decode())
 md = client.get(f"/expenses/transactions/{cost_manual}").data.decode()
-check("a hand-entered row keeps its Edit and Delete actions and says it was entered by hand", "Save changes" in md and "Delete transaction" in md and "entered by hand" in md)
+check("a hand-entered row keeps its Edit and Delete actions and says it was entered by hand", "Save changes" in md and "Delete transaction" in md and "entered by hand" in md.lower())
 legacy_id = tx("mg1", f"{SEP}-02", 5.0, "expense", "other", "legacy", source="excel_import")
 c.commit()
 lg = client.get(f"/expenses/transactions/{legacy_id}").data.decode()
@@ -313,7 +314,7 @@ check("a property with no workbook import has no verdict at all", review_status(
 # ------------------------------------------------------------------ responsive hooks
 print("Responsive hooks")
 css = (Path(__file__).resolve().parent.parent / "dashboard" / "static" / "style.css").read_text()
-check("tab bars, import detail cards and legends scroll inside themselves on narrow screens instead of widening the page", ".tabs { overflow-x: auto;" in css and "details.card { overflow-x: auto; }" in css)
+check("tab bars, import detail cards and legends scroll inside themselves on narrow screens instead of widening the page", ".tabs, .sidebar { overflow-x: auto;" in css and "details.card { overflow-x: auto; }" in css)
 check("secondary columns collapse below 760px and metric links keep a focus ring", ".hide-sm { display: none; }" in css and "a.mlink:focus-visible" in css and ".cost-line a:focus-visible" in css)
 
 print(f"\n{COUNT - len(FAILS)}/{COUNT} checks passed" + ("" if not FAILS else f"; FAILED: {FAILS}"))

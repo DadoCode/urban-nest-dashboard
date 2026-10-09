@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_head, section, delta, empty_state %}
+{% from "_components.html" import page_head, section, delta, empty_state, pname %}
 {% block title %}Expenses — Urban Nest Estates{% endblock %}
 {% block content %}
   {{ page_head("Expenses", "Property and business costs" ~ (" · " ~ viewing.name if viewing else " across the portfolio")) }}
 
   {% if scope is not none %}
     {% set scope_views = {'all': 'All', 'property': 'Property Costs', 'business': 'Business Costs'} %}
-    <div class="seg" style="margin-bottom:var(--s4)">
+    <div class="seg mb4">
       {% for key, label in scope_views.items() %}
         <a class="{{ 'on' if scope == key }}" href="{{ xurl(seg_base, scope=key) }}">{{ label }}</a>
       {% endfor %}
@@ -38,7 +38,7 @@
               <tbody>
                 {% for r in property_rows %}
                   <tr class="clickable" onclick="location.href='{{ xurl(base_params, t_scope=r.id) }}#ledger'">
-                    <td>{{ r.name }}</td>
+                    <td title="{{ r.name }}">{{ pname(r.name) }}</td>
                     <td class="num">{{ r.opex|money }}</td>
                     <td class="num">{{ r.capex|money }}</td>
                     <td class="num" style="font-weight:600">{{ r.total|money }}</td>
@@ -106,23 +106,23 @@
       {% endif %}
     </div>
     {% if vendorless_total > 0 %}
-      <p class="note" style="margin-top:var(--s2)">{{ vendorless_total|money }} of costs in this view have no vendor and {{ 'is' if vendor_rows|length == 0 else 'are' }} excluded from the vendor ranking.</p>
+      <p class="note mt2">{{ vendorless_total|money }} of costs in this view have no vendor and {{ 'is' if vendor_rows|length == 0 else 'are' }} excluded from the vendor ranking.</p>
     {% endif %}
   {% endcall %}
 
   {% call section("Transactions", (ledger_total.n ~ " · " ~ (ledger_total.amt|money)) if ledger_total.n else None, "ledger") %}
-    <form method="get" class="filter-bar">
+    <form method="get" class="filter-bar ledger-filters">
       {% for k, v in base_params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
       {% if scope %}<input type="hidden" name="scope" value="{{ scope }}">{% endif %}
       {% if f.t_month %}<input type="hidden" name="t_month" value="{{ f.t_month }}">{% endif %}
       <input type="hidden" name="t_sort" value="{{ t_sort }}"><input type="hidden" name="t_dir" value="{{ t_dir }}">
       {% if f.t_batch %}<input type="hidden" name="t_batch" value="{{ f.t_batch }}">{% endif %}
-      <input type="text" name="t_q" value="{{ f.t_q }}" placeholder="Search vendor or description…">
+      <input type="text" name="t_q" value="{{ f.t_q }}" placeholder="Search vendor or description…" aria-label="Search vendor or description">
       {% if scope is not none %}
         <select name="t_scope" onchange="this.form.submit()">
           <option value="">All scopes</option>
           <option value="business" {{ 'selected' if f.t_scope == 'business' }}>Business</option>
-          {% for p in flats %}<option value="{{ p.id }}" {{ 'selected' if f.t_scope == p.id }}>{{ p.name }}</option>{% endfor %}
+          {% for p in flats %}<option value="{{ p.id }}" title="{{ p.name }}" {{ 'selected' if f.t_scope == p.id }}>{{ p.name|short }}</option>{% endfor %}
         </select>
       {% endif %}
       <select name="t_category" onchange="this.form.submit()">
@@ -165,14 +165,14 @@
           <tbody>
             {% for t in ledger %}
               <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=t.id) }}" hx-target="#drawer" hx-swap="innerHTML">
-                <td>{{ t.date }}</td>
+                <td class="nw">{{ t.date }}</td>
                 <td class="truncate">{{ t.vendor or '—' }}</td>
                 <td class="truncate note">{{ t.description or '' }}</td>
-                <td>{{ 'Business' if t.property_type == 'overhead' else t.property_name }}</td>
+                <td class="scope" title="{{ 'Business' if t.property_type == 'overhead' else t.property_name }}">{{ 'Business' if t.property_type == 'overhead' else pname(t.property_name, always=True) }}</td>
                 <td>{% if t.category == 'reconciliation' %}<span class="pill" title="Adjustment imported to reconcile historical records with the original Urban Nest Excel accounts.">Historical Adjustment</span>{% else %}{{ t.category|replace('_', ' ')|title }}{% endif %}</td>
                 <td>{{ 'Capex' if t.capex else 'Opex' }}</td>
                 <td class="num">{{ t.amount|money2 }}</td>
-                <td class="note">{{ t.source|replace('_', ' ')|title }}{% if t.import_batch_id %} · <a href="{{ url_for('imports.batch', batch_id=t.import_batch_id) }}" title="Written by workbook import #{{ t.import_batch_id }}{{ ' · ' ~ t.source_ref if t.source_ref }}">#{{ t.import_batch_id }}</a>{% endif %}</td>
+                <td class="note nw">{% if t.import_batch_id %}<a href="{{ url_for('imports.batch', batch_id=t.import_batch_id) }}#prop-{{ t.property_id }}" onclick="event.stopPropagation()" title="Written by workbook import #{{ t.import_batch_id }}{{ ' · ' ~ t.source_ref if t.source_ref }}">Workbook #{{ t.import_batch_id }}</a>{% else %}{{ t.source|replace('_', ' ')|title }}{% endif %}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -181,7 +181,7 @@
         {{ empty_state("No transactions match", "Nothing in this period fits the filters above. Clear a filter or change the period.", "Clear filters", (xurl(base_params, scope=scope) if scope else xurl(base_params)) ~ '#ledger') }}
       {% endif %}
     </div>
-    {% if ledger_total.n > ledger|length %}<p class="note" style="margin-top:var(--s2)">Showing the first {{ ledger|length }} of {{ ledger_total.n }} matching transactions in this order.</p>{% endif %}
+    {% if ledger_total.n > ledger|length %}<p class="note mt2">Showing the first {{ ledger|length }} of {{ ledger_total.n }} matching transactions in this order.</p>{% endif %}
   {% endcall %}
 
   <script>

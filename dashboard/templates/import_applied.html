@@ -1,72 +1,102 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_head %}
-{% from "_import_macros.html" import val, status_pill, check_pill %}
+{% from "_import_macros.html" import val, change, diffv, status_pill, check_pill, checks_table, live_table %}
 {% block title %}Import #{{ batch.id }} — Urban Nest Estates{% endblock %}
-{% set KEYS = [('revenue', 'Revenue', 'money'), ('total_expenses', 'All expenses', 'money'), ('property_costs', 'Property costs', 'money'), ('management_fee', 'Management fee', 'money'),
-               ('days', 'Days booked', 'int'), ('occupancy', 'Occupancy', 'pct'), ('profit', 'Property profit / fee', 'money'), ('business_costs', 'Business costs', 'money')] %}
+{# Which figures an imported area shows, in order. Primary rows are always visible; the rest appear under "All metrics" (or when they changed). #}
+{% set PRIMARY_OP = ['revenue', 'property_costs', 'profit'] %}
+{% set PRIMARY_MG = ['revenue', 'property_costs', 'management_fee'] %}
+{% set LABEL = {'revenue': 'Revenue', 'property_costs': 'Property costs', 'management_fee': 'Management fee', 'profit': 'Property profit', 'total_expenses': 'All expenses',
+                'days': 'Days booked', 'occupancy': 'Occupancy', 'business_costs': 'Business costs'} %}
+{% set KIND = {'days': 'int', 'occupancy': 'pct'} %}
 {% block content %}
   {{ page_head("Import #" ~ batch.id ~ " · " ~ (month_label(batch.period) if batch.period else ''), batch.filename) }}
-  <p class="note" style="margin:calc(-1 * var(--s2)) 0 var(--s3)"><a href="{{ url_for('imports.index') }}">&larr; All imports</a> · {{ status_pill(batch.status) }} · applied {{ (batch.applied_at or '')[:16] }}{% if batch.undone_at %} · undone {{ batch.undone_at[:16] }}{% endif %} · {{ batch.rows_added }} added · {{ batch.rows_changed }} changed · {{ batch.rows_removed }} superseded · workbook {{ batch.file_hash[:10] }}</p>
-  {% if created %}<div class="card" style="margin-bottom:var(--s3)"><strong>New properties created by this import:</strong> {% for pid in created %}{{ names.get(pid, pid) }}{{ ', ' if not loop.last }}{% endfor %}
-    <span class="note">Undo removes them again only while nothing else has been recorded against them.</span></div>{% endif %}
+  <p class="meta-line"><a href="{{ url_for('imports.index') }}">&larr; All imports</a> · {{ status_pill(batch.status) }} · applied {{ (batch.applied_at or '')[:16] }}{% if batch.undone_at %} · undone {{ batch.undone_at[:16] }}{% endif %} · {{ batch.rows_added }} added · {{ batch.rows_changed }} changed · {{ batch.rows_removed }} superseded · workbook <span class="mono">{{ batch.file_hash[:10] }}</span></p>
+  <p class="meta-line"><a href="{{ url_for('expenses.index', t_batch=batch.id, property='all', **({'from': batch.period ~ '-01', 'to': batch.period ~ '-01'} if batch.period else {})) }}#ledger">Expense rows this import wrote ›</a> <span class="note">· income and management-fee rows are on each property's Bookings tab, under Revenue records.</span></p>
+  {% if created %}<p class="meta-line"><strong>New properties created by this import:</strong> {% for pid in created %}{{ names.get(pid, pid) }}{{ ', ' if not loop.last }}{% endfor %}
+    <span class="note">· Undo removes them again only while nothing else has been recorded against them.</span></p>{% endif %}
+
+  {% set vmap = {} %}{% for v in verification %}{% set _ = vmap.update({v.property_id: v}) %}{% endfor %}
+  {# one verdict per area: REVIEW if the import-time checks or the live check flagged it #}
+  {% set verdict = {} %}
+  {% for pid, checks in recon.items() %}
+    {% set _ = verdict.update({pid: (vmap[pid].verdict if pid in vmap else ('REVIEW' if checks|selectattr('status', 'equalto', 'REVIEW')|list else 'PASS'))}) %}
+  {% endfor %}
+
+  <section class="section mt4">
+    <div class="section-head"><h2>Before and after</h2><button type="button" class="quiet" data-toggle-rows="cmp" aria-expanded="false">All metrics</button></div>
+    <div class="card flush">
+      <table class="cmp" id="cmp">
+        <thead><tr><th>Area · metric</th><th class="num">Before</th><th class="num">After</th><th class="num">Change</th></tr></thead>
+        {% for pid, b0 in before.items() %}{% set b = b0 or {} %}{% set a = after[pid] %}
+          {% set managed = (pid in managed_ids) or ((vmap[pid].model == 'managed') if pid in vmap else ((a.get('management_fee') or 0) > 0)) %}
+          {% set primary = ['business_costs'] if pid == business_id else (PRIMARY_MG if managed else PRIMARY_OP) %}
+          {% set order = primary + ['total_expenses', 'days', 'occupancy'] %}
+          <tbody>
+            <tr class="grp"><td colspan="4"><div class="grp-head">
+              <span><strong>{{ names.get(pid, pid) }}</strong>{% if pid != business_id %} <span class="note">{{ 'Managed' if managed else 'Operated' }}</span>{% endif %}{% if b0 is none %} <span class="pill brand">new property</span>{% endif %}</span>
+              <a class="grp-status" href="#prop-{{ pid }}" title="Open this area's reconciliation">{{ check_pill(verdict.get(pid, 'PASS')) }}</a>
+            </div></td></tr>
+            {% for key in order if key in a or key in b %}
+              {% set changed = (key in a and key in b and (a[key] is not none and b[key] is not none) and (a[key] - b[key])|abs > 0.0049) or b0 is none %}
+              {% set k = KIND.get(key, 'money') %}
+              <tr class="{{ 'more' if key not in primary and not changed }}">
+                <td class="metric">{{ LABEL[key] }}</td>
+                <td class="num muted">{{ val(b.get(key), k) if b0 is not none else '—' }}</td>
+                <td class="num">{{ val(a.get(key), k) }}</td>
+                <td class="num">{% if b0 is none %}<span class="zero">new</span>{% else %}{{ diffv((a.get(key) - b.get(key)) if (a.get(key) is not none and b.get(key) is not none) else none, k) }}{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Reconciliation</h2><span class="note">The workbook's own totals against what was imported, then checked live: workbook = ledger = dashboard</span></div>
+    {% for pid, checks in recon.items() %}
+      {% set v = vmap.get(pid) %}
+      {% set review = checks|selectattr('status', 'equalto', 'REVIEW')|list %}
+      {% set nocontrol = checks|selectattr('status', 'equalto', 'NO CONTROL')|list %}
+      {% set passed = checks|selectattr('status', 'equalto', 'PASS')|list %}
+      <div class="recon {{ 'is-review' if verdict.get(pid) == 'REVIEW' }}" id="prop-{{ pid }}">
+        <div class="recon-head">
+          <span><strong>{{ names.get(pid, pid) }}</strong>{% if v %} <span class="note">{{ v.model }}</span>{% endif %}</span>
+          <span class="recon-head-r">{% if pid != business_id and batch.period %}
+            <a href="{{ url_for('properties.bookings', property_id=pid, **{'from': batch.period ~ '-01', 'to': batch.period ~ '-01', 'compare': 'none'}) }}#revenue-records">Revenue records ›</a>
+            <a href="{{ url_for('properties.expenses_tab', property_id=pid, **{'from': batch.period ~ '-01', 'to': batch.period ~ '-01', 'compare': 'none'}) }}">Expenses ›</a>{% endif %}
+            {{ check_pill(verdict.get(pid, 'PASS')) }}</span>
+        </div>
+        {% if review %}{{ checks_table(review) }}{% endif %}
+        {% if v and v.reasons and not review %}<p class="note recon-note">Flagged by the live check: {{ v.reasons|join(', ') }}</p>{% endif %}
+        {% if nocontrol %}
+          <details class="sub nc"><summary>{{ nocontrol|length }} figure{{ 's' if nocontrol|length != 1 }} with no workbook control <span class="note">· no comparison available, not a failure</span></summary>{{ checks_table(nocontrol) }}</details>
+        {% endif %}
+        {% if passed %}
+          <details class="sub"><summary><span class="rc-pass-text">✓ {{ passed|length }} check{{ 's' if passed|length != 1 }} passed</span></summary>{{ checks_table(passed) }}</details>
+        {% endif %}
+        {% if v %}
+          {% set live_review = v.rows|selectattr('status', 'equalto', 'REVIEW')|list %}
+          <details class="sub" id="verify-{{ pid }}" {{ 'open' if live_review }}><summary>Workbook = ledger = dashboard <span class="note">· live check{% if not live_review %} · {{ 'all figures agree' if not (v.rows|selectattr('status', 'equalto', 'NO CONTROL')|list) else 'nothing disagrees' }}{% endif %}</span></summary>{{ live_table(v.rows) }}</details>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
 
   {% if undoable %}
-    <div class="card" style="margin-bottom:var(--s4)">
+    <section class="section undo-block">
       <form method="post" action="{{ url_for('imports.undo', batch_id=batch.id) }}" onsubmit="return confirm('Undo this import? The rows it added are removed and the rows it replaced are put back exactly as they were.')">
         <button type="submit" class="secondary" {{ 'disabled' if demo_mode }}>Undo import</button>
         <span class="note">Restores the dashboard to exactly how it was before this import. Refused if a later import or an edit to these rows would make that a guess.</span>
       </form>
-      <p class="note" style="margin:var(--s2) 0 0"><a href="{{ url_for('expenses.index', t_batch=batch.id, property='all', **({'from': batch.period ~ '-01', 'to': batch.period ~ '-01'} if batch.period else {})) }}#ledger">See the expense rows this import wrote</a> <span class="note">· income and management-fee rows are on each property's Bookings tab, under Revenue records (links below).</span></p>
-    </div>
+    </section>
   {% endif %}
 
-  <h2 style="margin:var(--s3) 0 var(--s2)">Before and after</h2>
-  <div class="card flush">
-    <table>
-      <thead><tr><th>Area</th>{% for key, label, kind in KEYS %}<th class="num">{{ label }}</th>{% endfor %}</tr></thead>
-      <tbody>
-        {% for pid, b0 in before.items() %}{% set b = b0 or {} %}
-          <tr><td rowspan="2"><strong>{{ names.get(pid, pid) }}</strong>{% if b0 is none %} <span class="pill brand">new property</span>{% endif %}</td>
-            {% for key, label, kind in KEYS %}<td class="num note">{{ val(b.get(key), kind) if key in b else '' }}</td>{% endfor %}</tr>
-          <tr>{% for key, label, kind in KEYS %}<td class="num">{{ val(after[pid].get(key), kind) if key in after[pid] else '' }}</td>{% endfor %}</tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <div class="note" style="padding:var(--s2) var(--s3)">Top line: before. Second line: after.</div>
-  </div>
-
-  <h2 style="margin:var(--s4) 0 var(--s2)">Reconciliation at import time</h2>
-  {% for pid, checks in recon.items() %}
-    <details class="card" id="prop-{{ pid }}" style="margin-bottom:var(--s2)"><summary><strong>{{ names.get(pid, pid) }}</strong>
-      {% set bad = checks|rejectattr('status', 'equalto', 'PASS')|list %}
-      {{ check_pill('REVIEW' if bad else 'PASS') }}</summary>
-      <table style="margin-top:var(--s2)"><thead><tr><th>Check</th><th class="num">Workbook</th><th class="num">Imported</th><th class="num">Difference</th><th></th></tr></thead><tbody>
-        {% for c in checks %}<tr><td>{{ c.metric }}</td><td class="num">{{ val(c.workbook, 'pct' if c.metric == 'Occupancy' else 'money') }}</td><td class="num">{{ val(c.imported, 'pct' if c.metric == 'Occupancy' else 'money') }}</td><td class="num">{{ val(c.diff, 'money') if c.diff is not none else '—' }}</td><td>{{ check_pill(c.status) }}</td></tr>{% endfor %}
-      </tbody></table>
-      {% if pid != business_id and batch.period %}<p class="note" style="margin:var(--s2) 0 0">Where these figures show in the dashboard:
-        <a href="{{ url_for('properties.bookings', property_id=pid, **{'from': batch.period ~ '-01', 'to': batch.period ~ '-01', 'compare': 'none'}) }}#revenue-records">Revenue records</a> ·
-        <a href="{{ url_for('properties.expenses_tab', property_id=pid, **{'from': batch.period ~ '-01', 'to': batch.period ~ '-01', 'compare': 'none'}) }}">Expenses</a></p>{% endif %}
-      </details>
-  {% endfor %}
-
-  {% if verification %}
-    <h2 style="margin:var(--s4) 0 var(--s2)">Workbook = ledger = dashboard</h2>
-    <p class="note">Checked live against the dashboard's own figures, so a month someone switched to detailed bookings would show here.</p>
-    {% for v in verification %}
-      <details class="card" id="verify-{{ v.property_id }}" style="margin-bottom:var(--s2)" {{ 'open' if v.verdict == 'REVIEW' }}><summary><strong>{{ names.get(v.property_id, v.property_id) }}</strong> <span class="note">{{ v.model }}</span>
-        {{ check_pill(v.verdict) }}{% if v.reasons %} <span class="note">flagged: {{ v.reasons|join(', ') }}</span>{% endif %}</summary>
-        <table style="margin-top:var(--s2)"><thead><tr><th>Figure</th><th class="num">Workbook</th><th class="num">Imported ledger</th><th class="num">Dashboard</th><th></th></tr></thead><tbody>
-          {% for r in v.rows %}{% set kind = 'pct' if r.metric == 'Occupancy' else ('int' if r.metric == 'Days booked' else 'money') %}
-            <tr><td>{{ r.metric }}{% if r.note %}<div class="note">{{ r.note }}</div>{% endif %}</td><td class="num">{{ val(r.workbook, kind) }}</td><td class="num">{{ val(r.ledger, kind) }}</td><td class="num">{{ val(r.dashboard, kind) }}</td><td>{{ check_pill(r.status) }}</td></tr>
-          {% endfor %}
-        </tbody></table></details>
-    {% endfor %}
-  {% endif %}
   <script>
-    // A link like /imports/23#prop-19-draycott-ave opens that property's reconciliation block.
+    // A link like /imports/23#prop-19-draycott-ave goes straight to that property's reconciliation.
     (function () {
-      const open = () => { const el = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1))); if (el && el.tagName === 'DETAILS') { el.open = true; el.scrollIntoView({ block: 'start' }); } };
-      open(); window.addEventListener('hashchange', open);
+      const go = () => { const el = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1))); if (el) { if (el.tagName === 'DETAILS') el.open = true; el.scrollIntoView({ block: 'start' }); } };
+      go(); window.addEventListener('hashchange', go);
     })();
   </script>
 {% endblock %}

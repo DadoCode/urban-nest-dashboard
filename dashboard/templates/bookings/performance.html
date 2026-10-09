@@ -1,5 +1,5 @@
 {% extends "bookings/_shell.html" %}
-{% from "_components.html" import section, delta, empty_state %}
+{% from "_components.html" import section, delta, empty_state, pname %}
 {% block tab_content %}
   {% call section("Portfolio occupancy", "Months with no bookings imported are left blank, not drawn as 0%") %}
     <div class="card"><div class="chart-box" style="height:200px"><canvas id="portfolioChart"></canvas></div></div>
@@ -12,8 +12,8 @@
   {% call section("Occupancy vs ADR", current_month) %}
     <div class="card">
       <div class="chart-box" style="height:340px"><canvas id="scatterChart"></canvas></div>
-      <p class="note" style="margin:var(--s3) 0 0">Each dot is one property; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
-      <div id="scatter-legend" class="chan-legend" style="margin-top:var(--s2)"></div>
+      <p class="note m-t3">Each dot is one property; click one to open its bookings. Busy at a low rate can mean it's priced too cheaply; quiet at a high rate can mean it's priced too high.</p>
+      <div id="scatter-legend" class="chan-legend mt2"></div>
     </div>
   {% endcall %}
 
@@ -24,7 +24,7 @@
         <tbody>
           {% for r in heatmap_rows %}
             <tr>
-              <td style="white-space:nowrap"><a href="{{ cx('properties.bookings', property_id=r.id) }}">{{ r.name }}</a></td>
+              <td style="white-space:nowrap"><a href="{{ cx('properties.bookings', property_id=r.id) }}" title="{{ r.name }}">{{ r.name|short }}</a></td>
               {% for v in r.cells %}
                 {% if v is none %}
                   <td class="num" style="background:var(--surface-2); padding:4px"></td>
@@ -46,7 +46,7 @@
         <tbody>
           {% for r in rows %}
             <tr>
-              <td><a href="{{ wsurl(ctx, 'properties.bookings', r.id) }}#booked-nights">{{ r.name }}</a></td>
+              <td><a href="{{ wsurl(ctx, 'properties.bookings', r.id) }}#booked-nights" title="{{ r.name }}">{{ pname(r.name) }}</a></td>
               <td class="num">{{ '%.0f'|format(r.occupancy * 100) }}%</td>
               <td class="num">{{ '%.0f'|format(r.days_booked) }}</td>
               <td class="num">{{ '%.0f'|format(r.available) }}</td>
@@ -56,6 +56,11 @@
               <td class="num hide-sm">{% if r.delta is not none %}{{ delta(r.delta, '') }}{% else %}<span class="muted">—</span>{% endif %}</td>
             </tr>
           {% endfor %}
+          {% for r in idle_rows %}
+            <tr><td><a href="{{ wsurl(ctx, 'properties.bookings', r.id) }}#booked-nights" title="{{ r.name }}">{{ pname(r.name) }}</a> <span class="note">· {{ r.why }}</span></td>
+              <td class="num" colspan="3"><span class="zero" title="No occupancy to show: this property was not active in this period">—</span></td>
+              <td class="num hide-sm" colspan="4"></td></tr>
+          {% endfor %}
         </tbody>
         <tfoot>
           <tr class="recs-total"><td>Portfolio</td><td class="num">{{ '%.0f'|format(totals.occupancy * 100) }}%</td><td class="num">{{ '%.0f'|format(totals.days_booked) }}</td><td class="num">{{ '%.0f'|format(totals.available) }}</td>
@@ -63,7 +68,7 @@
         </tfoot>
       </table>
     </div>
-    <p class="note" style="margin-top:var(--s2)">Occupancy = booked nights ÷ available nights. ADR = Gross Booking Revenue ÷ booked nights. RevPAR = Gross Booking Revenue ÷ available nights. Click a property for the records behind its nights.</p>
+    <p class="note mt2">Occupancy = booked nights ÷ available nights. ADR = Gross Booking Revenue ÷ booked nights. RevPAR = Gross Booking Revenue ÷ available nights. Click a property for the records behind its nights.</p>
   {% endcall %}
 
   <script>
@@ -77,7 +82,7 @@
       options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: (i) => `Occupancy: ${pctShort(i.parsed.y)}` } } }, scales: occScale() },
     });
 
-    const rankedLabels = {{ rows|map(attribute='name')|list|tojson }};
+    const rankedLabels = {{ rows|map(attribute='name')|map('short')|list|tojson }};      // compact display names; the table below carries the full ones
     const rankedValues = {{ rows|map(attribute='occupancy')|list|tojson }}.map(v => Math.round(v * 1000) / 10);
     const barEndLabels = {
       id: 'barEndLabels',
@@ -128,7 +133,7 @@
 
     const PROPERTY_BOOKINGS = {{ cx('properties.bookings', property_id='__ID__')|tojson }};
     const DOT_COLORS = ['#0e9f6e', '#3f6489', '#b7791f', '#a34e7c', '#58645f', '#4c7ba0', '#8a6d3b', '#6f8f5e', '#9a5a5a', '#5a7a8a'];
-    const scatterPoints = {{ rows|tojson }}.filter(r => r.adr > 0).map((r, i) => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.name, id: r.id, color: DOT_COLORS[i % DOT_COLORS.length] }));
+    const scatterPoints = {{ rows_json|safe }}.filter(r => r.adr > 0).map((r, i) => ({ x: r.adr, y: Math.round(r.occupancy * 1000) / 10, name: r.short, id: r.id, color: DOT_COLORS[i % DOT_COLORS.length] }));
     const meanX = scatterPoints.reduce((a, p) => a + p.x, 0) / (scatterPoints.length || 1);
     const meanY = scatterPoints.reduce((a, p) => a + p.y, 0) / (scatterPoints.length || 1);
     // No point in charting the empty 0-50% band when nothing occupies it --

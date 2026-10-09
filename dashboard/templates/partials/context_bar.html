@@ -24,19 +24,17 @@
       </form>
     </div>
   </div>
-  {% if fixed_property %}
-  <div class="context-item"><span class="context-fixed" title="This workspace is fixed to this property">{{ fixed_property.name }}</span></div>
-  {% elif not hide_property %}
+  {% if not fixed_property and not hide_property %}
   <div class="context-item">
     <button type="button" class="context-trigger" @click="open = open === 'property' ? null : 'property'">
-      {{ viewing.name if viewing else 'All properties' }}<span class="caret">▾</span>
+      {% if viewing %}<span title="{{ viewing.name }}">{{ viewing.name|short }}</span>{% else %}All properties{% endif %}<span class="caret">▾</span>
     </button>
     <div class="context-pop" x-show="open === 'property'" @click.outside="open = null" x-cloak>
       <a href="?{{ {'from': ctx.from_input + '-01', 'to': ctx.to_input + '-01', 'property': 'all', 'compare': ctx.compare}|urlencode }}"
          class="context-option {{ 'sel' if not ctx.property_id else '' }}">All properties</a>
       {% for p in all_properties if p.type != 'overhead' %}
         <a href="?{{ {'from': ctx.from_input + '-01', 'to': ctx.to_input + '-01', 'property': p.id, 'compare': ctx.compare}|urlencode }}"
-           class="context-option {{ 'sel' if ctx.property_id == p.id else '' }}">{{ p.name }}</a>
+           class="context-option {{ 'sel' if ctx.property_id == p.id else '' }}" title="{{ p.name }}">{{ p.name|short }}</a>
       {% endfor %}
     </div>
   </div>

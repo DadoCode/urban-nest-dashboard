@@ -10,14 +10,17 @@
   <p class="note" style="margin-top:14px">This is a historical reconciliation adjustment imported to reconcile records with the original Urban Nest Excel accounts. It can't be edited or deleted -- doing so would break the exact match to the trusted historical totals.</p>
 {% endif %}
 
+{# 1. the record, 2. how it is classified, 3. where it came from (quieter) #}
 <div class="drawer-section">
   <div class="drawer-field"><span>Property</span><strong>{{ tx.property_name }}</strong></div>
-  <div class="drawer-field"><span>Classification</span><strong>{% if tx.category == 'management_fee' %}Management fee (Urban Nest income){% elif tx.direction == 'income' %}{{ 'Booking income' if tx.category == 'booking_income' else 'Income' }}{% else %}{{ 'Capex' if tx.capex else 'Opex' }}{% endif %}</strong></div>
-  <div class="drawer-field"><span>Recorded by</span><strong>{{ tx.source|replace('_', ' ')|title }}</strong></div>
+  <div class="drawer-field"><span>Category</span><strong>{{ tx.category|replace('_', ' ')|title }}</strong></div>
+  <div class="drawer-field"><span>Classification</span><strong>{% if tx.category == 'management_fee' %}Management fee · Urban Nest income{% elif tx.direction == 'income' %}{{ 'Booking income' if tx.category == 'booking_income' else 'Income' }}{% else %}{{ 'Capex' if tx.capex else 'Opex' }}{% endif %}</strong></div>
+  {% if tx.description %}<div class="drawer-field"><span>Description</span><strong>{{ tx.description }}</strong></div>{% endif %}
+  {% if tx.edited_at %}<div class="drawer-field"><span>Last edited</span><strong>{{ tx.edited_at }}</strong></div>{% endif %}
+</div>
+
+<div class="drawer-section src">
   {% include 'partials/provenance.html' %}
-  {% if tx.edited_at %}
-    <div class="drawer-field"><span>Last edited</span><strong>{{ tx.edited_at }}</strong></div>
-  {% endif %}
 </div>
 
 {% if history %}
@@ -44,7 +47,7 @@
         {% for c in categories %}<option value="{{ c }}" {{ 'selected' if c == tx.category }}>{{ c|replace('_', ' ')|title }}</option>{% endfor %}
       </select>
     </label>
-    <label style="flex-direction:row; align-items:center; gap:6px"><input type="checkbox" name="capex" {{ 'checked' if tx.capex }} style="width:auto"> Capex</label>
+    <label style="flex-direction:row; align-items:center; gap:6px"><input class="wa" type="checkbox" name="capex" {{ 'checked' if tx.capex }}> Capex</label>
     <button type="submit">Save changes</button>
   </form>
 
@@ -53,6 +56,5 @@
   </form>
 {% endif %}
 {% if workbook_row %}
-  <p class="note" style="margin-top:var(--s3)">This row was written by a monthly workbook import, so it can't be edited or deleted one row at a time: the workbook, the ledger and the dashboard have to stay identical.
-    To correct it, fix the workbook and re-import (you will see a preview first), or undo the import{% if wb %} (<a href="{{ url_for('imports.batch', batch_id=wb.batch_id) }}#{{ wb.anchor }}">batch #{{ wb.batch_id }}</a>){% endif %}.</p>
+  <p class="ro-note">Corrections are made in the workbook and re-imported (with a preview first), or by undoing the import{% if wb %} (<a href="{{ url_for('imports.batch', batch_id=wb.batch_id) }}#{{ wb.anchor }}">batch #{{ wb.batch_id }}</a>){% endif %}. Individual rows can't be edited or deleted, so the workbook, ledger and dashboard stay identical.</p>
 {% endif %}

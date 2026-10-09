@@ -2,7 +2,7 @@
 {% from "_components.html" import page_head, section %}
 {% block title %}{{ report.title }} — Urban Nest Estates{% endblock %}
 {% block content %}
-  <p class="note" style="margin:0 0 var(--s2)"><a href="{{ url_for('reports.index') }}">&larr; All reports</a></p>
+  <p class="note m0-b2"><a href="{{ url_for('reports.index') }}">&larr; All reports</a></p>
   {% call page_head(report.title, report.subtitle) %}
     <span class="note" style="margin-right:2px">Download:</span>
     <a class="btn" href="{{ url_for('reports.export', format='pdf', **params) }}">PDF</a>

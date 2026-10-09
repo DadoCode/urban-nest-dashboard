@@ -17,13 +17,13 @@
     <a class="tile link" href="#booked-nights" title="Booking revenue ÷ booked nights"><div class="label" title="{{ METRIC_INFO.adr }}">ADR</div><div class="value">{{ adr|money }}</div><span class="chev">›</span></a>
   </div>
 
-  <p class="note" style="margin-top:var(--s3)">Reservations and booked nights come from the monthly workbook. <a href="{{ url_for('imports.index') }}">Import a workbook</a>. Booking statements are optional supporting evidence only.</p>
+  <p class="note mt3">Reservations and booked nights come from the monthly workbook. <a href="{{ url_for('imports.index') }}">Import a workbook</a>. Booking statements are optional supporting evidence only.</p>
 
   {% if not_active_now %}
-    <div class="card" style="margin-top:var(--s4)"><div class="empty"><div class="empty-title">{{ 'Inactive' if not prop.active else 'Not active in this period' }}</div><div class="empty-body">{{ prop.name }} had no recorded activity in {{ ctx.display }}, so there is nothing to break down.</div></div></div>
+    <div class="card mt4"><div class="empty"><div class="empty-title">{{ 'Inactive' if not prop.active else 'Not active in this period' }}</div><div class="empty-body">{{ prop.name }} had no recorded activity in {{ ctx.display }}, so there is nothing to break down.</div></div></div>
   {% else %}
 
-  {% call section("Revenue records", ctx.display ~ " · the rows behind Gross Booking Revenue" ~ (" and Urban Nest Revenue" if not managed else ""), "revenue-records") %}
+  {% call section("Revenue records", "The rows behind Gross Booking Revenue" ~ (" and Urban Nest Revenue" if not managed else ""), "revenue-records") %}
     {% if records.income or records.reservations or records.monthly_total %}
       <div class="card flush">
         <table>
@@ -36,7 +36,7 @@
             {% endfor %}
           </tbody>
           <tfoot>
-            {% if records.booking_income or not records.monthly_total %}<tr><td colspan="3">Booking income</td><td class="num">{{ records.booking_income|money2 }}</td><td></td></tr>{% endif %}
+            {% if records.booking_income and (records.monthly_total or records.reservations) %}<tr><td colspan="3">Booking income</td><td class="num">{{ records.booking_income|money2 }}</td><td></td></tr>{% endif %}
             {% if records.monthly_total %}<tr><td colspan="3">Monthly booking total <span class="note">(recorded for the month, not individual reservations)</span></td><td class="num">{{ records.monthly_total|money2 }}</td><td></td></tr>{% endif %}
             {% if records.reservations %}<tr><td colspan="3">Reservation-level bookings <span class="note">(listed under Reservations below)</span></td><td class="num">{{ records.reservations|money2 }}</td><td></td></tr>{% endif %}
             <tr class="recs-total"><td colspan="3">Gross Booking Revenue</td><td class="num">{{ records.gross|money2 }}</td><td></td></tr>
@@ -47,8 +47,8 @@
           </tfoot>
         </table>
       </div>
-      {% if (records.gross - records.kpi_gross)|abs > 0.005 %}<p class="note" style="margin-top:var(--s2)">Difference from the Gross Booking Revenue tile: {{ (records.gross - records.kpi_gross)|money2 }}.</p>{% endif %}
-      {% if managed %}<p class="note" style="margin-top:var(--s2)">Gross Booking Revenue is what guests paid. Most of it belongs to the property's owner: Urban Nest's own income from this property is the management fee below.</p>{% endif %}
+      {% if (records.gross - records.kpi_gross)|abs > 0.005 %}<p class="note mt2">Difference from the Gross Booking Revenue tile: {{ (records.gross - records.kpi_gross)|money2 }}.</p>{% endif %}
+      {% if managed %}<p class="note mt2">Gross Booking Revenue is what guests paid. Most of it belongs to the property's owner: Urban Nest's own income from this property is the management fee below.</p>{% endif %}
     {% else %}
       <div class="card">{{ empty_state("No income recorded for " ~ ctx.display, "No booking-income rows or reservations are recorded for " ~ prop.name ~ " in this period.") }}</div>
     {% endif %}
@@ -56,7 +56,7 @@
 
   {% if managed %}
     {% set fee = records.fee %}
-    {% call section("Management fee", ctx.display ~ " · the record behind Management Fee Earned", "fees") %}
+    {% call section("Management fee", "The record behind Management Fee Earned", "fees") %}
       <div class="card flush">
         <div style="padding:var(--s3) var(--s4); display:flex; flex-wrap:wrap; gap:var(--s3); align-items:baseline">
           <span>Configured fee: <strong>{{ ('%g'|format(fee.pct) ~ '%') if fee.pct else 'not set' }}</strong></span>
@@ -79,9 +79,9 @@
         {% else %}
           <div style="padding:0 var(--s4) var(--s3)">
             {% if fee.estimated %}
-              <p class="note" style="margin:0">No fee row is recorded for this period. The dashboard estimates it as the configured percentage × revenue: <strong>{{ fee.value|money2 }}</strong>. Nothing here was imported.</p>
+              <p class="note m0">No fee row is recorded for this period. The dashboard estimates it as the configured percentage × revenue: <strong>{{ fee.value|money2 }}</strong>. Nothing here was imported.</p>
             {% else %}
-              <p class="note" style="margin:0">No fee is recorded for this period, and no percentage is configured to estimate one: <strong>{{ fee.value|money2 }}</strong>.</p>
+              <p class="note m0">No fee is recorded for this period, and no percentage is configured to estimate one: <strong>{{ fee.value|money2 }}</strong>.</p>
             {% endif %}
           </div>
         {% endif %}
@@ -89,7 +89,7 @@
     {% endcall %}
   {% endif %}
 
-  {% call section("Booked nights", ctx.display ~ " · the nights behind occupancy, ADR and RevPAR", "booked-nights") %}
+  {% call section("Booked nights", "The nights behind occupancy, ADR and RevPAR", "booked-nights") %}
     <div class="card flush">
       <div style="padding:var(--s3) var(--s4); display:grid; gap:4px; font-size:0.9rem">
         <div><strong>Occupancy {{ '%.0f'|format(evidence.occupancy * 100) }}%</strong> <span class="note">= {{ evidence.booked }} booked nights ÷ {{ evidence.available }} available nights</span></div>
@@ -118,7 +118,7 @@
 
   {% call section("Reservations", (total_rows ~ ' in this view') if total_rows else None) %}
     {% if inactive_stored %}
-      <div class="flash info" style="margin-bottom:var(--s3)">{{ inactive_stored }} of these reservation{{ 's are' if inactive_stored != 1 else ' is' }} stored but <strong>not counted in the figures above</strong>: the Excel history is still in charge of {{ 'those months' if inactive_stored != 1 else 'that month' }}. <a href="{{ url_for('reconcile.index') }}">Compare and choose on the Reconciliation page</a>.</div>
+      <div class="flash info mb3">{{ inactive_stored }} of these reservation{{ 's are' if inactive_stored != 1 else ' is' }} stored but <strong>not counted in the figures above</strong>: the Excel history is still in charge of {{ 'those months' if inactive_stored != 1 else 'that month' }}. <a href="{{ url_for('reconcile.index') }}">Compare and choose on the Reconciliation page</a>.</div>
     {% endif %}
     {# Filters only appear when there's something to choose between -- no
        empty dropdowns for a property with one channel and one source. #}
@@ -191,6 +191,6 @@
         {% endif %}
       {% endif %}
     </div>
-    {% if total_rows > bookings|length %}<p class="note" style="margin-top:var(--s2)">Showing the first {{ bookings|length }} of {{ total_rows }} reservations in this order.</p>{% endif %}
+    {% if total_rows > bookings|length %}<p class="note mt2">Showing the first {{ bookings|length }} of {{ total_rows }} reservations in this order.</p>{% endif %}
   {% endcall %}
 {% endblock %}

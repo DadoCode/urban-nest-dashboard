@@ -2,6 +2,7 @@
 percentage-delta math, and the month-tile builders every page's KPI row
 is assembled from. Nothing here talks to Flask (no request/response) --
 it's plain data access and arithmetic over a connection."""
+import re
 import services.kpis as kpis
 
 MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
@@ -45,6 +46,22 @@ def pct_delta(current, previous, min_base=0):
     if not previous or abs(previous) < min_base:
         return None
     return round((current - previous) / abs(previous) * 100, 1)
+
+
+_POSTCODE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?\s*\d?[A-Z]{0,2}$")
+
+
+def short_name(name):
+    """A compact DISPLAY form of a canonical property name for cramped spots (sparkline cards, recents, phones):
+    "Flat 602, Lascar Wharf Building, 21 Parnham Street, London, E14 7FN" -> "Flat 602, Lascar Wharf Building".
+    Presentation only: never stored, never used for matching, exports or evidence."""
+    parts = [p.strip() for p in (name or "").split(",") if p.strip()]
+    if len(parts) <= 2:
+        return ", ".join(parts)
+    second = parts[1]
+    if second.lower() == "london" or _POSTCODE.match(second.upper()):
+        return parts[0]
+    return f"{parts[0]}, {second}"
 
 
 # SQL form of is_managed() for queries that join `properties p`: the explicit flag OR a fee percentage.
