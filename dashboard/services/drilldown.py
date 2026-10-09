@@ -43,9 +43,18 @@ def revenue_records(conn, prop, start, end):
                        "text": r["description"] or r["vendor"] or "", "amount": r["amount"], "src": _source_cell(conn, r)})
     booking_income = sum(i["amount"] for i in income if i["booking"])
     other_income = sum(i["amount"] for i in income if not i["booking"])
-    pieces = kpis._booking_pieces(conn, pid, start, end)
-    reservations = sum(share for _r, _n, share in pieces)
-    gross = booking_income + reservations
+    # Revenue carried on a booking row: individual reservations, or (older Excel history) a month's total on its monthly row. The
+    # shares are exactly the ones kpis._booking_pieces() feeds into the KPIs.
+    reservations, monthly_total = 0.0, 0.0
+    for r, nights, share in kpis._booking_pieces(conn, pid, start, end):
+        if r["reservation_id"] != "monthly-aggregate":
+            reservations += share
+        elif abs(share) > 0.004:
+            monthly_total += share
+            full = conn.execute("SELECT * FROM bookings WHERE id=?", (r["id"],)).fetchone()
+            income.append({"id": r["id"], "date": r["check_in"], "booking": True, "drawer": "booking", "kind": "Monthly booking total",
+                           "text": f"{nights} nights recorded for the month", "amount": share, "src": _source_cell(conn, full) if full else {"kind": "manual"}})
+    gross = booking_income + monthly_total + reservations
 
     managed = is_managed(prop)
     fee = None
@@ -61,7 +70,7 @@ def revenue_records(conn, prop, start, end):
                "rate": (recorded / gross * 100) if rows and gross else None}
     lo, hi = _ym_range(start, end)
     review = review_status(conn, pid, lo, hi)
-    return {"income": income, "booking_income": booking_income, "other_income": other_income, "reservations": reservations,
+    return {"income": income, "booking_income": booking_income, "other_income": other_income, "reservations": reservations, "monthly_total": monthly_total,
             "gross": gross, "urban_nest_revenue": gross + other_income,
             "kpi_gross": kpis.accommodation_revenue(conn, pid, start, end), "kpi_revenue": kpis.revenue(conn, pid, start, end),
             "fee": fee, "managed": managed, "review": review}

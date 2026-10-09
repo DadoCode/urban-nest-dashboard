@@ -24,19 +24,20 @@
   {% else %}
 
   {% call section("Revenue records", ctx.display ~ " · the rows behind Gross Booking Revenue" ~ (" and Urban Nest Revenue" if not managed else ""), "revenue-records") %}
-    {% if records.income or records.reservations %}
+    {% if records.income or records.reservations or records.monthly_total %}
       <div class="card flush">
         <table>
           <thead><tr><th>Date</th><th>Type</th><th>Description</th><th class="num">Amount</th><th>Source</th></tr></thead>
           <tbody>
             {% for i in records.income %}
-              <tr class="clickable" hx-get="{{ url_for('expenses.transaction_drawer', tx_id=i.id) }}" hx-target="#drawer" hx-swap="innerHTML">
+              <tr class="clickable" hx-get="{{ url_for('bookings.booking_drawer' if i.drawer == 'booking' else 'expenses.transaction_drawer', **({'booking_id': i.id} if i.drawer == 'booking' else {'tx_id': i.id})) }}" hx-target="#drawer" hx-swap="innerHTML">
                 <td>{{ i.date }}</td><td>{{ i.kind }}</td><td class="truncate note">{{ i.text }}</td><td class="num">{{ i.amount|money2 }}</td><td>{{ src_cell(i.src) }}</td>
               </tr>
             {% endfor %}
           </tbody>
           <tfoot>
-            <tr><td colspan="3">Booking income</td><td class="num">{{ records.booking_income|money2 }}</td><td></td></tr>
+            {% if records.booking_income or not records.monthly_total %}<tr><td colspan="3">Booking income</td><td class="num">{{ records.booking_income|money2 }}</td><td></td></tr>{% endif %}
+            {% if records.monthly_total %}<tr><td colspan="3">Monthly booking total <span class="note">(recorded for the month, not individual reservations)</span></td><td class="num">{{ records.monthly_total|money2 }}</td><td></td></tr>{% endif %}
             {% if records.reservations %}<tr><td colspan="3">Reservation-level bookings <span class="note">(listed under Reservations below)</span></td><td class="num">{{ records.reservations|money2 }}</td><td></td></tr>{% endif %}
             <tr class="recs-total"><td colspan="3">Gross Booking Revenue</td><td class="num">{{ records.gross|money2 }}</td><td></td></tr>
             {% if not managed %}

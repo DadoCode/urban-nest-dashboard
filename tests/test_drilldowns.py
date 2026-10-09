@@ -71,6 +71,9 @@ prop("op1", "Operated Flat One")                                   # operated, w
 prop("mg1", "Managed Flat One", fee=12.0)                          # managed, recorded fee, REVIEW at import
 prop("mg2", "Managed Flat Two", fee=15.0)                          # managed, NO fee row recorded -> estimate
 prop("res1", "Reservations Flat")                                  # operated with a real reservation (not workbook)
+prop("agg1", "Monthly Total Flat")                                 # older Excel history: the month's revenue sits on its monthly row
+c.execute("""INSERT INTO bookings (property_id, platform, reservation_id, check_in, check_out, gross_revenue, platform_fees, cleaning_fee, net_revenue, status, source)
+             VALUES ('agg1','excel','monthly-aggregate','2026-09-01','2026-09-16', 0, 0, 0, 700, 'confirmed', 'excel_import')""")
 prop("gone", "Gone Flat", active=0)                                # inactive, activity only in June
 prop("later", "Later Flat", start="2026-12-01")                    # not started in September
 c.execute("INSERT INTO properties (id, code, name, address, type, active) VALUES ('general-overheads','GO','Business Costs','', 'overhead', 1)")
@@ -193,6 +196,10 @@ check("managed page: configured % and the recorded rate are both shown (12% conf
 check("managed page: the fee row's workbook source and batch are shown", "Batch #7" in mt and "MG126!AC19" in mt)
 m2 = text(client.get(f"/properties/mg2/bookings?{Q}"))
 check("managed property with no fee row: says it is an estimate and does not present it as a recorded fee", "No fee row is recorded" in m2 and "estimates it as the configured percentage" in m2 and "£150.00" in m2)
+ag = text(client.get(f"/properties/agg1/bookings?{Q}"))
+agr = revenue_records(conn, conn.execute("SELECT * FROM properties WHERE id='agg1'").fetchone(), S0, E0)
+check("revenue carried on a month's total row is shown as a monthly total (not as individual reservations) and still adds up to the KPI",
+      abs(agr["monthly_total"] - 700) < 0.005 and agr["reservations"] == 0 and abs(agr["gross"] - agr["kpi_gross"]) < 0.005 and "Monthly booking total" in ag and "Gross Booking Revenue £700.00" in ag and "listed under Reservations below" not in ag, ag[ag.find("Revenue records"):][:300])
 ot = text(client.get(f"/properties/op1/bookings?{Q}"))
 check("operated page: booking income, other income and Urban Nest Revenue are distinguished", "Booking income" in ot and "Other income" in ot and "Urban Nest Revenue £1,540.00" in ot and "Gross Booking Revenue £1,500.00" in ot)
 check("operated page has no management-fee section", "Management fee September 2026" not in ot)

@@ -7,7 +7,7 @@
   </div>
   <button type="button" class="drawer-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
 </div>
-<p class="note" style="margin-top:14px">This is the month's booked-nights total as recorded, not an individual reservation. Revenue for the month is held as booking-income rows (see Revenue records).</p>
+<p class="note" style="margin-top:14px">This is the month's total as recorded, not an individual reservation. {% if b.net_revenue %}It carries <strong>{{ b.net_revenue|money2 }}</strong> of revenue for the month.{% else %}Revenue for the month is held as booking-income rows (see Revenue records).{% endif %}</p>
 <div class="drawer-section">
   <div class="drawer-field"><span>Property</span><strong>{{ b.property_name }}</strong></div>
   <div class="drawer-field"><span>Counted from</span><strong>{{ b.check_in }}</strong></div>
