@@ -45,7 +45,7 @@
 {% macro checks_table(rows) -%}
   <table class="chk"><colgroup><col><col class="cn"><col class="cn"><col class="cn"><col class="cs"></colgroup><thead><tr><th>Check</th><th class="num">Workbook</th><th class="num">Imported</th><th class="num">Difference</th><th>Status</th></tr></thead><tbody>
     {% for c in rows %}{% set k = kind_of(c.metric) %}
-      <tr><td>{{ c.metric }}{% if c.note %}<div class="note">{{ c.note }}</div>{% endif %}</td><td class="num">{{ val(c.workbook, k) }}</td><td class="num">{{ val(c.imported, k) }}</td><td class="num">{{ diffv(c.diff, k) }}</td><td>{{ check_pill(c.status) }}</td></tr>
+      <tr><td>{{ c.metric }}{% if c.metric == 'Management fee rate' %}<div class="note">Recorded rate vs the rate configured at import</div>{% endif %}{% if c.current %}<div class="cur-note"><span class="cur-label">Current configuration</span> {{ '%g'|format(c.current.configured) }}% · {% if c.current.matches %}<span class="cur-ok">✓ now matches the recorded rate</span>{% else %}still differs from the recorded rate{% endif %} <span class="note">· the result at import time is unchanged</span></div>{% endif %}{% if c.note %}<div class="note">{{ c.note }}</div>{% endif %}</td><td class="num">{{ val(c.workbook, k) }}</td><td class="num">{{ val(c.imported, k) }}</td><td class="num">{{ diffv(c.diff, k) }}</td><td>{{ check_pill(c.status) }}</td></tr>
     {% endfor %}
   </tbody></table>
 {%- endmacro %}

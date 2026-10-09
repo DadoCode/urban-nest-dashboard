@@ -53,12 +53,13 @@
   </section>
 
   <section class="section">
-    <div class="section-head"><h2>Reconciliation</h2><span class="note">The workbook's own totals against what was imported, then checked live: workbook = ledger = dashboard</span></div>
+    <div class="section-head"><h2>Reconciliation at import time</h2><span class="note">The workbook's own totals against what was imported, exactly as evaluated when this import was applied. A separate "Current status" check below each area compares workbook, ledger and dashboard now.</span></div>
     {% for pid, checks in recon.items() %}
       {% set v = vmap.get(pid) %}
-      {% set review = checks|selectattr('status', 'equalto', 'REVIEW')|list %}
-      {% set nocontrol = checks|selectattr('status', 'equalto', 'NO CONTROL')|list %}
-      {% set passed = checks|selectattr('status', 'equalto', 'PASS')|list %}
+      {% set cchecks = current.get(pid, checks) %}
+      {% set review = cchecks|selectattr('status', 'equalto', 'REVIEW')|list %}
+      {% set nocontrol = cchecks|selectattr('status', 'equalto', 'NO CONTROL')|list %}
+      {% set passed = cchecks|selectattr('status', 'equalto', 'PASS')|list %}
       <div class="recon {{ 'is-review' if verdict.get(pid) == 'REVIEW' }}" id="prop-{{ pid }}">
         <div class="recon-head">
           <span><strong>{{ names.get(pid, pid) }}</strong>{% if v %} <span class="note">{{ v.model }}</span>{% endif %}</span>
@@ -77,7 +78,7 @@
         {% endif %}
         {% if v %}
           {% set live_review = v.rows|selectattr('status', 'equalto', 'REVIEW')|list %}
-          <details class="sub" id="verify-{{ pid }}" {{ 'open' if live_review }}><summary>Workbook = ledger = dashboard <span class="note">· live check{% if not live_review %} · {{ 'all figures agree' if not (v.rows|selectattr('status', 'equalto', 'NO CONTROL')|list) else 'nothing disagrees' }}{% endif %}</span></summary>{{ live_table(v.rows) }}</details>
+          <details class="sub" id="verify-{{ pid }}" {{ 'open' if live_review }}><summary>Current status · Workbook = ledger = dashboard <span class="note">· checked now{% if not live_review %} · {{ 'all figures agree' if not (v.rows|selectattr('status', 'equalto', 'NO CONTROL')|list) else 'nothing disagrees' }}{% endif %}</span></summary>{{ live_table(v.rows) }}</details>
         {% endif %}
       </div>
     {% endfor %}

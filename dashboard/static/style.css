@@ -903,3 +903,7 @@ table.chk col.cn { width: 130px; } table.chk col.cs { width: 112px; }
 .tile.link.split .tile-main { display: block; flex: 1; color: inherit; text-decoration: none; padding: var(--s3) var(--s4) 4px; }
 .tile.link.split .tile-main:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 .tile-flag { padding: 0 var(--s4) 12px; }
+/* the current configuration is context beside a historical result, never part of it */
+.cur-note { margin-top: 2px; font-size: var(--fs-small); color: var(--ink-soft); }
+.cur-label { text-transform: uppercase; letter-spacing: 0.05em; font-size: var(--fs-label); color: var(--muted); margin-right: 4px; }
+.cur-ok { color: var(--pos); font-weight: 500; }

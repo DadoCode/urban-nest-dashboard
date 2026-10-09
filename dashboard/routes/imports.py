@@ -12,7 +12,7 @@ from flask import Blueprint, flash, redirect, render_template, request, url_for
 import db
 from services import runtime
 from services.common import short_name, get_properties, is_managed
-from services.provenance import rejudge_rate
+from services.provenance import current_rate_context
 from services.workbook import apply as A
 from services.workbook import batches as B
 from services.workbook import config as C
@@ -137,7 +137,11 @@ def _applied(conn, row, parsed, ctx):
     names[P.BUSINESS_ID] = "Business costs"
     before = json.loads(row["before_totals"] or "{}")
     after = json.loads(row["after_totals"] or "{}")
-    recon = {pid: rejudge_rate(conn, pid, checks) for pid, checks in json.loads(row["reconciliation"] or "{}").items()}
+    # An applied import is an audit record: the stored import-time results are shown exactly as evaluated then (verdicts included). Where the
+    # property's fee % has changed since, a separate "current configuration" note is attached to that check; it never replaces the result.
+    recon_at_import = json.loads(row["reconciliation"] or "{}")
+    recon = recon_at_import
+    current = {pid: current_rate_context(conn, pid, checks) for pid, checks in recon_at_import.items()}
     verification = []
     if row["status"] == "applied" and parsed:
         for code, info in P.identity_map(conn, parsed).items():
@@ -150,7 +154,7 @@ def _applied(conn, row, parsed, ctx):
                 v["reasons"] = [c["metric"] for c in flagged]
                 verification.append(v)
     created = json.loads(row["new_properties"] or "[]")
-    return render_template("import_applied.html", names=names, before=before, after=after, recon=recon, verification=verification, managed_ids={p["id"] for p in get_properties(conn) if is_managed(p)},
+    return render_template("import_applied.html", names=names, before=before, after=after, recon=recon, current=current, verification=verification, managed_ids={p["id"] for p in get_properties(conn) if is_managed(p)},
                            created=created, undoable=(row["status"] == "applied"), **ctx)
 
 

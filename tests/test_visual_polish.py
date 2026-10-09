@@ -61,6 +61,7 @@ prop("op1", "Flat 602, Lascar Wharf Building, 21 Parnham Street, London, E14 7FN
 prop("mg1", "Flats 7 & 8, Shaldon Mansions, 132 Charing Cross Road, London, WC2H 0LA", fee=12.0)
 prop("gone", "House 44, Spooner Road, Sheffield, S10 5BN", active=0)
 prop("later", "Flat 3, 48 Station Road, NW4 3SX", start="2026-12-01")
+prop("mg3", "Flat 11, Eider Apartments, 73 Perryfield Way, London, NW9 7FD", fee=10.0)      # configured 10% when August was imported
 c.execute("INSERT INTO properties (id, code, name, address, type, active) VALUES ('general-overheads','GO','Business Costs','', 'overhead', 1)")
 rate_check = {"metric": "Management fee rate", "workbook": 0.1, "imported": 0.12, "diff": -0.02, "status": "REVIEW"}
 c.execute("INSERT INTO import_batches (id, filename, file_hash, uploaded_at, applied_at, status, period, kind, properties, reconciliation, before_totals, after_totals) VALUES "
@@ -76,6 +77,15 @@ c.execute("INSERT INTO import_batches (id, filename, file_hash, uploaded_at, app
                        "mg1": {"revenue": 1800.0, "property_costs": 60.0, "management_fee": 200.0, "profit": 200.0, "days": 20, "occupancy": 0.6667, "total_expenses": 260.0}}),
            json.dumps({"op1": {"revenue": 1500.0, "property_costs": 230.0, "profit": 1270.0, "days": 23, "occupancy": 0.7667, "total_expenses": 230.0},
                        "mg1": {"revenue": 2000.0, "property_costs": 60.0, "management_fee": 240.0, "profit": 240.0, "days": 20, "occupancy": 0.6667, "total_expenses": 300.0}})))
+AUG = "2026-08"
+HIST_RATE = {"metric": "Management fee rate", "workbook": 0.12, "imported": 0.10, "diff": 0.02, "status": "REVIEW"}      # recorded 12% against 10% configured, at import
+c.execute("INSERT INTO import_batches (id, filename, file_hash, uploaded_at, applied_at, status, period, kind, properties, reconciliation, before_totals, after_totals) VALUES "
+          "(8, 'Biz_Accounts_Tracker_2026_Sept_v4.xlsx', 'abcdef0123456789', '2026-10-06 11:00', '2026-10-06 11:05:00', 'applied', ?, 'workbook', ?, ?, ?, ?)",
+          (AUG, json.dumps(["mg3"]), json.dumps({"mg3": [{"metric": "Income", "workbook": 1000.0, "imported": 1000.0, "diff": 0.0, "status": "PASS"}, HIST_RATE]}),
+           json.dumps({"mg3": {"revenue": 1000.0, "property_costs": 0.0, "management_fee": 100.0, "profit": 100.0}}), json.dumps({"mg3": {"revenue": 1000.0, "property_costs": 0.0, "management_fee": 120.0, "profit": 120.0}})))
+tx("mg3", f"{AUG}-01", 1000.0, "income", "booking_income", "guest income", batch=8, ref="MG326!AC10")
+tx("mg3", f"{AUG}-01", 120.0, "expense", "management_fee", "FG Mngmt Fee (12%)", batch=8, ref="MG326!AC19")
+aggregate("mg3", AUG, 10, batch=8)
 tx("op1", f"{SEP}-01", 1500.0, "income", "booking_income", "3-6 direct", batch=7, ref="OP126!AC10")
 tx("op1", f"{SEP}-05", 230.0, "expense", "cleaning", "cleaners", batch=7, ref="OP126!AC20")
 aggregate("op1", SEP, 23, batch=7)
@@ -131,6 +141,36 @@ check("NO CONTROL does not share REVIEW's look; PASS, REVIEW, NO CONTROL each ha
 check("Undo comes after the data and the reconciliation", ap.index("Undo import") > ap.index("Reconciliation") > ap.index("Before and after"))
 check("the anchored block each drilldown points at still exists", 'id="prop-mg1"' in ap and 'id="prop-op1"' in ap )
 check("numbers are right-aligned and the zero difference recedes", 'class="num"' in ap and "zero" in ap)
+
+# ------------------------------------------------------------------ an applied import is an audit record
+print("historical import result is preserved")
+from services.provenance import review_status  # noqa: E402
+
+stored_before = c.execute("SELECT reconciliation FROM import_batches WHERE id=8").fetchone()[0]
+hist = client.get("/imports/8").data.decode()
+hist_t = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", hist))
+check("as configured then (10%): the stored result is REVIEW, shown as 12% recorded vs 10% configured, +2 pp", "Reconciliation at import time" in hist_t and "Management fee rate" in hist_t and "12%" in hist_t and "10%" in hist_t and "+2 pp" in hist_t and 'class="rc rc-review">REVIEW' in hist)
+check("no current-configuration note while the configuration has not changed", "Current configuration" not in hist_t)
+c.execute("UPDATE properties SET management_fee_pct=12.0 WHERE id='mg3'"); c.commit()                      # the property is later configured at 12%
+hist2 = client.get("/imports/8").data.decode()
+hist2_t = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", hist2))
+block = hist2[hist2.index('id="prop-mg3"'):]
+block = block[:block.index("</section>")] if "</section>" in block else block
+check("after the fee % is changed to 12%: the applied import STILL says REVIEW (verdict and the check row), with the import-time values unchanged",
+      'class="rc rc-review">REVIEW' in block and "+2 pp" in hist2_t and "Recorded rate vs the rate configured at import" in hist2_t and re.search(r"Management fee rate.*?12%.*?10%.*?\+2 pp", hist2_t) is not None)
+check("the group verdict at the top of the import is still REVIEW for that area", re.search(r'Eider Apartments, 73 Perryfield Way, London, NW9 7FD</strong> <span class="note">Managed</span>.*?rc-review">REVIEW', hist2, re.S) is not None)
+check("the current configuration is shown separately, labelled, and says it now matches without changing the result",
+      "Current configuration" in hist2_t and "12% · ✓ now matches the recorded rate" in hist2_t and "the result at import time is unchanged" in hist2_t and 'class="cur-note"' in hist2)
+check("the stored reconciliation data is untouched", c.execute("SELECT reconciliation FROM import_batches WHERE id=8").fetchone()[0] == stored_before)
+check("the section is headed as the import-time record, not as a live check", "Reconciliation at import time" in hist2_t and "checked live" not in hist2_t.split("Reconciliation at import time")[0])
+check("the current operational UI independently judges the property healthy under the new configuration (no REVIEW pill, status PASS)",
+      review_status(db.get_conn(), "mg3", AUG, AUG) == ("PASS", 8) and "REVIEW" not in client.get("/properties?from=2026-08-01&to=2026-08-01&compare=none").data.decode()
+      and "REVIEW" not in client.get("/properties/mg3?from=2026-08-01&to=2026-08-01&compare=none").data.decode())
+c.execute("UPDATE properties SET management_fee_pct=15.0 WHERE id='mg3'"); c.commit()                      # configured somewhere else again: still differs from the recorded 12%
+hist3_t = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", client.get("/imports/8").data.decode()))
+check("if the new configuration still differs, the note says so; the historical REVIEW is the same", "Current configuration" in hist3_t and "15% · still differs" in hist3_t and "+2 pp" in hist3_t)
+check("a rate is never printed as money on the applied page (10%, 12%, ±pp; no £0.10 / £0.12 / £0.02)", all(x not in hist3_t for x in ("£0.10", "£0.12", "£0.02", "−£0.02", "+£0.02")))
+c.execute("UPDATE properties SET management_fee_pct=10.0 WHERE id='mg3'"); c.commit()
 
 # ------------------------------------------------------------------ status system
 print("status")
