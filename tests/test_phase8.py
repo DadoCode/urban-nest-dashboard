@@ -263,5 +263,43 @@ probe = subprocess.run([sys.executable, "-c", "import sys,re;sys.path.insert(0,r
                        capture_output=True, text=True, env={**os.environ, "UN_DEMO_MODE": "1"})
 check("N: in the demo the disabled Undo says why", probe.stdout.strip() == "True True", probe.stdout + probe.stderr[-300:])
 
+# ------------------------------------------------------------------ Property Performance: NO DATA vs REAL ZERO
+print("property performance")
+prop("zn", "Flat 5, Zero Nights House, London, N5 5ZZ")
+prop("zr", "Flat 6, Zero Revenue House, London, N6 6ZZ")
+prop("zd", "Flat 7, Empty Month House, London, N7 7ZZ")
+prop("zi", "Flat 8, Gone House, London, N8 8ZZ", active=0)
+prop("zs", "Flat 9, Later House, London, N9 9ZZ", start="2027-06-01")
+ZM = "2026-12"
+c.execute("INSERT INTO bookings (property_id, platform, reservation_id, check_in, check_out, gross_revenue, platform_fees, cleaning_fee, net_revenue, status, source, import_batch_id, source_ref) "
+          "VALUES ('zn', 'excel', 'monthly-aggregate', ?, ?, 0, 0, 0, 0, 'confirmed', 'workbook', NULL, 'Days Booked 2026-12')", (f"{ZM}-01", f"{ZM}-01"))     # a recorded month with 0 booked nights
+tx("zn", f"{ZM}-02", 60.0, "expense", "cleaning", "cost only", source="manual")
+tx("zr", f"{ZM}-02", 35.0, "expense", "cleaning", "cost only", source="manual")                                                                    # recorded, revenue is a real £0
+tx("zr", "2026-11-02", 700.0, "income", "booking_income", "last month", source="manual")
+c.commit()
+PQ = f"from={ZM}-01&to={ZM}-01&compare=previous_period"
+
+
+def tile_values(path):
+    return [v.strip() for v in re.findall(r'<div class="value">(.*?)</div>', client.get(path).data.decode())]
+
+
+v = tile_values(f"/properties/zn/performance?{PQ}")
+check("P1: recorded month with 0 booked nights keeps its tiles, Booked nights 0 and Occupancy 0%", len(v) >= 4 and v[0] == "0%" and v[2] == "0", v)
+pt = text(client.get(f"/properties/zn/performance?{PQ}"))
+check("P1: …and does not claim there is no data", "No data imported for this period." not in pt)
+v = tile_values(f"/properties/zr/performance?{PQ}")
+check("P2: recorded month with £0 revenue keeps its tiles, RevPAR and ADR £0", len(v) >= 4 and v[0] == "0%" and v[1] == "£0" and v[3] == "£0", v)
+ov0 = tile_values(f"/properties/zr?{PQ}")
+check("P2: the property Overview shows Urban Nest Revenue £0 as a real zero", ov0 and "£0" in ov0 and "—" not in ov0, ov0)
+nd = client.get(f"/properties/zd/performance?{PQ}")
+ndt = text(nd)
+check("P3: a property-month with nothing recorded says so, with the import action", ndt.count("No data imported for this period.") == 1 and "Import monthly workbook" in ndt)
+check("P3: …and shows no tiles and no comparison deltas", not tile_values(f"/properties/zd/performance?{PQ}") and 'class="delta' not in nd.data.decode())
+gone = text(client.get(f"/properties/zi/performance?{PQ}"))
+later = text(client.get(f"/properties/zs/performance?{PQ}"))
+check("P4: an inactive property with nothing recorded still says it is inactive", "no longer active" in gone and "No data imported for this period." not in gone, gone[:300])
+check("P4: a property that has not started still says it had not joined", "had not joined the portfolio" in later and "No data imported for this period." not in later, later[:300])
+
 print(f"\n{COUNT - len(FAILS)}/{COUNT} passed")
 sys.exit(1 if FAILS else 0)

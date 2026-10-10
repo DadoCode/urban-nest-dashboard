@@ -6,7 +6,10 @@
       {% for t in tiles %}{{ kpi_tile(t, ctx.compare, ctx.compare_display or '', href=t.href, hint=t.hint) }}{% endfor %}
     </div>
   {% else %}
-    <div class="card">{{ empty_state("No " ~ ctx.display ~ " booking data for " ~ prop.name, "Import the monthly workbook or choose a different period.", "Import workbook", url_for('imports.index')) }}</div>
+    <div class="card">
+      {% if empty_reason and empty_reason[0] != 'no_data' %}{{ empty_state("No performance to show", empty_reason[1]) }}
+      {% else %}{{ empty_state("No data imported for this period.", "Nothing is recorded for " ~ prop.name ~ " in " ~ ctx.display ~ ". Import the monthly workbook, or choose a different period.", "Import monthly workbook", url_for('imports.index')) }}{% endif %}
+    </div>
   {% endif %}
 
   {% call section("Financial performance", "Gross Booking Revenue and Management Fee Earned over time" if managed else "Urban Nest Revenue, costs and Property Profit over time") %}

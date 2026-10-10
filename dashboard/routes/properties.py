@@ -463,7 +463,15 @@ def performance_tab(property_id):
         t("ADR", "adr", lambda v: gbp0(v), 20),
         t("Booked nights", "booked_nights", lambda v: f"{v:,.0f}", 2),
         t("RevPAR", "revpar", lambda v: gbp0(v), 20),
-    ] if (cur["booked_nights"] or cur["occupancy"]) else []
+    ] if has_real_data(conn, property_id, start, end) else []      # coverage, never "a figure happens to be non-zero": a measured zero stays visible
+    empty_reason = None
+    if not tiles:
+        if not prop["active"]:
+            empty_reason = ("inactive", f"{prop['name']} is no longer active and has nothing recorded in this period. Its history is kept.")
+        elif not_active(conn, property_id, start, end):
+            empty_reason = ("not_active", f"{prop['name']} had not joined the portfolio in this period, so nothing is expected.")
+        else:
+            empty_reason = ("no_data", "")
 
     # Same anchoring rule as every other trend chart here: this property's
     # own recorded months, clipped to the trailing 12 up to the selected
@@ -499,7 +507,7 @@ def performance_tab(property_id):
 
     resp = make_response(render_template(
         "property/performance.html", all_properties=get_properties(conn),
-        **_ws(conn, ctx, prop, "performance", is_overhead=is_overhead, tiles=tiles, yoy=yoy, managed=managed),
+        **_ws(conn, ctx, prop, "performance", is_overhead=is_overhead, tiles=tiles, yoy=yoy, managed=managed, empty_reason=empty_reason),
         months_json=json.dumps(months), occ_json=json.dumps(occ), occ_portfolio_json=json.dumps(occ_portfolio),
         adr_json=json.dumps(adr_series), revpar_json=json.dumps(revpar_series),
         financial_json=json.dumps(financial),
